@@ -23,6 +23,11 @@ export type AudioEntry = {
   text: string;
   // SSML-like phonetic hint for letter sounds. Used when speaking via Web Speech.
   speakAs?: string;
+  // Optional ElevenLabs model override. Some clips use SSML phoneme tags,
+  // which only work on phoneme-aware models (eleven_flash_v2,
+  // eleven_english_v1). Most clips stick with the default multilingual_v2
+  // for the warmer voice timbre.
+  modelId?: string;
 };
 
 // Single source of truth for what gets generated. The script and the runtime
@@ -49,7 +54,7 @@ export const LETTER_SOUND_TEXT: Record<string, string> = {
 // (or delete just the affected `letter-X-name.mp3` files and re-run without
 // --force) to update.
 export const LETTER_NAME_TEXT: Record<string, string> = {
-  A: "æ",
+  A: "ay",
   E: "eee",
   I: "eye",
   K: "Kay",
@@ -60,6 +65,24 @@ export const LETTER_NAME_TEXT: Record<string, string> = {
   Y: "why",
   Z: "zee",
 };
+
+// Letters that need explicit IPA pronunciation via SSML <phoneme> tags. These
+// clips use a phoneme-aware model (eleven_flash_v2) — the multilingual model
+// silently ignores phoneme tags. Per ElevenLabs docs, IPA and CMU Arpabet are
+// both accepted; we use IPA because it's more readable.
+//
+// To add a new override: pick the IPA from a phoneme chart (or just paste the
+// character — æ, ɪ, oʊ, etc.), wrap with the visible glyph as the ph fallback.
+export const LETTER_NAME_PHONEME: Record<string, string> = {
+  A: "æ", // short-a as in "apple"
+  V: "viː", // standard /viː/ — long-E vowel after the V
+};
+
+const PHONEME_MODEL = "eleven_flash_v2";
+
+function ssmlPhoneme(visible: string, ipa: string): string {
+  return `<phoneme alphabet="ipa" ph="${ipa}">${visible}</phoneme>`;
+}
 
 export function letterNameText(letter: string): string {
   return LETTER_NAME_TEXT[letter] ?? letter;
@@ -78,12 +101,25 @@ export const SPELL_WORDS: { word: string; intro: string; reveal: string }[] = [
 export function buildEntries(): AudioEntry[] {
   const entries: AudioEntry[] = [];
 
-  // Letter names — said clearly with a friendly tone. We feed ElevenLabs the
-  // override text from LETTER_NAME_TEXT for letters where the bare glyph was
-  // pronounced incorrectly.
+  // Letter names — said clearly with a friendly tone. Three tiers:
+  //   1. Letters with a phoneme override (LETTER_NAME_PHONEME) get an SSML
+  //      <phoneme> tag rendered on a phoneme-aware model.
+  //   2. Letters with a text override (LETTER_NAME_TEXT) get that text on the
+  //      default multilingual model (warmer voice).
+  //   3. Everything else gets the bare glyph on the default model.
   for (const L of ALPHABET) {
-    const text = letterNameText(L);
-    entries.push({ id: `letter-${L}-name`, text, speakAs: text });
+    const ipa = LETTER_NAME_PHONEME[L];
+    if (ipa) {
+      entries.push({
+        id: `letter-${L}-name`,
+        text: ssmlPhoneme(L, ipa),
+        speakAs: letterNameText(L),
+        modelId: PHONEME_MODEL,
+      });
+    } else {
+      const text = letterNameText(L);
+      entries.push({ id: `letter-${L}-name`, text, speakAs: text });
+    }
   }
 
   // Letter sounds — voiced as the phonetic blend.

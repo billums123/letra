@@ -50,7 +50,10 @@ async function generateOne(entry: AudioEntry) {
   const url = `https://api.elevenlabs.io/v1/text-to-speech/${VOICE_ID}?output_format=mp3_44100_128`;
   const body = {
     text: entry.text,
-    model_id: MODEL_ID,
+    // Per-entry model override lets us target phoneme-aware models for the
+    // few clips that use SSML <phoneme> tags. Falls through to MODEL_ID
+    // otherwise.
+    model_id: entry.modelId ?? MODEL_ID,
     voice_settings: {
       stability: 0.5,
       similarity_boost: 0.75,
