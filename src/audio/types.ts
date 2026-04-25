@@ -49,7 +49,7 @@ export const LETTER_SOUND_TEXT: Record<string, string> = {
 // (or delete just the affected `letter-X-name.mp3` files and re-run without
 // --force) to update.
 export const LETTER_NAME_TEXT: Record<string, string> = {
-  A: "ay",
+  A: "æ",
   E: "eee",
   I: "eye",
   K: "Kay",
