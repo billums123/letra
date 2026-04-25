@@ -8,7 +8,7 @@
 // pick "elevenlabs" if it loads, "speech" otherwise.
 
 import type { AudioManifest } from "./types";
-import { ALPHABET, LETTER_SOUND_TEXT } from "./types";
+import { ALPHABET, LETTER_NAME_TEXT, LETTER_SOUND_TEXT } from "./types";
 
 type Mode = "elevenlabs" | "speech" | "muted";
 
@@ -166,7 +166,10 @@ class AudioPlayer {
 function textForId(id: string): string {
   // Letter clips
   const letterName = id.match(/^letter-([A-Z])-name$/);
-  if (letterName) return letterName[1];
+  if (letterName) {
+    const L = letterName[1];
+    return LETTER_NAME_TEXT[L] ?? L;
+  }
   const letterSound = id.match(/^letter-([A-Z])-sound$/);
   if (letterSound) {
     const L = letterSound[1];

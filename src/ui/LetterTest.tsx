@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { Font, FontLoader } from "three/examples/jsm/loaders/FontLoader.js";
 import { audio } from "../audio/Player";
-import { ALPHABET, LETTER_SOUND_TEXT } from "../audio/types";
+import { ALPHABET, LETTER_NAME_TEXT, LETTER_SOUND_TEXT } from "../audio/types";
 import { buildLetterCharacter, colorFor, loadFont } from "../engine/letters";
 import { useGameStore } from "../state/store";
 
@@ -212,9 +212,10 @@ export function LetterTest() {
                 >
                   {display}
                 </span>
-                <span style={{ fontSize: 14, color: "#3a2a14", opacity: 0.65 }}>
-                  /{LETTER_SOUND_TEXT[L]}/
-                </span>
+                <div style={{ textAlign: "right", fontSize: 12, color: "#3a2a14", opacity: 0.7, lineHeight: 1.4 }}>
+                  <div>name: <strong>{LETTER_NAME_TEXT[L] ?? L}</strong></div>
+                  <div>sound: <strong>/{LETTER_SOUND_TEXT[L]}/</strong></div>
+                </div>
               </div>
               <div style={{ display: "flex", gap: 6, marginTop: 10 }}>
                 <button

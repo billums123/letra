@@ -41,6 +41,29 @@ export const LETTER_SOUND_TEXT: Record<string, string> = {
   Y: "yuh", Z: "zzz",
 };
 
+// What ElevenLabs is told to *say* for each letter name. For most letters,
+// passing the bare glyph ("A", "B", …) makes the TTS read it correctly. A few
+// letters come out wrong (numbers vs letters, the model picking a sound
+// instead of a name, etc.) so we override those with explicit phonetic text.
+// Add to or change this map and re-run `npm run audio:generate -- --force`
+// (or delete just the affected `letter-X-name.mp3` files and re-run without
+// --force) to update.
+export const LETTER_NAME_TEXT: Record<string, string> = {
+  A: "eh",
+  I: "eye",
+  K: "Kay",
+  O: "oh",
+  U: "you",
+  V: "vee",
+  W: "double you",
+  Y: "why",
+  Z: "zee",
+};
+
+export function letterNameText(letter: string): string {
+  return LETTER_NAME_TEXT[letter] ?? letter;
+}
+
 // Spelling-game words. Each has a friendly intro line and the letters needed.
 // Limit to 3-letter "CVC" words that pre-K kids see early in phonics.
 export const SPELL_WORDS: { word: string; intro: string; reveal: string }[] = [
@@ -54,9 +77,12 @@ export const SPELL_WORDS: { word: string; intro: string; reveal: string }[] = [
 export function buildEntries(): AudioEntry[] {
   const entries: AudioEntry[] = [];
 
-  // Letter names — said clearly with a friendly tone.
+  // Letter names — said clearly with a friendly tone. We feed ElevenLabs the
+  // override text from LETTER_NAME_TEXT for letters where the bare glyph was
+  // pronounced incorrectly.
   for (const L of ALPHABET) {
-    entries.push({ id: `letter-${L}-name`, text: L, speakAs: L });
+    const text = letterNameText(L);
+    entries.push({ id: `letter-${L}-name`, text, speakAs: text });
   }
 
   // Letter sounds — voiced as the phonetic blend.
