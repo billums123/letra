@@ -54,13 +54,16 @@ export class Engine {
     const sun = new THREE.DirectionalLight(0xffffff, 1.4);
     sun.position.set(15, 25, 10);
     sun.castShadow = true;
-    sun.shadow.mapSize.set(2048, 2048);
-    sun.shadow.camera.left = -30;
-    sun.shadow.camera.right = 30;
-    sun.shadow.camera.top = 30;
-    sun.shadow.camera.bottom = -30;
+    // Modest shadow map: kid-game scale doesn't need high-res shadows, and
+    // smaller maps keep the integrated GPU happy on Macs and mobile.
+    sun.shadow.mapSize.set(1024, 1024);
+    sun.shadow.camera.left = -25;
+    sun.shadow.camera.right = 25;
+    sun.shadow.camera.top = 25;
+    sun.shadow.camera.bottom = -25;
     sun.shadow.camera.near = 1;
-    sun.shadow.camera.far = 80;
+    sun.shadow.camera.far = 70;
+    sun.shadow.bias = -0.0005;
     this.scene.add(sun);
 
     const ambient = new THREE.AmbientLight(0xffffff, 0.4);

@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 
 // Unified input vector for the player. x = strafe (-1..1), y = forward/back (-1..1).
 // Magnitude is clamped to 1. Action button: A/Space/gamepad south.
@@ -97,18 +97,18 @@ export function readInput(): InputState {
   return state;
 }
 
+export function getInputDebugState() {
+  return { keys: [...keys], state };
+}
+
 export function setJoystick(x: number, y: number, active: boolean) {
   state.joystick.x = x;
   state.joystick.y = y;
   state.joystick.active = active;
 }
 
-// React hook — wires up listeners once for the lifetime of the app.
+// React hook — wires up keyboard/window listeners while the host component
+// is mounted. Cleanup removes them so we never end up with stale handlers.
 export function useInputBootstrap() {
-  const started = useRef(false);
-  useEffect(() => {
-    if (started.current) return;
-    started.current = true;
-    return startInput();
-  }, []);
+  useEffect(() => startInput(), []);
 }

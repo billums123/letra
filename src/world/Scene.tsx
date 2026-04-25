@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import * as THREE from "three";
 import { Engine } from "../engine/Engine";
+import { getInputDebugState } from "../input/useInput";
 
 type SceneProps = {
   onEngineReady?: (engine: Engine) => void;
@@ -15,9 +16,15 @@ export function Scene({ onEngineReady, onPlayerPosition }: SceneProps) {
     if (!canvasRef.current) return;
     const engine = new Engine(canvasRef.current, { onPlayerPosition });
     engineRef.current = engine;
+    if (import.meta.env.DEV) {
+      const w = window as unknown as { __letra: Engine; __letraInput: typeof getInputDebugState };
+      w.__letra = engine;
+      w.__letraInput = getInputDebugState;
+    }
     onEngineReady?.(engine);
     return () => {
       engineRef.current = null;
+      if (import.meta.env.DEV) delete (window as unknown as { __letra?: Engine }).__letra;
       engine.dispose();
     };
     // We intentionally do not re-create the engine on prop changes — engine
