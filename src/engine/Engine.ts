@@ -31,6 +31,15 @@ export class Engine {
   // The function decides whether anything happens; engine just calls it.
   tickHook?: (dt: number, t: number, playerPos: THREE.Vector3) => void;
 
+  // Actors with their own per-frame update (letter characters, particles, etc.).
+  private actors = new Set<{ update: (dt: number, t: number) => void }>();
+  addActor(actor: { update: (dt: number, t: number) => void }) {
+    this.actors.add(actor);
+  }
+  removeActor(actor: { update: (dt: number, t: number) => void }) {
+    this.actors.delete(actor);
+  }
+
   constructor(canvas: HTMLCanvasElement, events: EngineEvents = {}) {
     this.events = events;
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
@@ -113,6 +122,9 @@ export class Engine {
       this.camera.position.lerp(this.tmpVec, 0.08);
       this.tmpVec.copy(pos).add(this.cameraLookOffset);
       this.camera.lookAt(this.tmpVec);
+
+      // Per-actor update first (so collected letters can hide before render).
+      for (const actor of this.actors) actor.update(dt, t);
 
       this.tickHook?.(dt, t, pos);
       this.events.onPlayerPosition?.(pos);
