@@ -9,4 +9,5 @@ dist-ssr
 .vite
 .cache
 *.log
+*.tsbuildinfo
 audio-generation.log
