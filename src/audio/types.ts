@@ -78,6 +78,41 @@ export const LETTER_NAME_PHONEME: Record<string, string> = {
   V: "viː", // standard /viː/ — long-E vowel after the V
 };
 
+// Phonics-style letter SOUNDS. Used in the sound-match game and as the
+// follow-up audio when a letter is collected. Vowels are the short
+// pre-K-curriculum versions (apple, egg, igloo, octopus, umbrella). Most
+// stops are taught with a tiny schwa attached because pure /b/ /k/ /d/
+// can't really be vocalised on their own; continuants (F, L, M, N, R, S,
+// V, Z) are bare since they can be sustained.
+export const LETTER_SOUND_PHONEME: Record<string, string> = {
+  A: "æ",      // apple
+  B: "bə",     // "buh"
+  C: "kə",     // hard C, "kuh"
+  D: "də",     // "duh"
+  E: "ɛ",      // egg
+  F: "fːː",    // sustained /f/
+  G: "ɡə",     // hard G, "guh"
+  H: "hə",     // "huh"
+  I: "ɪ",      // igloo
+  J: "dʒə",    // "juh"
+  K: "kə",     // "kuh"
+  L: "lːː",    // sustained /l/
+  M: "mːː",    // sustained /m/
+  N: "nːː",    // sustained /n/
+  O: "ɑ",      // octopus (American short O)
+  P: "pə",     // "puh"
+  Q: "kwə",    // "kwuh"
+  R: "ɹːː",    // sustained English /r/
+  S: "sːː",    // sustained /s/
+  T: "tə",     // "tuh"
+  U: "ʌ",      // umbrella
+  V: "vːː",    // sustained /v/
+  W: "wə",     // "wuh"
+  X: "ks",     // fox
+  Y: "jə",     // "yuh"
+  Z: "zːː",    // sustained /z/
+};
+
 const PHONEME_MODEL = "eleven_flash_v2";
 
 function ssmlPhoneme(visible: string, ipa: string): string {
@@ -122,12 +157,18 @@ export function buildEntries(): AudioEntry[] {
     }
   }
 
-  // Letter sounds — voiced as the phonetic blend.
+  // Letter sounds — voiced as the phonetic blend. We use SSML phoneme tags
+  // on the phoneme-aware flash_v2 model for every sound. The bare-text
+  // approach was unreliable: "ah" landed on /ɑ/ instead of /æ/, "oh" on
+  // long-O instead of short-O, etc. Phoneme tags pin the actual
+  // articulation that pre-K phonics curricula teach.
   for (const L of ALPHABET) {
+    const ipa = LETTER_SOUND_PHONEME[L] ?? LETTER_SOUND_TEXT[L];
     entries.push({
       id: `letter-${L}-sound`,
-      text: LETTER_SOUND_TEXT[L],
+      text: ssmlPhoneme(L, ipa),
       speakAs: LETTER_SOUND_TEXT[L],
+      modelId: PHONEME_MODEL,
     });
   }
 
@@ -138,7 +179,10 @@ export function buildEntries(): AudioEntry[] {
   }
 
   // Game prompts.
-  entries.push({ id: "prompt-find-alphabet", text: "Let's find the whole alphabet! Walk to each letter, in order, from A all the way to Z!" });
+  // Spell out "Zee" so the TTS uses the American letter name. The bare "Z"
+  // glyph was getting read as "Zed" (British). The rest of the prompt sounds
+  // friendly enough as plain text.
+  entries.push({ id: "prompt-find-alphabet", text: "Let's find the whole alphabet! Walk to each letter, in order, from A all the way to Zee!" });
   entries.push({ id: "prompt-sound-match", text: "Listen carefully. I will say a sound, and you find the letter that makes it!" });
   entries.push({ id: "prompt-sound-match-replay", text: "Listen again." });
 
