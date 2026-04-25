@@ -9,9 +9,14 @@
 // Skips clips whose MP3 already exists, so re-runs are cheap. Pass --force to
 // regenerate everything.
 
-import "dotenv/config";
+import { config as loadEnv } from "dotenv";
 import { promises as fs } from "node:fs";
 import path from "node:path";
+
+// Match Vite's convention: load .env.local first (gitignored, takes precedence
+// for personal keys), then fall back to .env. Either works.
+loadEnv({ path: ".env.local" });
+loadEnv({ path: ".env" });
 import { buildEntries, type AudioManifest, type AudioEntry, ALPHABET, LETTER_SOUND_TEXT, SPELL_WORDS } from "../src/audio/types.ts";
 
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
