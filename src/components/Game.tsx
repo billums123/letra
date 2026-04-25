@@ -7,6 +7,7 @@ import { audio } from "../audio/Player";
 import { SpellWordGame } from "../games/SpellWord";
 import { FindAlphabetGame } from "../games/FindAlphabet";
 import { SoundMatchGame } from "../games/SoundMatch";
+import { LetterTest } from "../ui/LetterTest";
 
 export function Game() {
   useInputBootstrap();
@@ -31,6 +32,7 @@ export function Game() {
       {screen === "spell-word" && <SpellWordGame />}
       {screen === "find-alphabet" && <FindAlphabetGame />}
       {screen === "sound-match" && <SoundMatchGame />}
+      {screen === "letter-test" && <LetterTest />}
       <VirtualJoystick visible={screen !== "menu"} />
     </div>
   );

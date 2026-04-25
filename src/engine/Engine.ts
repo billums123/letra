@@ -1,7 +1,9 @@
 import * as THREE from "three";
 import { buildPlayer, type PlayerHandles } from "./player";
-import { buildWorld } from "./world";
+import { buildWorld, type Obstacle } from "./world";
 import { readInput } from "../input/useInput";
+
+const PLAYER_RADIUS = 0.55;
 
 // Engine — owns the renderer, scene, camera, and per-frame loop.
 // Pure three.js, no R3F. React mounts it via a useEffect.
@@ -17,6 +19,7 @@ export class Engine {
   readonly camera: THREE.PerspectiveCamera;
   readonly clock: THREE.Clock;
   readonly player: PlayerHandles;
+  readonly obstacles: Obstacle[];
 
   private rafId = 0;
   private events: EngineEvents;
@@ -81,6 +84,7 @@ export class Engine {
     // World + player
     const world = buildWorld();
     this.scene.add(world.group);
+    this.obstacles = world.obstacles;
 
     this.player = buildPlayer();
     this.scene.add(this.player.group);
@@ -115,6 +119,23 @@ export class Engine {
       // Player update from current input
       const input = readInput();
       this.player.update(dt, input.move);
+
+      // Push player out of any obstacle they overlap with. We resolve in a
+      // single pass per frame: for each overlap, slide along the contact
+      // normal so the player stops at the obstacle edge instead of sticking
+      // or jittering.
+      const pp = this.player.group.position;
+      for (const o of this.obstacles) {
+        const dx = pp.x - o.x;
+        const dz = pp.z - o.z;
+        const dist = Math.hypot(dx, dz);
+        const minDist = o.radius + PLAYER_RADIUS;
+        if (dist < minDist && dist > 0.0001) {
+          const push = (minDist - dist) / dist;
+          pp.x += dx * push;
+          pp.z += dz * push;
+        }
+      }
 
       // Smooth follow camera
       const pos = this.player.position();

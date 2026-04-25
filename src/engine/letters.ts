@@ -52,6 +52,10 @@ export type LetterCharacter = {
   celebrate: () => void;
   // Distance check helper used by game modes for proximity collection.
   positionXZ: () => { x: number; z: number };
+  // Aim the letter's face at a world position (typically the camera). Only
+  // affects the outer Y-axis pivot — the inner animation group keeps its
+  // own bob/spin animation separate so they never fight.
+  faceTowards: (x: number, z: number) => void;
 };
 
 export type LetterOptions = {
@@ -65,8 +69,14 @@ export function buildLetterCharacter(font: Font, opts: LetterOptions): LetterCha
   const upper = opts.letter.toUpperCase();
   const display = opts.lowercase ? opts.letter.toLowerCase() : upper;
   const color = colorFor(upper);
+  // Outer group: world position + Y-axis billboard.
+  // Inner group: every cosmetic mesh + idle/celebration animation.
+  // Splitting the two means we can rotate the body for celebration spin
+  // while the parent keeps the face aimed at the camera.
   const group = new THREE.Group();
+  const inner = new THREE.Group();
   group.name = `Letter-${upper}`;
+  group.add(inner);
 
   const letterMat = new THREE.MeshStandardMaterial({
     color,
@@ -96,79 +106,95 @@ export function buildLetterCharacter(font: Font, opts: LetterOptions): LetterCha
   const letterMesh = new THREE.Mesh(geo, letterMat);
   letterMesh.castShadow = true;
   letterMesh.receiveShadow = true;
-  group.add(letterMesh);
+  inner.add(letterMesh);
 
   const size = new THREE.Vector3();
   geo.boundingBox!.getSize(size);
   const width = size.x;
   const height = size.y;
+  // Half-width clamped to a comfortable range — narrow letters (I, L) get
+  // facial features brought in; wide letters (M, W) get them spread out
+  // but never beyond the glyph itself. The 0.42 floor keeps tiny letters
+  // from looking cross-eyed.
+  const half = Math.max(0.42, Math.min(width * 0.5 - 0.18, 0.95));
+  const depthFront = 0.55 / 2 + 0.07; // half the extrude depth + a hair
+  // Eye Y aligned with the upper third of the glyph for taller letters; on
+  // short ones (a) we clamp so the eyes don't ride above the letter.
+  const eyeY = Math.min(Math.max(height * 0.72, 0.95), height - 0.15);
+  const eyeRadius = Math.min(0.2, height * 0.13);
 
-  // Eyes — two big white spheres with black pupils, planted on the front face.
+  // Eyes — two white spheres with black pupils on the front face. Pupils sit
+  // forward of the eye so they read as 3D from any camera angle.
   const eyeWhite = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.4 });
   const eyePupil = new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.6 });
-  const eyeRadius = Math.min(0.22, height * 0.13);
-  const eyeY = Math.max(height * 0.7, 0.85);
+  const eyeOffset = Math.min(half * 0.55, 0.35);
   for (const dx of [-1, 1]) {
     const eye = new THREE.Mesh(new THREE.SphereGeometry(eyeRadius, 14, 12), eyeWhite);
-    eye.position.set(dx * Math.min(width * 0.22, 0.5), eyeY, 0.6);
-    group.add(eye);
+    eye.position.set(dx * eyeOffset, eyeY, depthFront + eyeRadius * 0.4);
+    inner.add(eye);
     const pupil = new THREE.Mesh(new THREE.SphereGeometry(eyeRadius * 0.45, 12, 10), eyePupil);
-    pupil.position.set(eye.position.x, eye.position.y, 0.78);
-    group.add(pupil);
+    pupil.position.set(eye.position.x, eye.position.y, eye.position.z + eyeRadius * 0.55);
+    inner.add(pupil);
   }
 
-  // Smile — half torus
+  // Smile — half torus, placed below the eyes within the letter's body.
+  const smileY = Math.max(eyeY - 0.36, height * 0.42);
   const smile = new THREE.Mesh(
-    new THREE.TorusGeometry(0.16, 0.04, 8, 14, Math.PI),
+    new THREE.TorusGeometry(Math.min(0.18, half * 0.32), 0.04, 8, 14, Math.PI),
     new THREE.MeshStandardMaterial({ color: 0x6b1d10 })
   );
-  smile.position.set(0, eyeY - 0.32, 0.62);
+  smile.position.set(0, smileY, depthFront + 0.02);
   smile.rotation.x = Math.PI / 2;
-  group.add(smile);
+  inner.add(smile);
 
-  // Tiny rosy cheeks for extra cuteness
+  // Rosy cheeks — flanking the smile, scaled to letter width.
   const cheekMat = new THREE.MeshStandardMaterial({ color: 0xff8aaa, transparent: true, opacity: 0.7 });
+  const cheekOffset = Math.min(half * 0.85, 0.55);
   for (const dx of [-1, 1]) {
-    const cheek = new THREE.Mesh(new THREE.SphereGeometry(0.1, 10, 8), cheekMat);
-    cheek.position.set(dx * 0.55, eyeY - 0.45, 0.6);
+    const cheek = new THREE.Mesh(new THREE.SphereGeometry(0.09, 10, 8), cheekMat);
+    cheek.position.set(dx * cheekOffset, smileY + 0.04, depthFront);
     cheek.scale.set(1, 0.7, 0.4);
-    group.add(cheek);
+    inner.add(cheek);
   }
 
-  // Arms — left and right capsules attached to mid-height; we wave them on celebrate.
+  // Arms — pivots sit just outside the letter so a wave reads cleanly from
+  // any camera angle. Position scales to letter width so M/W get arms that
+  // really stretch out, while I/L stay tucked.
   const limbMat = new THREE.MeshStandardMaterial({ color, roughness: 0.5 });
   const armGeo = new THREE.CapsuleGeometry(0.1, 0.45, 4, 8);
-  const armPivot = new THREE.Group();
-  armPivot.position.set(width * 0.5 + 0.15, height * 0.55, 0.25);
-  const leftArm = new THREE.Mesh(armGeo, limbMat);
-  leftArm.position.set(0.25, -0.05, 0);
-  leftArm.rotation.z = Math.PI / 4;
-  leftArm.castShadow = true;
-  armPivot.add(leftArm);
-  group.add(armPivot);
+  const armPivotR = new THREE.Group();
+  armPivotR.position.set(half + 0.15, height * 0.55, 0);
+  const armR = new THREE.Mesh(armGeo, limbMat);
+  armR.position.set(0.25, -0.05, 0);
+  armR.rotation.z = Math.PI / 4;
+  armR.castShadow = true;
+  armPivotR.add(armR);
+  inner.add(armPivotR);
 
-  const armPivot2 = new THREE.Group();
-  armPivot2.position.set(-width * 0.5 - 0.15, height * 0.55, 0.25);
-  const rightArm = new THREE.Mesh(armGeo, limbMat);
-  rightArm.position.set(-0.25, -0.05, 0);
-  rightArm.rotation.z = -Math.PI / 4;
-  rightArm.castShadow = true;
-  armPivot2.add(rightArm);
-  group.add(armPivot2);
+  const armPivotL = new THREE.Group();
+  armPivotL.position.set(-half - 0.15, height * 0.55, 0);
+  const armL = new THREE.Mesh(armGeo, limbMat);
+  armL.position.set(-0.25, -0.05, 0);
+  armL.rotation.z = -Math.PI / 4;
+  armL.castShadow = true;
+  armPivotL.add(armL);
+  inner.add(armPivotL);
 
-  // Feet — two black blobs at the base
+  // Feet — two black blobs centred under the glyph (not under the bounding
+  // box edges, so feet don't poke out from under W or M).
   const footMat = new THREE.MeshStandardMaterial({ color: 0x3a2a14, roughness: 0.7 });
+  const footOffset = Math.min(half * 0.45, 0.32);
   for (const dx of [-1, 1]) {
     const foot = new THREE.Mesh(new THREE.SphereGeometry(0.18, 10, 8), footMat);
-    foot.position.set(dx * 0.28, 0.05, 0.18);
+    foot.position.set(dx * footOffset, 0.05, 0.18);
     foot.scale.set(1, 0.6, 1.2);
     foot.castShadow = true;
-    group.add(foot);
+    inner.add(foot);
   }
 
-  // Soft glow disc on the ground
+  // Soft glow disc on the ground — sized to the letter footprint.
   const glow = new THREE.Mesh(
-    new THREE.CircleGeometry(width * 0.7, 24),
+    new THREE.CircleGeometry(Math.max(width * 0.7, 0.9), 24),
     new THREE.MeshBasicMaterial({
       color,
       transparent: true,
@@ -179,11 +205,11 @@ export function buildLetterCharacter(font: Font, opts: LetterOptions): LetterCha
   );
   glow.rotation.x = -Math.PI / 2;
   glow.position.y = 0.02;
-  group.add(glow);
+  inner.add(glow);
 
   // Animation state
   let bobPhase = Math.random() * Math.PI * 2;
-  let spinPhase = 0;
+  let swayPhase = Math.random() * Math.PI * 2;
   let celebrationT = -1;
   const baseY = 0;
   let isCollected = false;
@@ -197,17 +223,21 @@ export function buildLetterCharacter(font: Font, opts: LetterOptions): LetterCha
     set isCollected(_v) {
       // setter exists so consumers can write but we treat collect via celebrate()
     },
-    update(dt, t) {
+    update(dt, _t) {
       bobPhase += dt * 2;
-      spinPhase += dt * 0.6;
-      // Idle: gentle bob and tiny rotation
+      swayPhase += dt * 1.4;
+      // Idle: gentle bob (height) and a small Z-axis sway. We deliberately
+      // don't touch group.rotation.y here — that's owned by faceTowards()
+      // for camera billboarding. A tiny rotation.z gives the "alive" feel
+      // without fighting the parent's yaw.
       const baseBob = Math.sin(bobPhase) * 0.12;
       group.position.y = baseY + baseBob;
-      group.rotation.y = Math.sin(spinPhase) * 0.18;
+      inner.rotation.z = Math.sin(swayPhase) * 0.05;
+      inner.rotation.y = 0; // reset celebration spin between frames
 
       // Arms swing slightly idle
-      armPivot.rotation.z = Math.sin(bobPhase * 1.2) * 0.12;
-      armPivot2.rotation.z = -Math.sin(bobPhase * 1.2) * 0.12;
+      armPivotR.rotation.z = Math.sin(bobPhase * 1.2) * 0.12;
+      armPivotL.rotation.z = -Math.sin(bobPhase * 1.2) * 0.12;
 
       if (celebrationT >= 0) {
         celebrationT += dt;
@@ -215,18 +245,19 @@ export function buildLetterCharacter(font: Font, opts: LetterOptions): LetterCha
         // Big jump
         const jump = Math.sin(k * Math.PI) * 1.4;
         group.position.y = baseY + baseBob + jump;
-        // Spin once
-        group.rotation.y = k * Math.PI * 2;
+        // Spin around the inner axis so the parent stays facing the camera.
+        inner.rotation.y = k * Math.PI * 2;
         // Wave both arms wildly
-        armPivot.rotation.z = Math.sin(celebrationT * 18) * 1.0 - 0.6;
-        armPivot2.rotation.z = -Math.sin(celebrationT * 18) * 1.0 + 0.6;
+        armPivotR.rotation.z = Math.sin(celebrationT * 18) * 1.0 - 0.6;
+        armPivotL.rotation.z = -Math.sin(celebrationT * 18) * 1.0 + 0.6;
         // Scale pulse
         const s = 1 + 0.15 * Math.sin(k * Math.PI * 2);
-        group.scale.setScalar(s);
-        // Gentle fade out at end
+        inner.scale.setScalar(s);
         if (k >= 1) {
           isCollected = true;
         }
+      } else {
+        inner.scale.setScalar(1);
       }
     },
     celebrate() {
@@ -234,6 +265,13 @@ export function buildLetterCharacter(font: Font, opts: LetterOptions): LetterCha
     },
     positionXZ() {
       return { x: group.position.x, z: group.position.z };
+    },
+    faceTowards(x, z) {
+      const dx = x - group.position.x;
+      const dz = z - group.position.z;
+      // Letters are built with their face on local +Z. atan2(dx, dz) yields
+      // the yaw that aligns +Z with (dx, dz).
+      group.rotation.y = Math.atan2(dx, dz);
     },
   };
 

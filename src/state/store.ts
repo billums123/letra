@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-export type Screen = "menu" | "spell-word" | "find-alphabet" | "sound-match";
+export type Screen = "menu" | "spell-word" | "find-alphabet" | "sound-match" | "letter-test";
 
 type GameState = {
   screen: Screen;

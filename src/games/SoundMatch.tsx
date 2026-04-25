@@ -3,9 +3,11 @@ import * as THREE from "three";
 import { Scene } from "../world/Scene";
 import { HUD } from "../ui/HUD";
 import { audio } from "../audio/Player";
+import { playChime, playWoo } from "../audio/sfx";
 import { Engine } from "../engine/Engine";
 import { buildLetterCharacter, distanceXZ, loadFont } from "../engine/letters";
 import { makeBurst } from "../engine/particles";
+import { pickClearSpawn } from "../engine/world";
 import { ALPHABET } from "../audio/types";
 import { useGameStore } from "../state/store";
 
@@ -57,12 +59,25 @@ export function SoundMatchGame() {
     targetRef.current = targetLetter;
     setTarget(targetLetter);
 
-    const radius = 8 + roundIndex * 0.6;
-    candidates.forEach((L, i) => {
-      const angle = (i / candidates.length) * Math.PI * 2;
+    const minR = 7 + roundIndex * 0.4;
+    const maxR = minR + 6;
+    const taken: { x: number; z: number; radius: number }[] = [];
+    const rng = (() => {
+      let s = (roundIndex * 9871 + 17) | 0;
+      return () => {
+        s = (s + 0x9e3779b9) | 0;
+        let t = s;
+        t = Math.imul(t ^ (t >>> 15), t | 1);
+        t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+      };
+    })();
+    candidates.forEach((L) => {
       const character = buildLetterCharacter(font, { letter: L });
-      character.group.position.set(Math.cos(angle) * radius, 0, Math.sin(angle) * radius);
-      character.group.lookAt(0, 0, 0);
+      const spawn = pickClearSpawn(engine.obstacles, taken, { minRadius: minR, maxRadius: maxR }, 1.0, rng);
+      character.group.position.set(spawn.x, 0, spawn.z);
+      taken.push({ x: spawn.x, z: spawn.z, radius: 1.0 });
+      character.faceTowards(engine.camera.position.x, engine.camera.position.z);
       engine.scene.add(character.group);
       engine.addActor(character);
       lettersRef.current.push({ letter: L, character });
@@ -90,6 +105,10 @@ export function SoundMatchGame() {
     buildRound(engine, font, 0);
 
     engine.tickHook = (_dt, _t, playerPos) => {
+      // Billboard every letter toward the camera each frame.
+      for (const entry of lettersRef.current) {
+        entry.character.faceTowards(engine.camera.position.x, engine.camera.position.z);
+      }
       if (lockRef.current) return;
       const target = targetRef.current;
       if (!target) return;
@@ -126,6 +145,7 @@ export function SoundMatchGame() {
           }
         },
       });
+      playChime();
       audio.stop();
       await audio.play(audio.letterName(entry.letter));
       await audio.play(audio.randomCelebrate(), { interrupt: false });
@@ -134,6 +154,7 @@ export function SoundMatchGame() {
       setRound(next);
       if (next >= ROUNDS_PER_GAME) {
         setCompleted(true);
+        playWoo();
         await audio.play(audio.randomCelebrate());
         lockRef.current = false;
         return;

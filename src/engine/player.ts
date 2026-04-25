@@ -78,7 +78,11 @@ export function buildPlayer(): PlayerHandles {
         while (delta > Math.PI) delta -= Math.PI * 2;
         while (delta < -Math.PI) delta += Math.PI * 2;
         facing += delta * TURN_LERP;
-        group.rotation.y = facing + Math.PI;
+        // The character's face is built on local +Z. atan2(input.x, input.y)
+        // gives the yaw whose forward (+Z after rotation) points along the
+        // movement vector — no offset needed. The previous +PI flipped the
+        // facing 180° so the character moonwalked.
+        group.rotation.y = facing;
         bob += dt * 12;
       } else {
         bob += dt * 3;

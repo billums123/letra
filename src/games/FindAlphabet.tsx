@@ -3,9 +3,11 @@ import * as THREE from "three";
 import { Scene } from "../world/Scene";
 import { HUD } from "../ui/HUD";
 import { audio } from "../audio/Player";
+import { playChime, playWoo } from "../audio/sfx";
 import { Engine } from "../engine/Engine";
 import { buildLetterCharacter, distanceXZ, loadFont } from "../engine/letters";
 import { makeBurst } from "../engine/particles";
+import { pickClearSpawn } from "../engine/world";
 import { ALPHABET } from "../audio/types";
 import { useGameStore } from "../state/store";
 
@@ -33,20 +35,9 @@ export function FindAlphabetGame() {
   const hintScheduledRef = useRef(false);
   const lastProgressRef = useRef(performance.now());
 
-  const positions = useMemo(() => {
-    // 26 letters arranged in an outward spiral so the early ones are close to
-    // spawn and the harder ones (Q, X, Z) further away. Keeps the early game
-    // feeling fast and easy.
-    const list: THREE.Vector3[] = [];
-    for (let i = 0; i < ALPHABET.length; i++) {
-      const t = i / ALPHABET.length;
-      const r = RING_INNER + t * (RING_OUTER - RING_INNER);
-      const angle = i * 2.39996; // golden-angle-ish for nice spread
-      list.push(new THREE.Vector3(Math.cos(angle) * r, 0, Math.sin(angle) * r));
-    }
-    return list;
-  }, []);
-
+  // We can't pre-compute spawn positions without the engine's obstacle list,
+  // so they're chosen during bootstrap. The spiral is then used as a *seed*
+  // for retry attempts that respect the obstacle layout.
   const onEngineReady = (engine: Engine) => {
     engineRef.current = engine;
     bootstrap(engine);
@@ -54,18 +45,43 @@ export function FindAlphabetGame() {
 
   const bootstrap = async (engine: Engine) => {
     const font = await loadFont();
+    const taken: { x: number; z: number; radius: number }[] = [];
+    let spiralI = 0;
+    const rng = (() => {
+      // Mostly-random per session, but biased to walk the spiral so adjacent
+      // letters in the alphabet land near each other.
+      let s = 1234567 | 0;
+      return () => {
+        s = (s + 0x9e3779b9) | 0;
+        let t = s;
+        t = Math.imul(t ^ (t >>> 15), t | 1);
+        t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+      };
+    })();
+
     const letters: LetterEntry[] = ALPHABET.map((L, i) => {
       const character = buildLetterCharacter(font, { letter: L });
-      character.group.position.copy(positions[i]);
-      character.group.position.y = 0;
-      character.group.lookAt(0, character.group.position.y, 0);
+      // Try a spiral position first; if obstructed, pickClearSpawn retries.
+      const t = i / ALPHABET.length;
+      const minR = Math.max(RING_INNER, RING_INNER + t * 4);
+      const maxR = Math.min(RING_OUTER, RING_INNER + t * (RING_OUTER - RING_INNER) + 6);
+      const spawn = pickClearSpawn(engine.obstacles, taken, { minRadius: minR, maxRadius: maxR }, 1.0, rng);
+      character.group.position.set(spawn.x, 0, spawn.z);
+      taken.push({ x: spawn.x, z: spawn.z, radius: 1.0 });
+      character.faceTowards(engine.camera.position.x, engine.camera.position.z);
       engine.scene.add(character.group);
       engine.addActor(character);
+      spiralI++;
       return { letter: L, index: i, character };
     });
     lettersRef.current = letters;
+    void spiralI;
 
     engine.tickHook = (_dt, _t, playerPos) => {
+      for (const entry of lettersRef.current) {
+        entry.character.faceTowards(engine.camera.position.x, engine.camera.position.z);
+      }
       const next = lettersRef.current[currentIndex.current];
       if (!next) return;
       const d = distanceXZ(playerPos, next.character.positionXZ());
@@ -99,6 +115,7 @@ export function FindAlphabetGame() {
         }
       },
     });
+    playChime();
     audio.stop();
     audio.play(audio.letterName(entry.letter)).then(() => audio.play(audio.letterSound(entry.letter), { interrupt: false }));
     collect(entry.letter);
@@ -107,6 +124,7 @@ export function FindAlphabetGame() {
     lastProgressRef.current = performance.now();
     if (currentIndex.current >= ALPHABET.length) {
       setCompleted(true);
+      playWoo();
       setTimeout(() => audio.play(audio.randomCelebrate()), 800);
     }
   };

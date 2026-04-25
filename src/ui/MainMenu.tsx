@@ -159,6 +159,29 @@ export function MainMenu() {
 
       <button
         type="button"
+        onClick={() => setScreen("letter-test")}
+        aria-label="Open the letter test page"
+        style={{
+          position: "absolute",
+          top: 24,
+          left: 24,
+          appearance: "none",
+          border: "4px solid white",
+          background: "rgba(255,255,255,0.7)",
+          color: "#3a2a14",
+          borderRadius: 16,
+          padding: "8px 14px",
+          fontSize: 14,
+          fontWeight: 800,
+          cursor: "pointer",
+          boxShadow: "0 4px 0 rgba(0,0,0,0.12)",
+        }}
+      >
+        🔍 Letter test
+      </button>
+
+      <button
+        type="button"
         onClick={() => setShowStickers(true)}
         aria-label={`Sticker book — ${collected.size} of ${ALPHABET.length} letters mastered`}
         style={{

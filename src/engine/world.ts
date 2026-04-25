@@ -14,14 +14,23 @@ function mulberry32(seed: number) {
 
 const WORLD_RADIUS = 60;
 
+// An obstacle the player and letters should avoid. We model every world
+// prop as a vertical cylinder (good enough for the round-ish shapes we
+// have: hills, trees, mushrooms). Only objects within the play zone end
+// up in this list — the distant skirt and ground itself are excluded
+// because nothing collides with them.
+export type Obstacle = { x: number; z: number; radius: number };
+
 export type WorldHandles = {
   group: THREE.Group;
   worldRadius: number;
+  obstacles: Obstacle[];
 };
 
 export function buildWorld(): WorldHandles {
   const group = new THREE.Group();
   group.name = "World";
+  const obstacles: Obstacle[] = [];
 
   // Ground — large green disc
   const ground = new THREE.Mesh(
@@ -42,13 +51,14 @@ export function buildWorld(): WorldHandles {
   skirt.receiveShadow = true;
   group.add(skirt);
 
-  // Hills — soft spheres in the distance
+  // Hills — soft spheres in the distance. Pushed out of the play zone so the
+  // kid never walks "into" one.
   const hillRand = mulberry32(11);
   for (let i = 0; i < 18; i++) {
     const r = 8 + hillRand() * 14;
     const x = (hillRand() - 0.5) * 130;
     const z = (hillRand() - 0.5) * 130;
-    if (Math.hypot(x, z) < 20) continue;
+    if (Math.hypot(x, z) < 35) continue;
     const hue = 95 + hillRand() * 35;
     const hill = new THREE.Mesh(
       new THREE.SphereGeometry(r, 16, 12),
@@ -58,6 +68,9 @@ export function buildWorld(): WorldHandles {
     hill.castShadow = false;
     hill.receiveShadow = true;
     group.add(hill);
+    // Hills are scenery — we don't want collision quite at the visual
+    // sphere edge (the ground meets it well before that). Use 60% radius.
+    obstacles.push({ x, z, radius: r * 0.6 });
   }
 
   // Trees
@@ -71,6 +84,8 @@ export function buildWorld(): WorldHandles {
     const tree = makeTree(hue, scale);
     tree.position.set(x, 0, z);
     group.add(tree);
+    // Trunk + foliage radius — a generous 1.4*scale catches the leafy cone.
+    obstacles.push({ x, z, radius: 1.4 * scale });
   }
 
   // Mushrooms
@@ -83,6 +98,7 @@ export function buildWorld(): WorldHandles {
     const m = makeMushroom(hue);
     m.position.set(x, 0, z);
     group.add(m);
+    obstacles.push({ x, z, radius: 0.7 });
   }
 
   // Clouds
@@ -98,7 +114,49 @@ export function buildWorld(): WorldHandles {
     group.add(c);
   }
 
-  return { group, worldRadius: WORLD_RADIUS };
+  return { group, worldRadius: WORLD_RADIUS, obstacles };
+}
+
+// Picks a position within `radius` of (0,0) that's clear of every obstacle
+// (and other already-placed letters). Falls back to a random retry up to 60
+// times; if it can't find a spot the caller gets a position anyway — better
+// to overlap one tree than to fail the whole game.
+export function pickClearSpawn(
+  obstacles: Obstacle[],
+  taken: { x: number; z: number; radius: number }[],
+  bounds: { minRadius: number; maxRadius: number },
+  selfRadius: number,
+  rng: () => number
+): { x: number; z: number } {
+  const { minRadius, maxRadius } = bounds;
+  for (let attempt = 0; attempt < 60; attempt++) {
+    const angle = rng() * Math.PI * 2;
+    const dist = minRadius + rng() * (maxRadius - minRadius);
+    const x = Math.cos(angle) * dist;
+    const z = Math.sin(angle) * dist;
+    let clear = true;
+    for (const o of obstacles) {
+      if (Math.hypot(x - o.x, z - o.z) < o.radius + selfRadius + 0.4) {
+        clear = false;
+        break;
+      }
+    }
+    if (clear) {
+      for (const t of taken) {
+        if (Math.hypot(x - t.x, z - t.z) < t.radius + selfRadius + 1.2) {
+          clear = false;
+          break;
+        }
+      }
+    }
+    if (clear) return { x, z };
+  }
+  // Last-resort: place on the inner ring along an angle that hasn't been used.
+  const fallbackAngle = rng() * Math.PI * 2;
+  return {
+    x: Math.cos(fallbackAngle) * minRadius,
+    z: Math.sin(fallbackAngle) * minRadius,
+  };
 }
 
 function makeTree(hue: number, scale: number) {
