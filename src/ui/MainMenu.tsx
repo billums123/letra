@@ -1,6 +1,8 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useGameStore } from "../state/store";
 import { audio } from "../audio/Player";
+import { StickerBook } from "./StickerBook";
+import { ALPHABET } from "../audio/types";
 
 // Picture-based main menu. Designed for ages 3-6: huge buttons, big icons,
 // audio narration on hover, no required reading. Pre-readers can navigate
@@ -66,6 +68,8 @@ function GameCard({ emoji, title, subtitle, color, voiceClipId, onSelect, ariaLa
 export function MainMenu() {
   const setScreen = useGameStore((s) => s.setScreen);
   const audioMode = useGameStore((s) => s.audioMode);
+  const collected = useGameStore((s) => s.collected);
+  const [showStickers, setShowStickers] = useState(false);
 
   // Welcome line on first paint.
   useEffect(() => {
@@ -152,6 +156,49 @@ export function MainMenu() {
           Voice: {audioMode === "elevenlabs" ? "ElevenLabs" : audioMode === "speech" ? "Browser" : "Off"}
         </span>
       </footer>
+
+      <button
+        type="button"
+        onClick={() => setShowStickers(true)}
+        aria-label={`Sticker book — ${collected.size} of ${ALPHABET.length} letters mastered`}
+        style={{
+          position: "absolute",
+          top: 24,
+          right: 24,
+          appearance: "none",
+          border: "5px solid white",
+          background: "#ff8aaa",
+          color: "white",
+          borderRadius: "50%",
+          width: 84,
+          height: 84,
+          fontSize: 36,
+          fontWeight: 900,
+          cursor: "pointer",
+          boxShadow: "0 8px 0 rgba(0,0,0,0.18)",
+          display: "grid",
+          placeItems: "center",
+        }}
+      >
+        🏅
+        <span
+          style={{
+            position: "absolute",
+            bottom: -8,
+            right: -8,
+            background: "#3a2a14",
+            color: "white",
+            fontSize: 16,
+            borderRadius: 12,
+            padding: "2px 8px",
+            border: "3px solid white",
+          }}
+        >
+          {collected.size}
+        </span>
+      </button>
+
+      <StickerBook open={showStickers} onClose={() => setShowStickers(false)} />
     </div>
   );
 }
