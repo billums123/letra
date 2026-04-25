@@ -112,58 +112,69 @@ export function buildLetterCharacter(font: Font, opts: LetterOptions): LetterCha
   geo.boundingBox!.getSize(size);
   const width = size.x;
   const height = size.y;
-  // Half-width clamped to a comfortable range — narrow letters (I, L) get
-  // facial features brought in; wide letters (M, W) get them spread out
-  // but never beyond the glyph itself. The 0.42 floor keeps tiny letters
-  // from looking cross-eyed.
-  const half = Math.max(0.42, Math.min(width * 0.5 - 0.18, 0.95));
-  const depthFront = 0.55 / 2 + 0.07; // half the extrude depth + a hair
-  // Eye Y aligned with the upper third of the glyph for taller letters; on
-  // short ones (a) we clamp so the eyes don't ride above the letter.
-  const eyeY = Math.min(Math.max(height * 0.72, 0.95), height - 0.15);
-  const eyeRadius = Math.min(0.2, height * 0.13);
+  // Glyph half-width — used to keep every feature inside the letter
+  // silhouette. We don't enforce an artificial floor here (that pushed
+  // features off narrow letters like I and L). Instead, eye/cheek/foot
+  // sizes scale down with the glyph.
+  const half = Math.max(0.18, width * 0.5 - 0.06);
+  const depthFront = 0.55 / 2 + 0.08; // half the extrude depth + a hair
+  // Eye sphere sized so two eyes plus a 30% gap fit within the glyph width.
+  // This way an "I" gets tiny eyes that fit; "M" gets generous ones.
+  const eyeRadius = Math.min(0.2, half * 0.4, height * 0.13);
+  // Eyes ride high — about 75% of the way up the glyph, but always at least
+  // an eye-radius below the top so they don't pop above the letter.
+  const eyeY = Math.min(Math.max(height * 0.74, 0.85), height - eyeRadius * 1.4);
+  // Spread that fits inside the glyph: two eyes + tiny gap.
+  const eyeOffset = Math.max(eyeRadius * 1.1, Math.min(half - eyeRadius * 1.05, half * 0.6));
 
-  // Eyes — two white spheres with black pupils on the front face. Pupils sit
-  // forward of the eye so they read as 3D from any camera angle.
-  const eyeWhite = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.4 });
-  const eyePupil = new THREE.MeshStandardMaterial({ color: 0x222222, roughness: 0.6 });
-  const eyeOffset = Math.min(half * 0.55, 0.35);
+  // Eyes — white sclera, dark pupil, plus a tiny "shine" highlight that
+  // really sells the googly cartoon vibe.
+  const eyeWhite = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.35 });
+  const eyePupil = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.5 });
+  const eyeShine = new THREE.MeshBasicMaterial({ color: 0xffffff });
   for (const dx of [-1, 1]) {
-    const eye = new THREE.Mesh(new THREE.SphereGeometry(eyeRadius, 14, 12), eyeWhite);
+    const eye = new THREE.Mesh(new THREE.SphereGeometry(eyeRadius, 16, 12), eyeWhite);
     eye.position.set(dx * eyeOffset, eyeY, depthFront + eyeRadius * 0.4);
     inner.add(eye);
-    const pupil = new THREE.Mesh(new THREE.SphereGeometry(eyeRadius * 0.45, 12, 10), eyePupil);
-    pupil.position.set(eye.position.x, eye.position.y, eye.position.z + eyeRadius * 0.55);
+    const pupil = new THREE.Mesh(new THREE.SphereGeometry(eyeRadius * 0.55, 12, 10), eyePupil);
+    pupil.position.set(eye.position.x, eye.position.y, eye.position.z + eyeRadius * 0.5);
     inner.add(pupil);
+    const shine = new THREE.Mesh(new THREE.SphereGeometry(eyeRadius * 0.18, 8, 6), eyeShine);
+    shine.position.set(eye.position.x - eyeRadius * 0.25, eye.position.y + eyeRadius * 0.3, eye.position.z + eyeRadius * 0.7);
+    inner.add(shine);
   }
 
-  // Smile — half torus, placed below the eyes within the letter's body.
-  const smileY = Math.max(eyeY - 0.36, height * 0.42);
+  // Smile — half torus on the front face, sized to letter width.
+  const smileRadius = Math.min(0.16, half * 0.5);
+  const smileY = Math.max(eyeY - eyeRadius * 2.4, height * 0.36);
   const smile = new THREE.Mesh(
-    new THREE.TorusGeometry(Math.min(0.18, half * 0.32), 0.04, 8, 14, Math.PI),
+    new THREE.TorusGeometry(smileRadius, Math.max(0.03, smileRadius * 0.22), 8, 16, Math.PI),
     new THREE.MeshStandardMaterial({ color: 0x6b1d10 })
   );
-  smile.position.set(0, smileY, depthFront + 0.02);
+  smile.position.set(0, smileY, depthFront + 0.03);
   smile.rotation.x = Math.PI / 2;
   inner.add(smile);
 
-  // Rosy cheeks — flanking the smile, scaled to letter width.
-  const cheekMat = new THREE.MeshStandardMaterial({ color: 0xff8aaa, transparent: true, opacity: 0.7 });
-  const cheekOffset = Math.min(half * 0.85, 0.55);
+  // Rosy cheeks — flanking the smile within the glyph silhouette.
+  const cheekMat = new THREE.MeshStandardMaterial({ color: 0xff8aaa, transparent: true, opacity: 0.75 });
+  const cheekRadius = Math.min(0.1, half * 0.18);
+  const cheekOffset = Math.min(half - cheekRadius, eyeOffset + cheekRadius * 1.2);
   for (const dx of [-1, 1]) {
-    const cheek = new THREE.Mesh(new THREE.SphereGeometry(0.09, 10, 8), cheekMat);
-    cheek.position.set(dx * cheekOffset, smileY + 0.04, depthFront);
+    const cheek = new THREE.Mesh(new THREE.SphereGeometry(cheekRadius, 10, 8), cheekMat);
+    cheek.position.set(dx * cheekOffset, smileY + cheekRadius * 0.4, depthFront);
     cheek.scale.set(1, 0.7, 0.4);
     inner.add(cheek);
   }
 
-  // Arms — pivots sit just outside the letter so a wave reads cleanly from
-  // any camera angle. Position scales to letter width so M/W get arms that
-  // really stretch out, while I/L stay tucked.
+  // Arms — pivots just outside the letter so a wave reads from any angle.
+  // Position scales to letter width so M/W get arms that really stretch
+  // out while I/L stay tucked.
   const limbMat = new THREE.MeshStandardMaterial({ color, roughness: 0.5 });
   const armGeo = new THREE.CapsuleGeometry(0.1, 0.45, 4, 8);
+  const armX = Math.max(half + 0.18, 0.36);
+  const armY = Math.min(height * 0.55, height - 0.4);
   const armPivotR = new THREE.Group();
-  armPivotR.position.set(half + 0.15, height * 0.55, 0);
+  armPivotR.position.set(armX, armY, 0);
   const armR = new THREE.Mesh(armGeo, limbMat);
   armR.position.set(0.25, -0.05, 0);
   armR.rotation.z = Math.PI / 4;
@@ -172,7 +183,7 @@ export function buildLetterCharacter(font: Font, opts: LetterOptions): LetterCha
   inner.add(armPivotR);
 
   const armPivotL = new THREE.Group();
-  armPivotL.position.set(-half - 0.15, height * 0.55, 0);
+  armPivotL.position.set(-armX, armY, 0);
   const armL = new THREE.Mesh(armGeo, limbMat);
   armL.position.set(-0.25, -0.05, 0);
   armL.rotation.z = -Math.PI / 4;
@@ -180,13 +191,14 @@ export function buildLetterCharacter(font: Font, opts: LetterOptions): LetterCha
   armPivotL.add(armL);
   inner.add(armPivotL);
 
-  // Feet — two black blobs centred under the glyph (not under the bounding
-  // box edges, so feet don't poke out from under W or M).
+  // Feet — two black blobs centred under the glyph. We anchor them to the
+  // letter centre rather than to "half" so they don't get pushed too far
+  // apart on wide letters; for narrow letters they tuck in close.
   const footMat = new THREE.MeshStandardMaterial({ color: 0x3a2a14, roughness: 0.7 });
-  const footOffset = Math.min(half * 0.45, 0.32);
+  const footOffset = Math.max(0.18, Math.min(half * 0.4, 0.32));
   for (const dx of [-1, 1]) {
-    const foot = new THREE.Mesh(new THREE.SphereGeometry(0.18, 10, 8), footMat);
-    foot.position.set(dx * footOffset, 0.05, 0.18);
+    const foot = new THREE.Mesh(new THREE.SphereGeometry(0.16, 10, 8), footMat);
+    foot.position.set(dx * footOffset, 0.05, 0.2);
     foot.scale.set(1, 0.6, 1.2);
     foot.castShadow = true;
     inner.add(foot);
