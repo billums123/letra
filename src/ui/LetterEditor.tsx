@@ -370,6 +370,13 @@ export function LetterEditor() {
   const selectedPartRef = useRef<PartId>(selectedPart);
   const gizmoModeRef = useRef<GizmoMode>(gizmoMode);
   const onPartChangeRef = useRef<((p: EditableParts) => void) | null>(null);
+  // Latest letter id (read inside long-lived listeners that captured an
+  // older closure).
+  const letterRef = useRef(letter);
+  useEffect(() => { letterRef.current = letter; }, [letter]);
+  // Pushes go through this ref so the (init-once) TransformControls listeners
+  // always see the current implementation rather than a stale closure.
+  const pushHistoryRef = useRef<((L: string, v: EditableParts) => void) | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -444,9 +451,16 @@ export function LetterEditor() {
     const transform = new TransformControls(camera, renderer.domElement);
     transform.setSize(0.7);
     scene.add(transform.getHelper());
-    // While dragging the transform gizmo, freeze the camera orbit.
+    // While dragging the transform gizmo, freeze the camera orbit. When the
+    // drag ENDS, push the new state to history as a single undoable step —
+    // pushing on every objectChange used to fill the stack with hundreds of
+    // micro-deltas, making "undo" appear to do nothing.
     transform.addEventListener("dragging-changed", (e) => {
-      orbit.enabled = !(e as unknown as { value: boolean }).value;
+      const dragging = (e as unknown as { value: boolean }).value;
+      orbit.enabled = !dragging;
+      if (!dragging && partsRef.current && pushHistoryRef.current) {
+        pushHistoryRef.current(letterRef.current, partsRef.current);
+      }
     });
     // When the gizmo moves or rotates the part, push values back into state.
     transform.addEventListener("objectChange", () => {
@@ -616,7 +630,9 @@ export function LetterEditor() {
   }, [gizmoMode]);
 
   // Push parts into refs so the transform handler always sees the latest.
-  // Also push every committed change into the per-letter undo history.
+  // Drag-time updates DO NOT push to history — only the drag-end event
+  // (handled in the TransformControls listener) does. This keeps each drag
+  // as a single undoable step.
   useEffect(() => {
     partsRef.current = parts;
     onPartChangeRef.current = (next) => {
@@ -626,7 +642,6 @@ export function LetterEditor() {
         saveOverrides(merged);
         return merged;
       });
-      pushHistory(letter, next);
     };
   }, [parts, letter]);
 
@@ -635,12 +650,11 @@ export function LetterEditor() {
       const cur = h[L] ?? { stack: [], index: -1 };
       // Drop any redo entries — a new edit forks the timeline.
       const trimmed = cur.stack.slice(0, cur.index + 1);
-      // Coalesce rapid drag updates: don't add an entry if it's identical
-      // to the most recent one.
+      // Coalesce: don't push an entry identical to the current one.
       const last = trimmed[trimmed.length - 1];
       if (last && JSON.stringify(last) === JSON.stringify(value)) return h;
       const stack = [...trimmed, value];
-      // Cap depth so the history doesn't grow unbounded over a long session.
+      // Cap depth so history can't grow unbounded.
       const MAX = 80;
       const overflow = Math.max(0, stack.length - MAX);
       return {
@@ -649,6 +663,23 @@ export function LetterEditor() {
       };
     });
   };
+  // Expose latest pushHistory through a ref so the init-once TransformControls
+  // listener can call the current implementation.
+  useEffect(() => {
+    pushHistoryRef.current = pushHistory;
+  });
+
+  // Seed history when a letter is first loaded so the procedural defaults
+  // are themselves an undoable step. Without this, the first edit would
+  // produce a 1-entry stack and undo would be impossible.
+  useEffect(() => {
+    if (!parts) return;
+    setHistory((h) => {
+      if (h[letter]) return h;
+      return { ...h, [letter]: { stack: [parts], index: 0 } };
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [parts, letter]);
 
   const undo = () => {
     setHistory((h) => {
