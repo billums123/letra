@@ -28,15 +28,16 @@ import { useGameStore } from "../state/store";
 // editable transforms instead of a fixed function.
 
 type Vec3 = { x: number; y: number; z: number };
+type Transform = { pos: Vec3; rot: Vec3 };
 type EditableParts = {
   // Right side only — left is mirrored when `mirror` is true.
-  eye: Vec3;
-  pupil: Vec3; // relative offset from eye
-  shine: Vec3; // relative offset from eye
-  smile: Vec3;
-  cheek: Vec3;
-  arm: Vec3;
-  foot: Vec3;
+  eye: Transform;
+  pupil: Transform; // pos relative to eye
+  shine: Transform; // pos relative to eye
+  smile: Transform;
+  cheek: Transform;
+  arm: Transform;
+  foot: Transform;
   // Sizes (single value)
   eyeRadius: number;
   pupilRadius: number;
@@ -45,6 +46,10 @@ type EditableParts = {
   cheekRadius: number;
   footRadius: number;
 };
+
+const ZERO_ROT: Vec3 = { x: 0, y: 0, z: 0 };
+const ARM_REST_ROT: Vec3 = { x: 0, y: 0, z: 0 }; // pivot has no inherent rotation
+const SMILE_REST_ROT: Vec3 = { x: Math.PI / 2, y: 0, z: 0 };
 
 type PartId = keyof Omit<EditableParts, "eyeRadius" | "pupilRadius" | "shineRadius" | "smileRadius" | "cheekRadius" | "footRadius">;
 const PART_IDS: PartId[] = ["eye", "pupil", "shine", "smile", "cheek", "arm", "foot"];
@@ -79,19 +84,42 @@ function defaultParts(width: number, height: number): EditableParts {
   const armY = Math.min(height * 0.55, height - 0.4);
   const footOffset = Math.max(0.18, Math.min(half * 0.4, 0.32));
   return {
-    eye: { x: eyeOffset, y: eyeY, z: depthFront + eyeRadius * 0.4 },
-    pupil: { x: 0, y: 0, z: eyeRadius * 0.5 },
-    shine: { x: -eyeRadius * 0.25, y: eyeRadius * 0.3, z: eyeRadius * 0.7 },
-    smile: { x: 0, y: smileY, z: depthFront + 0.03 },
-    cheek: { x: cheekOffset, y: smileY + cheekRadius * 0.4, z: depthFront },
-    arm: { x: armX, y: armY, z: 0 },
-    foot: { x: footOffset, y: 0.05, z: 0.2 },
+    eye: { pos: { x: eyeOffset, y: eyeY, z: depthFront + eyeRadius * 0.4 }, rot: { ...ZERO_ROT } },
+    pupil: { pos: { x: 0, y: 0, z: eyeRadius * 0.5 }, rot: { ...ZERO_ROT } },
+    shine: { pos: { x: -eyeRadius * 0.25, y: eyeRadius * 0.3, z: eyeRadius * 0.7 }, rot: { ...ZERO_ROT } },
+    smile: { pos: { x: 0, y: smileY, z: depthFront + 0.03 }, rot: { ...SMILE_REST_ROT } },
+    cheek: { pos: { x: cheekOffset, y: smileY + cheekRadius * 0.4, z: depthFront }, rot: { ...ZERO_ROT } },
+    arm: { pos: { x: armX, y: armY, z: 0 }, rot: { ...ARM_REST_ROT } },
+    foot: { pos: { x: footOffset, y: 0.05, z: 0.2 }, rot: { ...ZERO_ROT } },
     eyeRadius,
     pupilRadius: eyeRadius * 0.55,
     shineRadius: eyeRadius * 0.18,
     smileRadius,
     cheekRadius,
     footRadius: 0.16,
+  };
+}
+
+// Migrate older saved overrides (positions only, no rotation) into the new
+// Transform shape so users don't lose work after the schema change.
+function migrate(p: EditableParts | null): EditableParts | null {
+  if (!p) return p;
+  const fix = (t: unknown, restRot: Vec3 = ZERO_ROT): Transform => {
+    if (t && typeof t === "object" && "pos" in (t as Record<string, unknown>)) return t as Transform;
+    if (t && typeof t === "object" && "x" in (t as Record<string, unknown>)) {
+      return { pos: t as Vec3, rot: { ...restRot } };
+    }
+    return { pos: { x: 0, y: 0, z: 0 }, rot: { ...restRot } };
+  };
+  return {
+    ...p,
+    eye: fix(p.eye as unknown),
+    pupil: fix(p.pupil as unknown),
+    shine: fix(p.shine as unknown),
+    smile: fix(p.smile as unknown, SMILE_REST_ROT),
+    cheek: fix(p.cheek as unknown),
+    arm: fix(p.arm as unknown, ARM_REST_ROT),
+    foot: fix(p.foot as unknown),
   };
 }
 
@@ -117,13 +145,30 @@ function saveOverrides(o: Record<string, EditableParts>) {
 // that rebuilds part meshes whenever parts change. We rebuild the meshes
 // every render rather than tracking individual updates — at this scale
 // (a few dozen meshes) it's plenty fast.
+type BuiltLetter = {
+  // Outer group (positioned/rotated for the celebration jump+spin)
+  root: THREE.Group;
+  // Inner group (carries scale pulse — children are the meshes)
+  inner: THREE.Group;
+  // Selectable handles for the editor's transform gizmo
+  partGroups: Record<string, THREE.Object3D>;
+  // Arm pivots (so the celebration animation can wave them)
+  armPivotR: THREE.Group;
+  armPivotL: THREE.Group | null;
+  baseY: number;
+  size: { width: number; height: number };
+  dispose: () => void;
+};
+
 function buildEditableLetter(
   font: Font,
   letter: string,
   parts: EditableParts,
   mirror: boolean
-): { group: THREE.Group; partGroups: Record<string, THREE.Object3D>; size: { width: number; height: number }; dispose: () => void } {
-  const group = new THREE.Group();
+): BuiltLetter {
+  const root = new THREE.Group();
+  const inner = new THREE.Group();
+  root.add(inner);
   const display = letter;
   const color = colorFor(letter);
   const letterMat = new THREE.MeshStandardMaterial({ color, roughness: 0.55, metalness: 0.05, emissive: color.clone().multiplyScalar(0.08) });
@@ -148,16 +193,20 @@ function buildEditableLetter(
   const letterMesh = new THREE.Mesh(geo, letterMat);
   letterMesh.castShadow = true;
   letterMesh.receiveShadow = true;
-  group.add(letterMesh);
+  inner.add(letterMesh);
 
   const partGroups: Record<string, THREE.Object3D> = {};
 
+  const setRot = (obj: THREE.Object3D, r: Vec3) => obj.rotation.set(r.x, r.y, r.z);
+
   // Eyes (right + mirrored left). Each eye is its own group containing
-  // sclera + pupil + shine so they move together.
+  // sclera + pupil + shine so they move together. Pupil/shine are children
+  // of the eye, so their positions are local to it.
   const makeEye = (mirrorSide: boolean) => {
     const sign = mirrorSide ? -1 : 1;
     const eyeGroup = new THREE.Group();
-    eyeGroup.position.set(sign * parts.eye.x, parts.eye.y, parts.eye.z);
+    eyeGroup.position.set(sign * parts.eye.pos.x, parts.eye.pos.y, parts.eye.pos.z);
+    setRot(eyeGroup, parts.eye.rot);
     const sclera = new THREE.Mesh(
       new THREE.SphereGeometry(parts.eyeRadius, 16, 12),
       new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.35 })
@@ -167,22 +216,24 @@ function buildEditableLetter(
       new THREE.SphereGeometry(parts.pupilRadius, 12, 10),
       new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.5 })
     );
-    pupil.position.set(sign * parts.pupil.x, parts.pupil.y, parts.pupil.z);
+    pupil.position.set(sign * parts.pupil.pos.x, parts.pupil.pos.y, parts.pupil.pos.z);
+    setRot(pupil, parts.pupil.rot);
     eyeGroup.add(pupil);
     const shine = new THREE.Mesh(
       new THREE.SphereGeometry(parts.shineRadius, 8, 6),
       new THREE.MeshBasicMaterial({ color: 0xffffff })
     );
-    shine.position.set(sign * parts.shine.x, parts.shine.y, parts.shine.z);
+    shine.position.set(sign * parts.shine.pos.x, parts.shine.pos.y, parts.shine.pos.z);
+    setRot(shine, parts.shine.rot);
     eyeGroup.add(shine);
     return eyeGroup;
   };
   const eyeR = makeEye(false);
-  group.add(eyeR);
+  inner.add(eyeR);
   partGroups.eye = eyeR;
   if (mirror) {
     const eyeL = makeEye(true);
-    group.add(eyeL);
+    inner.add(eyeL);
   }
 
   // Smile
@@ -190,66 +241,70 @@ function buildEditableLetter(
     new THREE.TorusGeometry(parts.smileRadius, Math.max(0.03, parts.smileRadius * 0.22), 8, 16, Math.PI),
     new THREE.MeshStandardMaterial({ color: 0x6b1d10 })
   );
-  smile.position.set(parts.smile.x, parts.smile.y, parts.smile.z);
-  smile.rotation.x = Math.PI / 2;
-  group.add(smile);
+  smile.position.set(parts.smile.pos.x, parts.smile.pos.y, parts.smile.pos.z);
+  setRot(smile, parts.smile.rot);
+  inner.add(smile);
   partGroups.smile = smile;
 
   // Cheeks
   const cheekMat = new THREE.MeshStandardMaterial({ color: 0xff8aaa, transparent: true, opacity: 0.75 });
   const cheekR = new THREE.Mesh(new THREE.SphereGeometry(parts.cheekRadius, 10, 8), cheekMat);
-  cheekR.position.set(parts.cheek.x, parts.cheek.y, parts.cheek.z);
+  cheekR.position.set(parts.cheek.pos.x, parts.cheek.pos.y, parts.cheek.pos.z);
+  setRot(cheekR, parts.cheek.rot);
   cheekR.scale.set(1, 0.7, 0.4);
-  group.add(cheekR);
+  inner.add(cheekR);
   partGroups.cheek = cheekR;
   if (mirror) {
     const cheekL = cheekR.clone();
     cheekL.position.x *= -1;
-    group.add(cheekL);
+    inner.add(cheekL);
   }
 
   // Arms
   const limbMat = new THREE.MeshStandardMaterial({ color, roughness: 0.5 });
   const armGeo = new THREE.CapsuleGeometry(0.1, 0.45, 4, 8);
   const armPivotR = new THREE.Group();
-  armPivotR.position.set(parts.arm.x, parts.arm.y, parts.arm.z);
+  armPivotR.position.set(parts.arm.pos.x, parts.arm.pos.y, parts.arm.pos.z);
+  setRot(armPivotR, parts.arm.rot);
   const armR = new THREE.Mesh(armGeo, limbMat);
   armR.position.set(0.25, -0.05, 0);
   armR.rotation.z = Math.PI / 4;
   armPivotR.add(armR);
-  group.add(armPivotR);
+  inner.add(armPivotR);
   partGroups.arm = armPivotR;
+  let armPivotL: THREE.Group | null = null;
   if (mirror) {
-    const armPivotL = new THREE.Group();
-    armPivotL.position.set(-parts.arm.x, parts.arm.y, parts.arm.z);
+    armPivotL = new THREE.Group();
+    armPivotL.position.set(-parts.arm.pos.x, parts.arm.pos.y, parts.arm.pos.z);
+    setRot(armPivotL, parts.arm.rot);
     const armL = new THREE.Mesh(armGeo, limbMat);
     armL.position.set(-0.25, -0.05, 0);
     armL.rotation.z = -Math.PI / 4;
     armPivotL.add(armL);
-    group.add(armPivotL);
+    inner.add(armPivotL);
   }
 
   // Feet
   const footMat = new THREE.MeshStandardMaterial({ color: 0x3a2a14, roughness: 0.7 });
   const footR = new THREE.Mesh(new THREE.SphereGeometry(parts.footRadius, 10, 8), footMat);
-  footR.position.set(parts.foot.x, parts.foot.y, parts.foot.z);
+  footR.position.set(parts.foot.pos.x, parts.foot.pos.y, parts.foot.pos.z);
+  setRot(footR, parts.foot.rot);
   footR.scale.set(1, 0.6, 1.2);
-  group.add(footR);
+  inner.add(footR);
   partGroups.foot = footR;
   if (mirror) {
     const footL = footR.clone();
     footL.position.x *= -1;
-    group.add(footL);
+    inner.add(footL);
   }
 
   // pupil and shine are surfaced as the eye group's children — selecting them
-  // means selecting their child within the eye. We expose them by walking
-  // children: eye[0]=sclera, eye[1]=pupil, eye[2]=shine.
+  // means selecting their child within the eye.
   partGroups.pupil = (partGroups.eye.children[1] ?? partGroups.eye) as THREE.Object3D;
   partGroups.shine = (partGroups.eye.children[2] ?? partGroups.eye) as THREE.Object3D;
 
   const dispose = () => {
-    group.traverse((obj) => {
+    root.traverse((obj) => {
       const m = obj as THREE.Mesh;
       if (m.geometry) m.geometry.dispose();
       const mat = m.material;
@@ -258,8 +313,19 @@ function buildEditableLetter(
     });
   };
 
-  return { group, partGroups, size: { width: size.x, height: size.y }, dispose };
+  return {
+    root,
+    inner,
+    partGroups,
+    armPivotR,
+    armPivotL,
+    baseY: 0,
+    size: { width: size.x, height: size.y },
+    dispose,
+  };
 }
+
+type GizmoMode = "translate" | "rotate";
 
 export function LetterEditor() {
   const goToMenu = useGameStore((s) => s.goToMenu);
@@ -267,8 +333,25 @@ export function LetterEditor() {
   const [letter, setLetter] = useState<string>("A");
   const [mirror, setMirror] = useState(true);
   const [selectedPart, setSelectedPart] = useState<PartId>("eye");
-  const [overrides, setOverrides] = useState<Record<string, EditableParts>>(() => loadOverrides());
+  const [gizmoMode, setGizmoMode] = useState<GizmoMode>("translate");
+  const [overrides, setOverrides] = useState<Record<string, EditableParts>>(() => {
+    const raw = loadOverrides();
+    // Migrate old position-only entries to the new {pos, rot} shape.
+    const migrated: Record<string, EditableParts> = {};
+    for (const [k, v] of Object.entries(raw)) {
+      const m = migrate(v as EditableParts);
+      if (m) migrated[k] = m;
+    }
+    return migrated;
+  });
   const [parts, setParts] = useState<EditableParts | null>(null);
+  // Celebration animation. When > 0, the render loop applies the celebrate
+  // transform on top of the editable letter.
+  const celebrationTRef = useRef<number>(-1);
+
+  // Per-letter undo/redo history. Only the current letter has history at a
+  // time — switching letters keeps each letter's history separate.
+  const [history, setHistory] = useState<Record<string, { stack: EditableParts[]; index: number }>>({});
 
   const containerRef = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<{
@@ -279,13 +362,13 @@ export function LetterEditor() {
     transform: TransformControls;
     raycaster: THREE.Raycaster;
     pointer: THREE.Vector2;
-    letterGroup: THREE.Group | null;
-    partGroups: Record<string, THREE.Object3D>;
+    built: BuiltLetter | null;
     dispose: () => void;
   } | null>(null);
   const partsRef = useRef<EditableParts | null>(null);
   const mirrorRef = useRef(mirror);
   const selectedPartRef = useRef<PartId>(selectedPart);
+  const gizmoModeRef = useRef<GizmoMode>(gizmoMode);
   const onPartChangeRef = useRef<((p: EditableParts) => void) | null>(null);
 
   useEffect(() => {
@@ -311,6 +394,13 @@ export function LetterEditor() {
       probe.dispose();
       setParts(def);
     }
+    // Seed the per-letter undo stack with the current state.
+    setHistory((h) => {
+      if (h[letter]) return h;
+      const seed = overrides[letter] ?? null;
+      if (!seed) return h;
+      return { ...h, [letter]: { stack: [seed], index: 0 } };
+    });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [letter, font]);
 
@@ -358,25 +448,23 @@ export function LetterEditor() {
     transform.addEventListener("dragging-changed", (e) => {
       orbit.enabled = !(e as unknown as { value: boolean }).value;
     });
-    // When the gizmo moves the part, push values back into the React state.
+    // When the gizmo moves or rotates the part, push values back into state.
     transform.addEventListener("objectChange", () => {
       const obj = transform.object;
       if (!obj || !partsRef.current || !onPartChangeRef.current) return;
       const id = selectedPartRef.current;
       const next = { ...partsRef.current };
-      // x is mirrored when mirror is on — for symmetric parts on the right
-      // side, we keep the absolute x positive in state.
-      const sign = SYMMETRIC[id] ? 1 : 1;
-      if (id === "pupil" || id === "shine") {
-        // Pupil & shine are local to the eye — read object.position which is
-        // already in eye-local space.
-        next[id] = { x: obj.position.x * sign, y: obj.position.y, z: obj.position.z };
-      } else if (id === "eye") {
-        // Eye position is the parent group's position.
-        next.eye = { x: Math.abs(obj.position.x), y: obj.position.y, z: obj.position.z };
-      } else {
-        next[id] = { x: Math.abs(obj.position.x), y: obj.position.y, z: obj.position.z };
-      }
+      const cur = next[id];
+      // For symmetric parts the right side stores positive X so mirrors
+      // mirror correctly; pupil/shine are local to the eye so their X can
+      // be negative or positive.
+      const isLocal = id === "pupil" || id === "shine";
+      const newPos: Vec3 = isLocal
+        ? { x: obj.position.x, y: obj.position.y, z: obj.position.z }
+        : { x: Math.abs(obj.position.x), y: obj.position.y, z: obj.position.z };
+      const newRot: Vec3 = { x: obj.rotation.x, y: obj.rotation.y, z: obj.rotation.z };
+      next[id] = { pos: newPos, rot: newRot };
+      void cur;
       onPartChangeRef.current(next);
     });
 
@@ -391,7 +479,8 @@ export function LetterEditor() {
       pointer.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
       raycaster.setFromCamera(pointer, camera);
       if (!sceneRef.current) return;
-      const candidates = Object.entries(sceneRef.current.partGroups).flatMap(([id, obj]) => {
+      const partGroups = sceneRef.current.built?.partGroups ?? {};
+      const candidates = Object.entries(partGroups).flatMap(([id, obj]) => {
         // Walk descendants and tag each with its part id for hit testing.
         const items: { id: PartId; obj: THREE.Object3D }[] = [];
         obj.traverse((o) => items.push({ id: id as PartId, obj: o }));
@@ -410,7 +499,45 @@ export function LetterEditor() {
     renderer.domElement.addEventListener("pointerdown", onPointerDown);
 
     let raf = 0;
+    let lastT = performance.now();
     const tick = () => {
+      const nowT = performance.now();
+      const dt = Math.min((nowT - lastT) / 1000, 0.05);
+      lastT = nowT;
+
+      // Drive the optional "found" celebration animation. Mirrors the same
+      // motion the LetterCharacter uses in-game so what you see here is
+      // what the kid sees on pickup.
+      const built = sceneRef.current?.built;
+      if (built) {
+        if (celebrationTRef.current >= 0) {
+          celebrationTRef.current += dt;
+          const c = celebrationTRef.current;
+          const k = Math.min(c / 1.6, 1);
+          const jump = Math.sin(k * Math.PI) * 1.4;
+          built.root.position.y = built.baseY + jump;
+          built.inner.rotation.y = k * Math.PI * 2;
+          built.armPivotR.rotation.z = Math.sin(c * 18) * 1.0 - 0.6;
+          if (built.armPivotL) built.armPivotL.rotation.z = -Math.sin(c * 18) * 1.0 + 0.6;
+          const s = 1 + 0.15 * Math.sin(k * Math.PI * 2);
+          built.inner.scale.setScalar(s);
+          if (k >= 1) {
+            // End of celebration — restore.
+            celebrationTRef.current = -1;
+            built.root.position.y = built.baseY;
+            built.inner.rotation.y = 0;
+            built.inner.scale.setScalar(1);
+            built.armPivotR.rotation.set(0, 0, 0);
+            if (built.armPivotL) built.armPivotL.rotation.set(0, 0, 0);
+          }
+        } else {
+          // Hold rest pose so the part the user is editing stays put.
+          built.root.position.y = built.baseY;
+          built.inner.rotation.y = 0;
+          built.inner.scale.setScalar(1);
+        }
+      }
+
       orbit.update();
       renderer.render(scene, camera);
       raf = requestAnimationFrame(tick);
@@ -435,8 +562,7 @@ export function LetterEditor() {
       transform,
       raycaster,
       pointer,
-      letterGroup: null,
-      partGroups: {},
+      built: null,
       dispose: () => {
         cancelAnimationFrame(raf);
         renderer.domElement.removeEventListener("pointerdown", onPointerDown);
@@ -460,63 +586,154 @@ export function LetterEditor() {
   useEffect(() => {
     if (!font || !parts || !sceneRef.current) return;
     const sr = sceneRef.current;
-    if (sr.letterGroup) {
-      sr.scene.remove(sr.letterGroup);
-      sr.letterGroup.traverse((o) => {
-        const m = o as THREE.Mesh;
-        if (m.geometry) m.geometry.dispose();
-        const mat = m.material;
-        if (Array.isArray(mat)) mat.forEach((x) => x.dispose());
-        else if (mat) (mat as THREE.Material).dispose();
-      });
+    if (sr.built) {
+      sr.scene.remove(sr.built.root);
+      sr.built.dispose();
     }
     const built = buildEditableLetter(font, letter, parts, mirror);
-    sr.scene.add(built.group);
-    sr.letterGroup = built.group;
-    sr.partGroups = built.partGroups;
+    sr.scene.add(built.root);
+    sr.built = built;
+    // Cancel any in-flight celebration when geometry rebuilds.
+    celebrationTRef.current = -1;
     // Update the transform target if the selected part exists.
     const target = built.partGroups[selectedPartRef.current];
     if (target) sr.transform.attach(target);
     else sr.transform.detach();
   }, [font, parts, letter, mirror]);
 
-  // Re-attach transform when the user switches selected part.
+  // Re-attach transform when the user switches selected part or mode.
   useEffect(() => {
     selectedPartRef.current = selectedPart;
     const sr = sceneRef.current;
     if (!sr) return;
-    const target = sr.partGroups[selectedPart];
+    const target = sr.built?.partGroups[selectedPart];
     if (target) sr.transform.attach(target);
   }, [selectedPart]);
 
+  useEffect(() => {
+    gizmoModeRef.current = gizmoMode;
+    sceneRef.current?.transform.setMode(gizmoMode);
+  }, [gizmoMode]);
+
   // Push parts into refs so the transform handler always sees the latest.
+  // Also push every committed change into the per-letter undo history.
   useEffect(() => {
     partsRef.current = parts;
     onPartChangeRef.current = (next) => {
       setParts(next);
-      // Persist override
       setOverrides((prev) => {
         const merged = { ...prev, [letter]: next };
         saveOverrides(merged);
         return merged;
       });
+      pushHistory(letter, next);
     };
   }, [parts, letter]);
+
+  const pushHistory = (L: string, value: EditableParts) => {
+    setHistory((h) => {
+      const cur = h[L] ?? { stack: [], index: -1 };
+      // Drop any redo entries — a new edit forks the timeline.
+      const trimmed = cur.stack.slice(0, cur.index + 1);
+      // Coalesce rapid drag updates: don't add an entry if it's identical
+      // to the most recent one.
+      const last = trimmed[trimmed.length - 1];
+      if (last && JSON.stringify(last) === JSON.stringify(value)) return h;
+      const stack = [...trimmed, value];
+      // Cap depth so the history doesn't grow unbounded over a long session.
+      const MAX = 80;
+      const overflow = Math.max(0, stack.length - MAX);
+      return {
+        ...h,
+        [L]: { stack: stack.slice(overflow), index: stack.length - 1 - overflow },
+      };
+    });
+  };
+
+  const undo = () => {
+    setHistory((h) => {
+      const cur = h[letter];
+      if (!cur || cur.index <= 0) return h;
+      const next = { stack: cur.stack, index: cur.index - 1 };
+      const value = cur.stack[next.index];
+      setParts(value);
+      setOverrides((prev) => {
+        const merged = { ...prev, [letter]: value };
+        saveOverrides(merged);
+        return merged;
+      });
+      return { ...h, [letter]: next };
+    });
+  };
+
+  const redo = () => {
+    setHistory((h) => {
+      const cur = h[letter];
+      if (!cur || cur.index >= cur.stack.length - 1) return h;
+      const next = { stack: cur.stack, index: cur.index + 1 };
+      const value = cur.stack[next.index];
+      setParts(value);
+      setOverrides((prev) => {
+        const merged = { ...prev, [letter]: value };
+        saveOverrides(merged);
+        return merged;
+      });
+      return { ...h, [letter]: next };
+    });
+  };
+
+  const canUndo = (history[letter]?.index ?? 0) > 0;
+  const canRedo = (history[letter]?.index ?? 0) < ((history[letter]?.stack.length ?? 0) - 1);
+
+  // Keyboard shortcuts: Cmd/Ctrl+Z = undo, Shift+Cmd/Ctrl+Z (or Cmd/Ctrl+Y) = redo.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const cmd = e.metaKey || e.ctrlKey;
+      if (!cmd) return;
+      if (e.key === "z" || e.key === "Z") {
+        e.preventDefault();
+        if (e.shiftKey) redo();
+        else undo();
+      } else if (e.key === "y" || e.key === "Y") {
+        e.preventDefault();
+        redo();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [letter]);
 
   useEffect(() => {
     mirrorRef.current = mirror;
   }, [mirror]);
 
-  const onAxisInput = (axis: "x" | "y" | "z", value: number) => {
+  const onPosInput = (axis: "x" | "y" | "z", value: number) => {
     if (!parts) return;
     const id = selectedPart;
-    const next: EditableParts = { ...parts, [id]: { ...parts[id], [axis]: value } };
+    const cur = parts[id];
+    const next: EditableParts = { ...parts, [id]: { ...cur, pos: { ...cur.pos, [axis]: value } } };
     setParts(next);
     setOverrides((prev) => {
       const merged = { ...prev, [letter]: next };
       saveOverrides(merged);
       return merged;
     });
+    pushHistory(letter, next);
+  };
+
+  const onRotInput = (axis: "x" | "y" | "z", value: number) => {
+    if (!parts) return;
+    const id = selectedPart;
+    const cur = parts[id];
+    const next: EditableParts = { ...parts, [id]: { ...cur, rot: { ...cur.rot, [axis]: value } } };
+    setParts(next);
+    setOverrides((prev) => {
+      const merged = { ...prev, [letter]: next };
+      saveOverrides(merged);
+      return merged;
+    });
+    pushHistory(letter, next);
   };
 
   const onResetLetter = () => {
@@ -531,6 +748,33 @@ export function LetterEditor() {
       saveOverrides(merged);
       return merged;
     });
+    pushHistory(letter, def);
+  };
+
+  // Camera snap presets — orthogonal-style framings centred on the letter.
+  const snapCamera = (preset: "front" | "back" | "left" | "right" | "top" | "perspective") => {
+    const sr = sceneRef.current;
+    if (!sr) return;
+    const dist = 5;
+    const center = new THREE.Vector3(0, 0.9, 0);
+    let pos: THREE.Vector3;
+    switch (preset) {
+      case "front":       pos = new THREE.Vector3(0, 0.9, dist); break;
+      case "back":        pos = new THREE.Vector3(0, 0.9, -dist); break;
+      case "left":        pos = new THREE.Vector3(-dist, 0.9, 0); break;
+      case "right":       pos = new THREE.Vector3(dist, 0.9, 0); break;
+      case "top":         pos = new THREE.Vector3(0, dist, 0.001); break;
+      case "perspective": pos = new THREE.Vector3(2.5, 1.8, 5); break;
+    }
+    sr.camera.position.copy(pos);
+    sr.orbit.target.copy(center);
+    sr.camera.lookAt(center);
+    sr.orbit.update();
+  };
+
+  const triggerFound = () => {
+    celebrationTRef.current = 0;
+    void import("../audio/sfx").then(({ playChime }) => playChime());
   };
 
   const onExport = async () => {
@@ -586,21 +830,31 @@ export function LetterEditor() {
             <option key={L} value={L}>{L}{overrides[L] ? " *" : ""}</option>
           ))}
         </select>
+        <div style={{ display: "flex", borderRadius: 10, overflow: "hidden", border: "2px solid #d8e6f0" }}>
+          <button onClick={() => setGizmoMode("translate")} style={tab(gizmoMode === "translate")} title="Move (W)">↔ Move</button>
+          <button onClick={() => setGizmoMode("rotate")} style={tab(gizmoMode === "rotate")} title="Rotate (E)">⟳ Rotate</button>
+        </div>
+        <div style={{ display: "flex", borderRadius: 10, overflow: "hidden", border: "2px solid #d8e6f0" }}>
+          <button onClick={() => snapCamera("front")} style={tab(false)} title="Front view">Front</button>
+          <button onClick={() => snapCamera("back")} style={tab(false)} title="Back view">Back</button>
+          <button onClick={() => snapCamera("left")} style={tab(false)} title="Left view">Left</button>
+          <button onClick={() => snapCamera("right")} style={tab(false)} title="Right view">Right</button>
+          <button onClick={() => snapCamera("top")} style={tab(false)} title="Top view">Top</button>
+          <button onClick={() => snapCamera("perspective")} style={tab(false)} title="Perspective view">3/4</button>
+        </div>
         <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 14, fontWeight: 700, color: "#3a2a14" }}>
           <input type="checkbox" checked={mirror} onChange={(e) => setMirror(e.target.checked)} />
-          Mirror left/right
+          Mirror
         </label>
         <span style={{ flex: 1 }} />
+        <div style={{ display: "flex", gap: 4 }}>
+          <button onClick={undo} disabled={!canUndo} style={btn(canUndo ? "#a8e2ff" : "#e0e0e0", "#3a2a14")} title="Undo (⌘Z)">↶ Undo</button>
+          <button onClick={redo} disabled={!canRedo} style={btn(canRedo ? "#a8e2ff" : "#e0e0e0", "#3a2a14")} title="Redo (⌘⇧Z)">↷ Redo</button>
+        </div>
+        <button onClick={triggerFound} style={btn("#9bdc4a", "white")}>🎉 Found!</button>
         <button onClick={onResetLetter} style={btn("#ffd56b", "#3a2a14")}>Reset {letter}</button>
         <button onClick={onExport} style={btn("#46c2cb", "white")}>📋 Export</button>
-        <button
-          onClick={() => {
-            goToMenu();
-          }}
-          style={btn("#ff8c4a", "white")}
-        >
-          ◀ Home
-        </button>
+        <button onClick={() => goToMenu()} style={btn("#ff8c4a", "white")}>◀ Home</button>
       </header>
 
       <div
@@ -669,9 +923,14 @@ export function LetterEditor() {
                 : "Single instance."}
               {(selectedPart === "pupil" || selectedPart === "shine") && " Coordinates are relative to the eye."}
             </p>
-            <NumberRow label="X" value={parts[selectedPart].x} onChange={(v) => onAxisInput("x", v)} />
-            <NumberRow label="Y" value={parts[selectedPart].y} onChange={(v) => onAxisInput("y", v)} />
-            <NumberRow label="Z" value={parts[selectedPart].z} onChange={(v) => onAxisInput("z", v)} />
+            <NumberRow label="X" value={parts[selectedPart].pos.x} onChange={(v) => onPosInput("x", v)} />
+            <NumberRow label="Y" value={parts[selectedPart].pos.y} onChange={(v) => onPosInput("y", v)} />
+            <NumberRow label="Z" value={parts[selectedPart].pos.z} onChange={(v) => onPosInput("z", v)} />
+
+            <h3 style={{ margin: "16px 0 6px 0" }}>{PART_LABELS[selectedPart]} rotation (rad)</h3>
+            <NumberRow label="X" value={parts[selectedPart].rot.x} onChange={(v) => onRotInput("x", v)} step={Math.PI / 36} min={-Math.PI * 2} max={Math.PI * 2} />
+            <NumberRow label="Y" value={parts[selectedPart].rot.y} onChange={(v) => onRotInput("y", v)} step={Math.PI / 36} min={-Math.PI * 2} max={Math.PI * 2} />
+            <NumberRow label="Z" value={parts[selectedPart].rot.z} onChange={(v) => onRotInput("z", v)} step={Math.PI / 36} min={-Math.PI * 2} max={Math.PI * 2} />
 
             <h3 style={{ margin: "16px 0 6px 0" }}>Sizes</h3>
             <NumberRow label="Eye r" value={parts.eyeRadius} onChange={(v) => setParts((p) => p && persistAndReturn({ ...p, eyeRadius: v }, letter, setOverrides))} step={0.005} />
@@ -702,14 +961,28 @@ function persistAndReturn(p: EditableParts, letter: string, setOverrides: (fn: (
   return p;
 }
 
-function NumberRow({ label, value, onChange, step = 0.01 }: { label: string; value: number; onChange: (v: number) => void; step?: number }) {
+function NumberRow({
+  label,
+  value,
+  onChange,
+  step = 0.01,
+  min = -3,
+  max = 3,
+}: {
+  label: string;
+  value: number;
+  onChange: (v: number) => void;
+  step?: number;
+  min?: number;
+  max?: number;
+}) {
   return (
-    <div style={{ display: "grid", gridTemplateColumns: "60px 1fr 64px", gap: 6, alignItems: "center", marginBottom: 6 }}>
+    <div style={{ display: "grid", gridTemplateColumns: "44px 1fr 64px", gap: 6, alignItems: "center", marginBottom: 6 }}>
       <label style={{ fontWeight: 700, fontSize: 13 }}>{label}</label>
       <input
         type="range"
-        min={-3}
-        max={3}
+        min={min}
+        max={max}
         step={step}
         value={value}
         onChange={(e) => onChange(Number(e.target.value))}
@@ -726,6 +999,19 @@ function NumberRow({ label, value, onChange, step = 0.01 }: { label: string; val
       />
     </div>
   );
+}
+
+function tab(active: boolean): React.CSSProperties {
+  return {
+    appearance: "none",
+    border: "none",
+    background: active ? "#3a2a14" : "white",
+    color: active ? "white" : "#3a2a14",
+    padding: "8px 12px",
+    fontSize: 13,
+    fontWeight: 800,
+    cursor: "pointer",
+  };
 }
 
 function btn(bg: string, fg: string): React.CSSProperties {
