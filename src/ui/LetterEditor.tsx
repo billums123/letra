@@ -51,6 +51,10 @@ type EditableParts = {
   smileRadius: number;
   cheekRadius: number;
   footRadius: number;
+  // Wave animation tuning is *per-letter* — different letters can have
+  // different arm-swing personalities (B might do a big slow wave, I a
+  // tight quick one).
+  wave: WaveConfig;
 };
 
 const ZERO_ROT: Vec3 = { x: 0, y: 0, z: 0 };
@@ -254,6 +258,7 @@ function defaultParts(width: number, height: number): EditableParts {
     smileRadius,
     cheekRadius,
     footRadius: 0.16,
+    wave: { ...DEFAULT_WAVE },
   };
 }
 
@@ -297,7 +302,22 @@ function migrate(p: unknown): EditableParts | null {
     smileRadius: typeof o.smileRadius === "number" ? o.smileRadius : 0.16,
     cheekRadius: typeof o.cheekRadius === "number" ? o.cheekRadius : 0.1,
     footRadius: typeof o.footRadius === "number" ? o.footRadius : 0.16,
+    wave: migrateWave(o.wave),
   };
+}
+
+function migrateWave(raw: unknown): WaveConfig {
+  if (raw && typeof raw === "object") {
+    const w = raw as Record<string, unknown>;
+    const pattern = (typeof w.pattern === "string" ? w.pattern : DEFAULT_WAVE.pattern) as WavePattern;
+    return {
+      pattern,
+      amplitude: typeof w.amplitude === "number" ? w.amplitude : DEFAULT_WAVE.amplitude,
+      frequency: typeof w.frequency === "number" ? w.frequency : DEFAULT_WAVE.frequency,
+      offset: typeof w.offset === "number" ? w.offset : DEFAULT_WAVE.offset,
+    };
+  }
+  return { ...DEFAULT_WAVE };
 }
 
 function loadOverrides(): Record<string, EditableParts> {
@@ -619,13 +639,9 @@ export function LetterEditor() {
   const [isWaving, setIsWaving] = useState(false);
   const isWavingRef = useRef(false);
   const wavePhaseRef = useRef(0);
-  // Wave shape parameters — fully editable so the author can dial in the
-  // exact arm motion they want before locking it into the engine. All
-  // angles are stored in radians (the gizmo / Three.js use radians); the
-  // UI converts to degrees at the boundary.
-  const [waveConfig, setWaveConfig] = useState<WaveConfig>(DEFAULT_WAVE);
-  const waveConfigRef = useRef<WaveConfig>(DEFAULT_WAVE);
-  useEffect(() => { waveConfigRef.current = waveConfig; }, [waveConfig]);
+  // Wave shape parameters live on `parts.wave` — see EditableParts.wave —
+  // because each letter has its own wave personality. The tick loop reads
+  // partsRef.current?.wave directly, so no separate ref is needed.
 
   // Per-letter undo/redo history. Only the current letter has history at a
   // time — switching letters keeps each letter's history separate.
@@ -824,9 +840,9 @@ export function LetterEditor() {
             if (built.armPivotL) built.armPivotL.rotation.set(0, 0, 0);
           }
         } else if (isWavingRef.current) {
-          // Continuous wave with editable shape parameters. Lets the author
-          // dial in the exact wave style without rebuilding the engine.
-          const cfg = waveConfigRef.current;
+          // Continuous wave with the *current letter's* shape parameters.
+          // partsRef is updated whenever the letter or its parts change.
+          const cfg = partsRef.current?.wave ?? DEFAULT_WAVE;
           wavePhaseRef.current += dt;
           // Phase units: radians. frequency Hz × 2π × dt would be the
           // delta, but we accumulate in seconds and multiply on read so
@@ -1061,6 +1077,50 @@ export function LetterEditor() {
   };
   const onRotInput = (axis: "x" | "y" | "z", value: number) => {
     writeTransform((t) => ({ ...t, rot: { ...t.rot, [axis]: value } }));
+  };
+
+  const updateWave = (patch: Partial<WaveConfig>) => {
+    if (!parts) return;
+    const next = { ...parts, wave: { ...parts.wave, ...patch } };
+    setParts(next);
+    setOverrides((prev) => {
+      const merged = { ...prev, [letter]: next };
+      saveOverrides(merged);
+      return merged;
+    });
+    pushHistory(letter, next);
+  };
+
+  // Bulk helper: apply the current letter's wave config to every other
+  // letter that has an override (and creates overrides for the others
+  // by inheriting their procedural defaults). Saves a lot of clicking
+  // when the user has dialled in a wave they like.
+  const copyWaveToAllLetters = (wave: WaveConfig) => {
+    if (!font) return;
+    setOverrides((prev) => {
+      const merged: Record<string, EditableParts> = { ...prev };
+      for (const L of ALPHABET) {
+        const existing = merged[L];
+        if (existing) {
+          merged[L] = { ...existing, wave: { ...wave } };
+        } else {
+          // Build defaults for letters that don't yet have an override.
+          const probe = buildEditableLetter(font, L, defaultParts(1.4, 1.6));
+          const def = defaultParts(probe.size.width, probe.size.height);
+          probe.dispose();
+          merged[L] = { ...def, wave: { ...wave } };
+        }
+      }
+      saveOverrides(merged);
+      // Also push the current letter's resulting state into history so the
+      // user can undo a runaway "apply to all" if they didn't mean it.
+      const currentNext = merged[letter];
+      if (currentNext) {
+        setParts(currentNext);
+        pushHistory(letter, currentNext);
+      }
+      return merged;
+    });
   };
 
   const onMouthShapeChange = (shape: MouthShape) => {
@@ -1362,71 +1422,81 @@ export function LetterEditor() {
           </>
         )}
 
-        <h3 style={{ margin: "20px 0 6px 0", display: "flex", alignItems: "center", gap: 8 }}>
-          Wave animation
-          <span style={{ fontSize: 11, opacity: 0.6, fontWeight: 500 }}>
-            {isWaving ? "playing" : "paused"}
-          </span>
-        </h3>
-        <p style={{ marginTop: 0, fontSize: 11, opacity: 0.7 }}>
-          Tunes the standalone 👋 Wave loop. Pattern, amplitude, frequency,
-          and resting offset all preview live.
-        </p>
-        <div style={{ marginBottom: 8 }}>
-          <label style={{ fontSize: 12, fontWeight: 700, display: "block", marginBottom: 4 }}>Pattern</label>
-          <select
-            value={waveConfig.pattern}
-            onChange={(e) => setWaveConfig({ ...waveConfig, pattern: e.target.value as WavePattern })}
-            style={{
-              width: "100%",
-              padding: 6,
-              fontSize: 13,
-              fontWeight: 700,
-              border: "1px solid #d8e6f0",
-              borderRadius: 6,
-            }}
-          >
-            {(Object.keys(WAVE_PATTERN_LABEL) as WavePattern[]).map((p) => (
-              <option key={p} value={p}>{WAVE_PATTERN_LABEL[p]}</option>
-            ))}
-          </select>
-        </div>
-        <NumberRow
-          label="Amp °"
-          value={radToDeg(waveConfig.amplitude)}
-          onChange={(v) => setWaveConfig({ ...waveConfig, amplitude: degToRad(v) })}
-          step={1}
-          min={0}
-          max={180}
-        />
-        <NumberRow
-          label="Freq Hz"
-          value={waveConfig.frequency}
-          onChange={(v) => setWaveConfig({ ...waveConfig, frequency: v })}
-          step={0.1}
-          min={0.1}
-          max={10}
-        />
-        <NumberRow
-          label="Rest °"
-          value={radToDeg(waveConfig.offset)}
-          onChange={(v) => setWaveConfig({ ...waveConfig, offset: degToRad(v) })}
-          step={1}
-          min={-90}
-          max={90}
-        />
-        <button
-          type="button"
-          onClick={() => setWaveConfig(DEFAULT_WAVE)}
-          style={{
-            ...btn("#ffd56b", "#3a2a14"),
-            width: "100%",
-            marginTop: 6,
-            boxShadow: "0 3px 0 rgba(0,0,0,0.12)",
-          }}
-        >
-          Reset wave
-        </button>
+        {parts && (
+          <>
+            <h3 style={{ margin: "20px 0 6px 0", display: "flex", alignItems: "center", gap: 8 }}>
+              Wave animation
+              <span style={{ fontSize: 11, opacity: 0.6, fontWeight: 500 }}>
+                for {letter} · {isWaving ? "playing" : "paused"}
+              </span>
+            </h3>
+            <p style={{ marginTop: 0, fontSize: 11, opacity: 0.7 }}>
+              Each letter has its own wave personality. Pattern, amplitude,
+              frequency, and resting offset preview live and persist with this
+              letter's overrides.
+            </p>
+            <div style={{ marginBottom: 8 }}>
+              <label style={{ fontSize: 12, fontWeight: 700, display: "block", marginBottom: 4 }}>Pattern</label>
+              <select
+                value={parts.wave.pattern}
+                onChange={(e) => updateWave({ pattern: e.target.value as WavePattern })}
+                style={{
+                  width: "100%",
+                  padding: 6,
+                  fontSize: 13,
+                  fontWeight: 700,
+                  border: "1px solid #d8e6f0",
+                  borderRadius: 6,
+                }}
+              >
+                {(Object.keys(WAVE_PATTERN_LABEL) as WavePattern[]).map((p) => (
+                  <option key={p} value={p}>{WAVE_PATTERN_LABEL[p]}</option>
+                ))}
+              </select>
+            </div>
+            <NumberRow
+              label="Amp °"
+              value={radToDeg(parts.wave.amplitude)}
+              onChange={(v) => updateWave({ amplitude: degToRad(v) })}
+              step={1}
+              min={0}
+              max={180}
+            />
+            <NumberRow
+              label="Freq Hz"
+              value={parts.wave.frequency}
+              onChange={(v) => updateWave({ frequency: v })}
+              step={0.1}
+              min={0.1}
+              max={10}
+            />
+            <NumberRow
+              label="Rest °"
+              value={radToDeg(parts.wave.offset)}
+              onChange={(v) => updateWave({ offset: degToRad(v) })}
+              step={1}
+              min={-90}
+              max={90}
+            />
+            <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+              <button
+                type="button"
+                onClick={() => updateWave(DEFAULT_WAVE)}
+                style={{ ...btn("#ffd56b", "#3a2a14"), flex: 1, boxShadow: "0 3px 0 rgba(0,0,0,0.12)" }}
+              >
+                Reset wave
+              </button>
+              <button
+                type="button"
+                onClick={() => copyWaveToAllLetters(parts.wave)}
+                style={{ ...btn("#a8e2ff", "#3a2a14"), flex: 1, boxShadow: "0 3px 0 rgba(0,0,0,0.12)" }}
+                title="Apply this letter's wave to every other letter"
+              >
+                Apply to all
+              </button>
+            </div>
+          </>
+        )}
 
         <p style={{ marginTop: 24, fontSize: 11, opacity: 0.6 }}>
           Edits save automatically per-letter to localStorage. "Export" copies the
