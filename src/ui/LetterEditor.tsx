@@ -29,16 +29,22 @@ import { useGameStore } from "../state/store";
 
 type Vec3 = { x: number; y: number; z: number };
 type Transform = { pos: Vec3; rot: Vec3 };
+// Symmetric parts hold both sides explicitly so the user can break the
+// mirror on any individual feature (e.g. wonky-eye letters). The build
+// logic reads each side directly — no global mirror flag any more.
+type Pair = { R: Transform; L: Transform };
+type Side = "R" | "L" | "both";
+type MouthShape = "smile" | "big-smile" | "open-smile" | "frown" | "smirk-left" | "smirk-right" | "open-o" | "flat";
 type EditableParts = {
-  // Right side only — left is mirrored when `mirror` is true.
-  eye: Transform;
-  pupil: Transform; // pos relative to eye
-  shine: Transform; // pos relative to eye
-  smile: Transform;
-  cheek: Transform;
-  arm: Transform;
-  foot: Transform;
-  // Sizes (single value)
+  eye: Pair;
+  pupil: Pair; // pos relative to its eye
+  shine: Pair; // pos relative to its eye
+  smile: Transform; // single (centred mouth)
+  mouthShape: MouthShape;
+  cheek: Pair;
+  arm: Pair;
+  foot: Pair;
+  // Sizes (single value, applies to whichever side is rendered)
   eyeRadius: number;
   pupilRadius: number;
   shineRadius: number;
@@ -50,6 +56,71 @@ type EditableParts = {
 const ZERO_ROT: Vec3 = { x: 0, y: 0, z: 0 };
 const ARM_REST_ROT: Vec3 = { x: 0, y: 0, z: 0 }; // pivot has no inherent rotation
 const SMILE_REST_ROT: Vec3 = { x: Math.PI / 2, y: 0, z: 0 };
+
+// Mirror a Transform across the X axis. Position negates X; rotations
+// around Y and Z negate (rotation about X stays the same — that's still
+// the same axis after a left/right flip).
+function mirrorT(t: Transform): Transform {
+  return {
+    pos: { x: -t.pos.x, y: t.pos.y, z: t.pos.z },
+    rot: { x: t.rot.x, y: -t.rot.y, z: -t.rot.z },
+  };
+}
+function pairFromR(R: Transform): Pair {
+  return { R, L: mirrorT(R) };
+}
+
+// Helpers for reading / writing per-side data given the current selection.
+function isPaired(id: "eye" | "pupil" | "shine" | "smile" | "cheek" | "arm" | "foot"): id is "eye" | "pupil" | "shine" | "cheek" | "arm" | "foot" {
+  return id !== "smile";
+}
+
+// Returns the Transform corresponding to the current selection. If the
+// part is paired and the side is "both", we read R as the canonical.
+function getTransform(parts: EditableParts, id: "eye" | "pupil" | "shine" | "smile" | "cheek" | "arm" | "foot", side: Side): Transform {
+  if (id === "smile") return parts.smile;
+  const pair = parts[id];
+  if (side === "L") return pair.L;
+  return pair.R;
+}
+
+// Look up the Three.js group keyed by part + side. Singletons (smile)
+// ignore the side. For paired parts, "both" uses the right-side handle
+// since that's where the gizmo grabs the canonical side.
+function lookupPartGroup(groups: Record<string, THREE.Object3D>, id: "eye" | "pupil" | "shine" | "smile" | "cheek" | "arm" | "foot", side: Side): THREE.Object3D | undefined {
+  if (id === "smile") return groups.smile;
+  const sideKey = side === "L" ? "L" : "R";
+  return groups[`${id}:${sideKey}`];
+}
+
+// Apply an edit to the right place. The gizmo always reports an absolute
+// position/rotation in inner-group space; we copy those values directly
+// into the side being edited. If side === "both", we mirror across to the
+// other side so symmetry is preserved.
+function applyEdit(
+  parts: EditableParts,
+  id: "eye" | "pupil" | "shine" | "smile" | "cheek" | "arm" | "foot",
+  side: Side,
+  pos: THREE.Vector3,
+  rot: THREE.Euler
+): EditableParts {
+  const newT: Transform = {
+    pos: { x: pos.x, y: pos.y, z: pos.z },
+    rot: { x: rot.x, y: rot.y, z: rot.z },
+  };
+  if (id === "smile") {
+    return { ...parts, smile: newT };
+  }
+  const pair = parts[id];
+  if (side === "L") {
+    return { ...parts, [id]: { R: pair.R, L: newT } };
+  }
+  if (side === "R") {
+    return { ...parts, [id]: { R: newT, L: pair.L } };
+  }
+  // both — mirror the edit across so the other side stays in sync.
+  return { ...parts, [id]: { R: newT, L: mirrorT(newT) } };
+}
 
 // ─── Wave authoring ──────────────────────────────────────────────────────
 // All five built-in patterns map a phase value (in radians) into a
@@ -112,13 +183,13 @@ function wavePatternValue(pattern: WavePattern, phaseRad: number): number {
   }
 }
 
-type PartId = keyof Omit<EditableParts, "eyeRadius" | "pupilRadius" | "shineRadius" | "smileRadius" | "cheekRadius" | "footRadius">;
+type PartId = "eye" | "pupil" | "shine" | "smile" | "cheek" | "arm" | "foot";
 const PART_IDS: PartId[] = ["eye", "pupil", "shine", "smile", "cheek", "arm", "foot"];
 const PART_LABELS: Record<PartId, string> = {
   eye: "Eye (white)",
   pupil: "Pupil (offset from eye)",
   shine: "Shine (offset from eye)",
-  smile: "Smile",
+  smile: "Mouth",
   cheek: "Cheek",
   arm: "Arm pivot",
   foot: "Foot",
@@ -127,7 +198,21 @@ const SYMMETRIC: Record<PartId, boolean> = {
   eye: true, pupil: true, shine: true, smile: false, cheek: true, arm: true, foot: true,
 };
 
-const STORAGE_KEY = "letra:editor:overrides:v1";
+const MOUTH_LABEL: Record<MouthShape, string> = {
+  smile: "Smile",
+  "big-smile": "Big smile",
+  "open-smile": "Open mouth",
+  frown: "Frown",
+  "smirk-left": "Smirk (left)",
+  "smirk-right": "Smirk (right)",
+  "open-o": "Surprised O",
+  flat: "Flat line",
+};
+
+// Bumped to v2 — the storage shape changed when symmetric parts started
+// holding both sides explicitly. v1 entries are migrated transparently.
+const STORAGE_KEY = "letra:editor:overrides:v2";
+const STORAGE_KEY_V1 = "letra:editor:overrides:v1";
 
 // Procedural defaults — same math the game uses, evaluated for a generic
 // letter of width 1.4 and height 1.6. The user can override per letter.
@@ -144,14 +229,25 @@ function defaultParts(width: number, height: number): EditableParts {
   const armX = Math.max(half + 0.18, 0.36);
   const armY = Math.min(height * 0.55, height - 0.4);
   const footOffset = Math.max(0.18, Math.min(half * 0.4, 0.32));
+  // Right-side canonical transforms; mirror to get the matching left side.
+  const eyeR: Transform = { pos: { x: eyeOffset, y: eyeY, z: depthFront + eyeRadius * 0.4 }, rot: { ...ZERO_ROT } };
+  const pupilR: Transform = { pos: { x: 0, y: 0, z: eyeRadius * 0.5 }, rot: { ...ZERO_ROT } };
+  const shineR: Transform = { pos: { x: -eyeRadius * 0.25, y: eyeRadius * 0.3, z: eyeRadius * 0.7 }, rot: { ...ZERO_ROT } };
+  const cheekR: Transform = { pos: { x: cheekOffset, y: smileY + cheekRadius * 0.4, z: depthFront }, rot: { ...ZERO_ROT } };
+  const armR: Transform = { pos: { x: armX, y: armY, z: 0 }, rot: { ...ARM_REST_ROT } };
+  const footR: Transform = { pos: { x: footOffset, y: 0.05, z: 0.2 }, rot: { ...ZERO_ROT } };
+  // Pupil/shine live in eye-local space, so their R is asymmetric in X
+  // (shine sits on one side of the eye for a "highlight" look). Mirror in
+  // X to make the left-eye highlight sit on the corresponding side.
   return {
-    eye: { pos: { x: eyeOffset, y: eyeY, z: depthFront + eyeRadius * 0.4 }, rot: { ...ZERO_ROT } },
-    pupil: { pos: { x: 0, y: 0, z: eyeRadius * 0.5 }, rot: { ...ZERO_ROT } },
-    shine: { pos: { x: -eyeRadius * 0.25, y: eyeRadius * 0.3, z: eyeRadius * 0.7 }, rot: { ...ZERO_ROT } },
+    eye: pairFromR(eyeR),
+    pupil: pairFromR(pupilR),
+    shine: pairFromR(shineR),
     smile: { pos: { x: 0, y: smileY, z: depthFront + 0.03 }, rot: { ...SMILE_REST_ROT } },
-    cheek: { pos: { x: cheekOffset, y: smileY + cheekRadius * 0.4, z: depthFront }, rot: { ...ZERO_ROT } },
-    arm: { pos: { x: armX, y: armY, z: 0 }, rot: { ...ARM_REST_ROT } },
-    foot: { pos: { x: footOffset, y: 0.05, z: 0.2 }, rot: { ...ZERO_ROT } },
+    mouthShape: "smile",
+    cheek: pairFromR(cheekR),
+    arm: pairFromR(armR),
+    foot: pairFromR(footR),
     eyeRadius,
     pupilRadius: eyeRadius * 0.55,
     shineRadius: eyeRadius * 0.18,
@@ -161,34 +257,69 @@ function defaultParts(width: number, height: number): EditableParts {
   };
 }
 
-// Migrate older saved overrides (positions only, no rotation) into the new
-// Transform shape so users don't lose work after the schema change.
-function migrate(p: EditableParts | null): EditableParts | null {
-  if (!p) return p;
-  const fix = (t: unknown, restRot: Vec3 = ZERO_ROT): Transform => {
+// Migrate any older saved override into the current EditableParts shape.
+// Two prior shapes existed:
+//   v0: each part was a bare Vec3 (no rotation)
+//   v1: each part was a Transform { pos, rot }
+// Today (v2) symmetric parts are Pair { R, L } and we have mouthShape.
+function migrate(p: unknown): EditableParts | null {
+  if (!p || typeof p !== "object") return null;
+  const o = p as Record<string, unknown>;
+  const asTransform = (t: unknown, restRot: Vec3 = ZERO_ROT): Transform => {
     if (t && typeof t === "object" && "pos" in (t as Record<string, unknown>)) return t as Transform;
     if (t && typeof t === "object" && "x" in (t as Record<string, unknown>)) {
       return { pos: t as Vec3, rot: { ...restRot } };
     }
     return { pos: { x: 0, y: 0, z: 0 }, rot: { ...restRot } };
   };
+  const asPair = (raw: unknown, restRot: Vec3 = ZERO_ROT): Pair => {
+    // Already a Pair (current shape)
+    if (raw && typeof raw === "object" && "R" in (raw as Record<string, unknown>) && "L" in (raw as Record<string, unknown>)) {
+      const r = raw as { R: unknown; L: unknown };
+      return { R: asTransform(r.R, restRot), L: asTransform(r.L, restRot) };
+    }
+    // Older single-side Transform → mirror to fill in left.
+    const R = asTransform(raw, restRot);
+    return { R, L: mirrorT(R) };
+  };
   return {
-    ...p,
-    eye: fix(p.eye as unknown),
-    pupil: fix(p.pupil as unknown),
-    shine: fix(p.shine as unknown),
-    smile: fix(p.smile as unknown, SMILE_REST_ROT),
-    cheek: fix(p.cheek as unknown),
-    arm: fix(p.arm as unknown, ARM_REST_ROT),
-    foot: fix(p.foot as unknown),
+    eye: asPair(o.eye),
+    pupil: asPair(o.pupil),
+    shine: asPair(o.shine),
+    smile: asTransform(o.smile, SMILE_REST_ROT),
+    mouthShape: typeof o.mouthShape === "string" ? (o.mouthShape as MouthShape) : "smile",
+    cheek: asPair(o.cheek),
+    arm: asPair(o.arm, ARM_REST_ROT),
+    foot: asPair(o.foot),
+    eyeRadius: typeof o.eyeRadius === "number" ? o.eyeRadius : 0.2,
+    pupilRadius: typeof o.pupilRadius === "number" ? o.pupilRadius : 0.11,
+    shineRadius: typeof o.shineRadius === "number" ? o.shineRadius : 0.04,
+    smileRadius: typeof o.smileRadius === "number" ? o.smileRadius : 0.16,
+    cheekRadius: typeof o.cheekRadius === "number" ? o.cheekRadius : 0.1,
+    footRadius: typeof o.footRadius === "number" ? o.footRadius : 0.16,
   };
 }
 
 function loadOverrides(): Record<string, EditableParts> {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    let raw = localStorage.getItem(STORAGE_KEY);
+    let isLegacy = false;
+    if (!raw) {
+      raw = localStorage.getItem(STORAGE_KEY_V1);
+      isLegacy = !!raw;
+    }
     if (!raw) return {};
-    return JSON.parse(raw);
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const migrated: Record<string, EditableParts> = {};
+    for (const [k, v] of Object.entries(parsed)) {
+      const m = migrate(v);
+      if (m) migrated[k] = m;
+    }
+    if (isLegacy) {
+      // Promote the migrated content to the v2 storage location.
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(migrated));
+    }
+    return migrated;
   } catch {
     return {};
   }
@@ -211,11 +342,12 @@ type BuiltLetter = {
   root: THREE.Group;
   // Inner group (carries scale pulse — children are the meshes)
   inner: THREE.Group;
-  // Selectable handles for the editor's transform gizmo
+  // Selectable handles per part-and-side for the gizmo. Keys look like
+  // "eye:R", "eye:L", "smile" (single).
   partGroups: Record<string, THREE.Object3D>;
   // Arm pivots (so the celebration animation can wave them)
   armPivotR: THREE.Group;
-  armPivotL: THREE.Group | null;
+  armPivotL: THREE.Group;
   baseY: number;
   size: { width: number; height: number };
   dispose: () => void;
@@ -224,8 +356,7 @@ type BuiltLetter = {
 function buildEditableLetter(
   font: Font,
   letter: string,
-  parts: EditableParts,
-  mirror: boolean
+  parts: EditableParts
 ): BuiltLetter {
   const root = new THREE.Group();
   const inner = new THREE.Group();
@@ -257,17 +388,15 @@ function buildEditableLetter(
   inner.add(letterMesh);
 
   const partGroups: Record<string, THREE.Object3D> = {};
-
   const setRot = (obj: THREE.Object3D, r: Vec3) => obj.rotation.set(r.x, r.y, r.z);
 
-  // Eyes (right + mirrored left). Each eye is its own group containing
-  // sclera + pupil + shine so they move together. Pupil/shine are children
-  // of the eye, so their positions are local to it.
-  const makeEye = (mirrorSide: boolean) => {
-    const sign = mirrorSide ? -1 : 1;
+  // Eyes — render BOTH sides explicitly from the per-side transforms. No
+  // mirror flag: if you want symmetry, edit in mirror mode and we sync
+  // the other side; if you want asymmetry, edit each side independently.
+  const makeEye = (eyeT: Transform, pupilT: Transform, shineT: Transform) => {
     const eyeGroup = new THREE.Group();
-    eyeGroup.position.set(sign * parts.eye.pos.x, parts.eye.pos.y, parts.eye.pos.z);
-    setRot(eyeGroup, parts.eye.rot);
+    eyeGroup.position.set(eyeT.pos.x, eyeT.pos.y, eyeT.pos.z);
+    setRot(eyeGroup, eyeT.rot);
     const sclera = new THREE.Mesh(
       new THREE.SphereGeometry(parts.eyeRadius, 16, 12),
       new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.35 })
@@ -277,92 +406,92 @@ function buildEditableLetter(
       new THREE.SphereGeometry(parts.pupilRadius, 12, 10),
       new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.5 })
     );
-    pupil.position.set(sign * parts.pupil.pos.x, parts.pupil.pos.y, parts.pupil.pos.z);
-    setRot(pupil, parts.pupil.rot);
+    pupil.position.set(pupilT.pos.x, pupilT.pos.y, pupilT.pos.z);
+    setRot(pupil, pupilT.rot);
     eyeGroup.add(pupil);
     const shine = new THREE.Mesh(
       new THREE.SphereGeometry(parts.shineRadius, 8, 6),
       new THREE.MeshBasicMaterial({ color: 0xffffff })
     );
-    shine.position.set(sign * parts.shine.pos.x, parts.shine.pos.y, parts.shine.pos.z);
-    setRot(shine, parts.shine.rot);
+    shine.position.set(shineT.pos.x, shineT.pos.y, shineT.pos.z);
+    setRot(shine, shineT.rot);
     eyeGroup.add(shine);
     return eyeGroup;
   };
-  const eyeR = makeEye(false);
+  const eyeR = makeEye(parts.eye.R, parts.pupil.R, parts.shine.R);
+  const eyeL = makeEye(parts.eye.L, parts.pupil.L, parts.shine.L);
   inner.add(eyeR);
-  partGroups.eye = eyeR;
-  if (mirror) {
-    const eyeL = makeEye(true);
-    inner.add(eyeL);
-  }
+  inner.add(eyeL);
+  partGroups["eye:R"] = eyeR;
+  partGroups["eye:L"] = eyeL;
+  // Pupil/shine are children of their eye — selecting them returns the
+  // child mesh so the gizmo edits eye-local coordinates.
+  partGroups["pupil:R"] = eyeR.children[1];
+  partGroups["pupil:L"] = eyeL.children[1];
+  partGroups["shine:R"] = eyeR.children[2];
+  partGroups["shine:L"] = eyeL.children[2];
 
-  // Smile
-  const smile = new THREE.Mesh(
-    new THREE.TorusGeometry(parts.smileRadius, Math.max(0.03, parts.smileRadius * 0.22), 8, 16, Math.PI),
-    new THREE.MeshStandardMaterial({ color: 0x6b1d10 })
-  );
-  smile.position.set(parts.smile.pos.x, parts.smile.pos.y, parts.smile.pos.z);
-  setRot(smile, parts.smile.rot);
-  inner.add(smile);
-  partGroups.smile = smile;
+  // Mouth
+  const mouthMat = new THREE.MeshStandardMaterial({ color: 0x6b1d10 });
+  const mouthGroup = makeMouth(parts.mouthShape, parts.smileRadius, mouthMat);
+  mouthGroup.position.set(parts.smile.pos.x, parts.smile.pos.y, parts.smile.pos.z);
+  setRot(mouthGroup, parts.smile.rot);
+  inner.add(mouthGroup);
+  partGroups.smile = mouthGroup;
 
   // Cheeks
   const cheekMat = new THREE.MeshStandardMaterial({ color: 0xff8aaa, transparent: true, opacity: 0.75 });
-  const cheekR = new THREE.Mesh(new THREE.SphereGeometry(parts.cheekRadius, 10, 8), cheekMat);
-  cheekR.position.set(parts.cheek.pos.x, parts.cheek.pos.y, parts.cheek.pos.z);
-  setRot(cheekR, parts.cheek.rot);
+  const cheekGeo = new THREE.SphereGeometry(parts.cheekRadius, 10, 8);
+  const cheekR = new THREE.Mesh(cheekGeo, cheekMat);
+  cheekR.position.set(parts.cheek.R.pos.x, parts.cheek.R.pos.y, parts.cheek.R.pos.z);
+  setRot(cheekR, parts.cheek.R.rot);
   cheekR.scale.set(1, 0.7, 0.4);
   inner.add(cheekR);
-  partGroups.cheek = cheekR;
-  if (mirror) {
-    const cheekL = cheekR.clone();
-    cheekL.position.x *= -1;
-    inner.add(cheekL);
-  }
+  const cheekL = new THREE.Mesh(cheekGeo, cheekMat);
+  cheekL.position.set(parts.cheek.L.pos.x, parts.cheek.L.pos.y, parts.cheek.L.pos.z);
+  setRot(cheekL, parts.cheek.L.rot);
+  cheekL.scale.set(1, 0.7, 0.4);
+  inner.add(cheekL);
+  partGroups["cheek:R"] = cheekR;
+  partGroups["cheek:L"] = cheekL;
 
   // Arms
   const limbMat = new THREE.MeshStandardMaterial({ color, roughness: 0.5 });
   const armGeo = new THREE.CapsuleGeometry(0.1, 0.45, 4, 8);
   const armPivotR = new THREE.Group();
-  armPivotR.position.set(parts.arm.pos.x, parts.arm.pos.y, parts.arm.pos.z);
-  setRot(armPivotR, parts.arm.rot);
+  armPivotR.position.set(parts.arm.R.pos.x, parts.arm.R.pos.y, parts.arm.R.pos.z);
+  setRot(armPivotR, parts.arm.R.rot);
   const armR = new THREE.Mesh(armGeo, limbMat);
   armR.position.set(0.25, -0.05, 0);
   armR.rotation.z = Math.PI / 4;
   armPivotR.add(armR);
   inner.add(armPivotR);
-  partGroups.arm = armPivotR;
-  let armPivotL: THREE.Group | null = null;
-  if (mirror) {
-    armPivotL = new THREE.Group();
-    armPivotL.position.set(-parts.arm.pos.x, parts.arm.pos.y, parts.arm.pos.z);
-    setRot(armPivotL, parts.arm.rot);
-    const armL = new THREE.Mesh(armGeo, limbMat);
-    armL.position.set(-0.25, -0.05, 0);
-    armL.rotation.z = -Math.PI / 4;
-    armPivotL.add(armL);
-    inner.add(armPivotL);
-  }
+  const armPivotL = new THREE.Group();
+  armPivotL.position.set(parts.arm.L.pos.x, parts.arm.L.pos.y, parts.arm.L.pos.z);
+  setRot(armPivotL, parts.arm.L.rot);
+  const armL = new THREE.Mesh(armGeo, limbMat);
+  armL.position.set(-0.25, -0.05, 0);
+  armL.rotation.z = -Math.PI / 4;
+  armPivotL.add(armL);
+  inner.add(armPivotL);
+  partGroups["arm:R"] = armPivotR;
+  partGroups["arm:L"] = armPivotL;
 
   // Feet
   const footMat = new THREE.MeshStandardMaterial({ color: 0x3a2a14, roughness: 0.7 });
-  const footR = new THREE.Mesh(new THREE.SphereGeometry(parts.footRadius, 10, 8), footMat);
-  footR.position.set(parts.foot.pos.x, parts.foot.pos.y, parts.foot.pos.z);
-  setRot(footR, parts.foot.rot);
+  const footGeo = new THREE.SphereGeometry(parts.footRadius, 10, 8);
+  const footR = new THREE.Mesh(footGeo, footMat);
+  footR.position.set(parts.foot.R.pos.x, parts.foot.R.pos.y, parts.foot.R.pos.z);
+  setRot(footR, parts.foot.R.rot);
   footR.scale.set(1, 0.6, 1.2);
   inner.add(footR);
-  partGroups.foot = footR;
-  if (mirror) {
-    const footL = footR.clone();
-    footL.position.x *= -1;
-    inner.add(footL);
-  }
-
-  // pupil and shine are surfaced as the eye group's children — selecting them
-  // means selecting their child within the eye.
-  partGroups.pupil = (partGroups.eye.children[1] ?? partGroups.eye) as THREE.Object3D;
-  partGroups.shine = (partGroups.eye.children[2] ?? partGroups.eye) as THREE.Object3D;
+  const footL = new THREE.Mesh(footGeo, footMat);
+  footL.position.set(parts.foot.L.pos.x, parts.foot.L.pos.y, parts.foot.L.pos.z);
+  setRot(footL, parts.foot.L.rot);
+  footL.scale.set(1, 0.6, 1.2);
+  inner.add(footL);
+  partGroups["foot:R"] = footR;
+  partGroups["foot:L"] = footL;
 
   const dispose = () => {
     root.traverse((obj) => {
@@ -386,14 +515,89 @@ function buildEditableLetter(
   };
 }
 
+// Build the chosen mouth geometry. Each shape is wrapped in a group so the
+// gizmo handles a consistent target regardless of the underlying primitive.
+function makeMouth(shape: MouthShape, radius: number, mat: THREE.Material): THREE.Group {
+  const g = new THREE.Group();
+  const tube = Math.max(0.03, radius * 0.22);
+  switch (shape) {
+    case "smile": {
+      const m = new THREE.Mesh(new THREE.TorusGeometry(radius, tube, 8, 16, Math.PI), mat);
+      g.add(m);
+      break;
+    }
+    case "big-smile": {
+      // Wider arc + thicker tube for an exuberant grin.
+      const m = new THREE.Mesh(new THREE.TorusGeometry(radius * 1.3, tube * 1.3, 8, 18, Math.PI * 1.1), mat);
+      g.add(m);
+      break;
+    }
+    case "open-smile": {
+      // Smile + a tiny dark inside-mouth shape so it reads "open".
+      const arc = new THREE.Mesh(new THREE.TorusGeometry(radius, tube * 1.2, 8, 18, Math.PI), mat);
+      g.add(arc);
+      const inside = new THREE.Mesh(
+        new THREE.SphereGeometry(radius * 0.6, 12, 8, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2),
+        new THREE.MeshStandardMaterial({ color: 0x2b0d05 })
+      );
+      inside.position.y = -radius * 0.15;
+      inside.scale.set(1, 0.6, 0.5);
+      g.add(inside);
+      break;
+    }
+    case "frown": {
+      // Same arc, flipped — angry/sad letter.
+      const m = new THREE.Mesh(new THREE.TorusGeometry(radius, tube, 8, 16, Math.PI), mat);
+      m.rotation.z = Math.PI;
+      m.position.y = -radius * 0.6; // raise so the corners sit at smile-Y
+      g.add(m);
+      break;
+    }
+    case "smirk-left": {
+      // Half a smile, the left half longer.
+      const m = new THREE.Mesh(new THREE.TorusGeometry(radius, tube, 8, 14, Math.PI * 0.7), mat);
+      m.position.x = -radius * 0.25;
+      g.add(m);
+      break;
+    }
+    case "smirk-right": {
+      const m = new THREE.Mesh(new THREE.TorusGeometry(radius, tube, 8, 14, Math.PI * 0.7), mat);
+      m.position.x = radius * 0.25;
+      m.rotation.y = Math.PI; // flips the arc orientation
+      g.add(m);
+      break;
+    }
+    case "open-o": {
+      // Surprised "o" — full ring, smaller.
+      const m = new THREE.Mesh(new THREE.TorusGeometry(radius * 0.65, tube * 1.1, 10, 20), mat);
+      g.add(m);
+      const inside = new THREE.Mesh(
+        new THREE.CircleGeometry(radius * 0.55, 16),
+        new THREE.MeshStandardMaterial({ color: 0x2b0d05, side: THREE.DoubleSide })
+      );
+      g.add(inside);
+      break;
+    }
+    case "flat": {
+      // Stoic line — a thin capsule.
+      const m = new THREE.Mesh(new THREE.CapsuleGeometry(tube * 1.2, radius * 1.4, 4, 8), mat);
+      m.rotation.z = Math.PI / 2;
+      g.add(m);
+      break;
+    }
+  }
+  return g;
+}
+
 type GizmoMode = "translate" | "rotate";
 
 export function LetterEditor() {
   const goToMenu = useGameStore((s) => s.goToMenu);
   const [font, setFont] = useState<Font | null>(null);
   const [letter, setLetter] = useState<string>("A");
-  const [mirror, setMirror] = useState(true);
   const [selectedPart, setSelectedPart] = useState<PartId>("eye");
+  // Which side of a symmetric pair to edit. "both" mirrors edits across.
+  const [side, setSide] = useState<Side>("both");
   const [gizmoMode, setGizmoMode] = useState<GizmoMode>("translate");
   const [overrides, setOverrides] = useState<Record<string, EditableParts>>(() => {
     const raw = loadOverrides();
@@ -440,8 +644,8 @@ export function LetterEditor() {
     dispose: () => void;
   } | null>(null);
   const partsRef = useRef<EditableParts | null>(null);
-  const mirrorRef = useRef(mirror);
   const selectedPartRef = useRef<PartId>(selectedPart);
+  const sideRef = useRef<Side>(side);
   const gizmoModeRef = useRef<GizmoMode>(gizmoMode);
   const onPartChangeRef = useRef<((p: EditableParts) => void) | null>(null);
   // Latest letter id (read inside long-lived listeners that captured an
@@ -470,7 +674,7 @@ export function LetterEditor() {
       setParts(existing);
     } else {
       // Build a temp letter to measure dimensions for defaults.
-      const probe = buildEditableLetter(font, letter, defaultParts(1.4, 1.6), false);
+      const probe = buildEditableLetter(font, letter, defaultParts(1.4, 1.6));
       const def = defaultParts(probe.size.width, probe.size.height);
       probe.dispose();
       setParts(def);
@@ -537,22 +741,14 @@ export function LetterEditor() {
       }
     });
     // When the gizmo moves or rotates the part, push values back into state.
+    // We write to the side the user is editing; if mode is "both", we mirror
+    // the change across to keep symmetry.
     transform.addEventListener("objectChange", () => {
       const obj = transform.object;
       if (!obj || !partsRef.current || !onPartChangeRef.current) return;
       const id = selectedPartRef.current;
-      const next = { ...partsRef.current };
-      const cur = next[id];
-      // For symmetric parts the right side stores positive X so mirrors
-      // mirror correctly; pupil/shine are local to the eye so their X can
-      // be negative or positive.
-      const isLocal = id === "pupil" || id === "shine";
-      const newPos: Vec3 = isLocal
-        ? { x: obj.position.x, y: obj.position.y, z: obj.position.z }
-        : { x: Math.abs(obj.position.x), y: obj.position.y, z: obj.position.z };
-      const newRot: Vec3 = { x: obj.rotation.x, y: obj.rotation.y, z: obj.rotation.z };
-      next[id] = { pos: newPos, rot: newRot };
-      void cur;
+      const s = sideRef.current;
+      const next = applyEdit(partsRef.current, id, s, obj.position, obj.rotation);
       onPartChangeRef.current(next);
     });
 
@@ -568,10 +764,10 @@ export function LetterEditor() {
       raycaster.setFromCamera(pointer, camera);
       if (!sceneRef.current) return;
       const partGroups = sceneRef.current.built?.partGroups ?? {};
-      const candidates = Object.entries(partGroups).flatMap(([id, obj]) => {
-        // Walk descendants and tag each with its part id for hit testing.
-        const items: { id: PartId; obj: THREE.Object3D }[] = [];
-        obj.traverse((o) => items.push({ id: id as PartId, obj: o }));
+      // Each entry's key is "part:R" / "part:L" or just "part" (singletons).
+      const candidates = Object.entries(partGroups).flatMap(([key, obj]) => {
+        const items: { key: string; obj: THREE.Object3D }[] = [];
+        obj.traverse((o) => items.push({ key, obj: o }));
         return items;
       });
       const meshes = candidates.map((c) => c.obj);
@@ -580,8 +776,16 @@ export function LetterEditor() {
       const hitObj = hits[0].object;
       const hit = candidates.find((c) => c.obj === hitObj);
       if (hit) {
-        selectedPartRef.current = hit.id;
-        setSelectedPart(hit.id);
+        const [partKey, sideKey] = hit.key.split(":") as [PartId, "R" | "L" | undefined];
+        selectedPartRef.current = partKey;
+        setSelectedPart(partKey);
+        // Don't override "both" mode when the user clicks: they meant to
+        // edit symmetrically. For R/L modes, snap to whichever side they
+        // clicked so the gizmo lands on it.
+        if (sideKey && sideRef.current !== "both") {
+          sideRef.current = sideKey;
+          setSide(sideKey);
+        }
       }
     };
     renderer.domElement.addEventListener("pointerdown", onPointerDown);
@@ -688,7 +892,7 @@ export function LetterEditor() {
     };
   }, []);
 
-  // Rebuild the letter mesh whenever parts/letter/mirror change.
+  // Rebuild the letter mesh whenever parts/letter change.
   useEffect(() => {
     if (!font || !parts || !sceneRef.current) return;
     const sr = sceneRef.current;
@@ -696,25 +900,24 @@ export function LetterEditor() {
       sr.scene.remove(sr.built.root);
       sr.built.dispose();
     }
-    const built = buildEditableLetter(font, letter, parts, mirror);
+    const built = buildEditableLetter(font, letter, parts);
     sr.scene.add(built.root);
     sr.built = built;
-    // Cancel any in-flight celebration when geometry rebuilds.
     celebrationTRef.current = -1;
-    // Update the transform target if the selected part exists.
-    const target = built.partGroups[selectedPartRef.current];
+    const target = lookupPartGroup(built.partGroups, selectedPartRef.current, sideRef.current);
     if (target) sr.transform.attach(target);
     else sr.transform.detach();
-  }, [font, parts, letter, mirror]);
+  }, [font, parts, letter]);
 
-  // Re-attach transform when the user switches selected part or mode.
+  // Re-attach transform when the user switches selected part or side.
   useEffect(() => {
     selectedPartRef.current = selectedPart;
+    sideRef.current = side;
     const sr = sceneRef.current;
     if (!sr) return;
-    const target = sr.built?.partGroups[selectedPart];
+    const target = lookupPartGroup(sr.built?.partGroups ?? {}, selectedPart, side);
     if (target) sr.transform.attach(target);
-  }, [selectedPart]);
+  }, [selectedPart, side]);
 
   useEffect(() => {
     gizmoModeRef.current = gizmoMode;
@@ -827,15 +1030,23 @@ export function LetterEditor() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [letter]);
 
-  useEffect(() => {
-    mirrorRef.current = mirror;
-  }, [mirror]);
-
-  const onPosInput = (axis: "x" | "y" | "z", value: number) => {
+  const writeTransform = (mutate: (t: Transform) => Transform) => {
     if (!parts) return;
     const id = selectedPart;
-    const cur = parts[id];
-    const next: EditableParts = { ...parts, [id]: { ...cur, pos: { ...cur.pos, [axis]: value } } };
+    const s = side;
+    const cur = getTransform(parts, id, s);
+    const newT = mutate(cur);
+    let next: EditableParts;
+    if (id === "smile") {
+      next = { ...parts, smile: newT };
+    } else if (s === "L") {
+      next = { ...parts, [id]: { R: parts[id].R, L: newT } };
+    } else if (s === "R") {
+      next = { ...parts, [id]: { R: newT, L: parts[id].L } };
+    } else {
+      // both — keep symmetry by writing R explicitly and mirroring to L.
+      next = { ...parts, [id]: { R: newT, L: mirrorT(newT) } };
+    }
     setParts(next);
     setOverrides((prev) => {
       const merged = { ...prev, [letter]: next };
@@ -845,11 +1056,41 @@ export function LetterEditor() {
     pushHistory(letter, next);
   };
 
+  const onPosInput = (axis: "x" | "y" | "z", value: number) => {
+    writeTransform((t) => ({ ...t, pos: { ...t.pos, [axis]: value } }));
+  };
   const onRotInput = (axis: "x" | "y" | "z", value: number) => {
+    writeTransform((t) => ({ ...t, rot: { ...t.rot, [axis]: value } }));
+  };
+
+  const onMouthShapeChange = (shape: MouthShape) => {
     if (!parts) return;
-    const id = selectedPart;
-    const cur = parts[id];
-    const next: EditableParts = { ...parts, [id]: { ...cur, rot: { ...cur.rot, [axis]: value } } };
+    const next = { ...parts, mouthShape: shape };
+    setParts(next);
+    setOverrides((prev) => {
+      const merged = { ...prev, [letter]: next };
+      saveOverrides(merged);
+      return merged;
+    });
+    pushHistory(letter, next);
+  };
+
+  const onMirrorRtoL = () => {
+    if (!parts || selectedPart === "smile") return;
+    const pair = parts[selectedPart];
+    const next = { ...parts, [selectedPart]: { R: pair.R, L: mirrorT(pair.R) } };
+    setParts(next);
+    setOverrides((prev) => {
+      const merged = { ...prev, [letter]: next };
+      saveOverrides(merged);
+      return merged;
+    });
+    pushHistory(letter, next);
+  };
+  const onMirrorLtoR = () => {
+    if (!parts || selectedPart === "smile") return;
+    const pair = parts[selectedPart];
+    const next = { ...parts, [selectedPart]: { R: mirrorT(pair.L), L: pair.L } };
     setParts(next);
     setOverrides((prev) => {
       const merged = { ...prev, [letter]: next };
@@ -861,7 +1102,7 @@ export function LetterEditor() {
 
   const onResetLetter = () => {
     if (!font) return;
-    const probe = buildEditableLetter(font, letter, defaultParts(1.4, 1.6), false);
+    const probe = buildEditableLetter(font, letter, defaultParts(1.4, 1.6));
     const def = defaultParts(probe.size.width, probe.size.height);
     probe.dispose();
     setParts(def);
@@ -982,10 +1223,6 @@ export function LetterEditor() {
           <button onClick={() => snapCamera("top")} style={tab(false)} title="Top view">Top</button>
           <button onClick={() => snapCamera("perspective")} style={tab(false)} title="Perspective view">3/4</button>
         </div>
-        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 14, fontWeight: 700, color: "#3a2a14" }}>
-          <input type="checkbox" checked={mirror} onChange={(e) => setMirror(e.target.checked)} />
-          Mirror
-        </label>
         <span style={{ flex: 1 }} />
         <div style={{ display: "flex", gap: 4 }}>
           <button onClick={undo} disabled={!canUndo} style={btn(canUndo ? "#a8e2ff" : "#e0e0e0", "#3a2a14")} title="Undo (⌘Z)">↶ Undo</button>
@@ -1059,21 +1296,61 @@ export function LetterEditor() {
 
         {parts && (
           <>
-            <h3 style={{ margin: "0 0 6px 0" }}>{PART_LABELS[selectedPart]} position</h3>
-            <p style={{ marginTop: 0, fontSize: 11, opacity: 0.7 }}>
-              {SYMMETRIC[selectedPart]
-                ? "Right side. Mirror toggle controls the left."
-                : "Single instance."}
-              {(selectedPart === "pupil" || selectedPart === "shine") && " Coordinates are relative to the eye."}
-            </p>
-            <NumberRow label="X" value={parts[selectedPart].pos.x} onChange={(v) => onPosInput("x", v)} />
-            <NumberRow label="Y" value={parts[selectedPart].pos.y} onChange={(v) => onPosInput("y", v)} />
-            <NumberRow label="Z" value={parts[selectedPart].pos.z} onChange={(v) => onPosInput("z", v)} />
+            {SYMMETRIC[selectedPart] && (
+              <>
+                <h3 style={{ margin: "0 0 6px 0" }}>Side</h3>
+                <div style={{ display: "flex", borderRadius: 10, overflow: "hidden", border: "2px solid #d8e6f0", marginBottom: 8 }}>
+                  <button onClick={() => setSide("R")} style={tab(side === "R")} title="Edit right side only">R</button>
+                  <button onClick={() => setSide("L")} style={tab(side === "L")} title="Edit left side only">L</button>
+                  <button onClick={() => setSide("both")} style={tab(side === "both")} title="Edit both sides — symmetric mirror">⇄ Both</button>
+                </div>
+                <div style={{ display: "flex", gap: 6, marginBottom: 14 }}>
+                  <button onClick={onMirrorRtoL} style={miniBtn} title="Copy right side onto left">R → L</button>
+                  <button onClick={onMirrorLtoR} style={miniBtn} title="Copy left side onto right">L → R</button>
+                </div>
+              </>
+            )}
 
-            <h3 style={{ margin: "16px 0 6px 0" }}>{PART_LABELS[selectedPart]} rotation (°)</h3>
-            <NumberRow label="X" value={radToDeg(parts[selectedPart].rot.x)} onChange={(v) => onRotInput("x", degToRad(v))} step={5} min={-360} max={360} />
-            <NumberRow label="Y" value={radToDeg(parts[selectedPart].rot.y)} onChange={(v) => onRotInput("y", degToRad(v))} step={5} min={-360} max={360} />
-            <NumberRow label="Z" value={radToDeg(parts[selectedPart].rot.z)} onChange={(v) => onRotInput("z", degToRad(v))} step={5} min={-360} max={360} />
+            {selectedPart === "smile" && (
+              <>
+                <h3 style={{ margin: "0 0 6px 0" }}>Mouth shape</h3>
+                <select
+                  value={parts.mouthShape}
+                  onChange={(e) => onMouthShapeChange(e.target.value as MouthShape)}
+                  style={{ width: "100%", padding: 6, fontSize: 13, fontWeight: 700, border: "1px solid #d8e6f0", borderRadius: 6, marginBottom: 14 }}
+                >
+                  {(Object.keys(MOUTH_LABEL) as MouthShape[]).map((s) => (
+                    <option key={s} value={s}>{MOUTH_LABEL[s]}</option>
+                  ))}
+                </select>
+              </>
+            )}
+
+            <h3 style={{ margin: "0 0 6px 0" }}>
+              {PART_LABELS[selectedPart]} position
+              {SYMMETRIC[selectedPart] && side !== "both" && (
+                <span style={{ fontSize: 11, opacity: 0.6, marginLeft: 6, fontWeight: 500 }}>{side} only</span>
+              )}
+            </h3>
+            <p style={{ marginTop: 0, fontSize: 11, opacity: 0.7 }}>
+              {(selectedPart === "pupil" || selectedPart === "shine") && "Coordinates are relative to the eye. "}
+              {SYMMETRIC[selectedPart] && side === "both" && "Editing both sides — changes mirror across X."}
+            </p>
+            {(() => {
+              const t = getTransform(parts, selectedPart, side);
+              return (
+                <>
+                  <NumberRow label="X" value={t.pos.x} onChange={(v) => onPosInput("x", v)} />
+                  <NumberRow label="Y" value={t.pos.y} onChange={(v) => onPosInput("y", v)} />
+                  <NumberRow label="Z" value={t.pos.z} onChange={(v) => onPosInput("z", v)} />
+
+                  <h3 style={{ margin: "16px 0 6px 0" }}>{PART_LABELS[selectedPart]} rotation (°)</h3>
+                  <NumberRow label="X" value={radToDeg(t.rot.x)} onChange={(v) => onRotInput("x", degToRad(v))} step={5} min={-360} max={360} />
+                  <NumberRow label="Y" value={radToDeg(t.rot.y)} onChange={(v) => onRotInput("y", degToRad(v))} step={5} min={-360} max={360} />
+                  <NumberRow label="Z" value={radToDeg(t.rot.z)} onChange={(v) => onRotInput("z", degToRad(v))} step={5} min={-360} max={360} />
+                </>
+              );
+            })()}
 
             <h3 style={{ margin: "16px 0 6px 0" }}>Sizes</h3>
             <NumberRow label="Eye r" value={parts.eyeRadius} onChange={(v) => setParts((p) => p && persistAndReturn({ ...p, eyeRadius: v }, letter, setOverrides))} step={0.005} />
@@ -1219,6 +1496,19 @@ function radToDeg(r: number): number {
 function degToRad(d: number): number {
   return (d * Math.PI) / 180;
 }
+
+const miniBtn: React.CSSProperties = {
+  flex: 1,
+  appearance: "none",
+  border: "2px solid #d8e6f0",
+  background: "white",
+  color: "#3a2a14",
+  borderRadius: 8,
+  padding: "6px 4px",
+  fontSize: 12,
+  fontWeight: 800,
+  cursor: "pointer",
+};
 
 function tab(active: boolean): React.CSSProperties {
   return {
