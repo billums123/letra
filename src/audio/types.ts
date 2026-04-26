@@ -17,6 +17,31 @@ export type AudioManifest = {
   menu: Record<string, string>;
 };
 
+// Top-level registry at /audio/voices.json. Lets the runtime enumerate
+// every voice that's been generated, switch between them, and lets the
+// generation script know which voices to refresh when new clip ids are
+// added to buildEntries() later.
+export type VoiceRegistryEntry = {
+  // Slug used as the audio subdirectory name and as the persisted
+  // selection id. Lowercase alphanumerics + dashes.
+  slug: string;
+  // Friendly name shown in the UI (e.g. "Rachel").
+  name: string;
+  // ElevenLabs voice id passed to the API.
+  voiceId: string;
+  // Model id used to generate this voice's clips.
+  modelId: string;
+  // Last time this voice was (re)generated. Helpful for debugging.
+  generatedAt: string;
+  // First voice in the registry is the runtime default; this flag is
+  // only meaningful when the user has explicitly chosen a default.
+  isDefault?: boolean;
+};
+
+export type VoicesRegistry = {
+  voices: VoiceRegistryEntry[];
+};
+
 export type AudioEntry = {
   id: string;
   // Text fed to ElevenLabs / read by Web Speech as a fallback.
