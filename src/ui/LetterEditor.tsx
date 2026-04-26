@@ -1301,19 +1301,37 @@ export function LetterEditor() {
     }
   };
 
-  const onExport = async () => {
-    const json = JSON.stringify(overrides, null, 2);
-    const letterCount = Object.keys(overrides).length;
-    const sizeKb = (json.length / 1024).toFixed(1);
+  // Copy a JSON blob to the clipboard. Shared between "export this letter"
+  // and "export all" so the success / failure toast text stays consistent.
+  const copyJson = async (json: string, label: string) => {
     try {
       await navigator.clipboard.writeText(json);
-      showToast("ok", `✓ Copied ${letterCount} letter${letterCount === 1 ? "" : "s"} (${sizeKb} KB) to clipboard`);
+      const sizeKb = (json.length / 1024).toFixed(1);
+      showToast("ok", `✓ Copied ${label} (${sizeKb} KB) to clipboard`);
     } catch {
-      // Fallback: dump to console so the user can grab it manually.
       // eslint-disable-next-line no-console
-      console.log("Editor overrides:\n" + json);
+      console.log(`Editor overrides (${label}):\n` + json);
       showToast("err", "⚠ Clipboard blocked — check the browser console for the JSON");
     }
+  };
+
+  const onExportAll = async () => {
+    const json = JSON.stringify(overrides, null, 2);
+    const count = Object.keys(overrides).length;
+    if (count === 0) {
+      showToast("err", "No edited letters to export");
+      return;
+    }
+    await copyJson(json, `${count} letter${count === 1 ? "" : "s"}`);
+  };
+
+  const onExportCurrent = async () => {
+    if (!parts) return;
+    // Wrap as the same shape "export all" produces ({ "A": {...} }) so the
+    // user can paste it straight into the larger overrides JSON without
+    // restructuring.
+    const json = JSON.stringify({ [letter]: parts }, null, 2);
+    await copyJson(json, `letter ${letter}`);
   };
 
   return (
@@ -1389,7 +1407,8 @@ export function LetterEditor() {
           {isWaving ? "⏸ Pause wave" : "👋 Wave"}
         </button>
         <button onClick={onResetLetter} style={btn("#ffd56b", "#3a2a14")}>Reset {letter}</button>
-        <button onClick={onExport} style={btn("#46c2cb", "white")}>📋 Export</button>
+        <button onClick={onExportCurrent} style={btn("#a8e2ff", "#3a2a14")} title={`Copy only letter ${letter}'s overrides`}>📋 Export {letter}</button>
+        <button onClick={onExportAll} style={btn("#46c2cb", "white")} title={`Copy all ${Object.keys(overrides).length} edited letters`}>📋 Export all</button>
         <button onClick={() => goToMenu()} style={btn("#ff8c4a", "white")}>◀ Home</button>
       </header>
 
