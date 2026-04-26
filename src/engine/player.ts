@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import type { AvatarKind } from "../state/store";
 
 export type PlayerHandles = {
   group: THREE.Group;
@@ -9,7 +10,18 @@ export type PlayerHandles = {
 const SPEED = 7;
 const TURN_LERP = 0.18;
 
+// Top-level factory the engine calls. Adds avatar variants without
+// each game/screen needing to know about the underlying meshes.
+export function buildAvatar(kind: AvatarKind): PlayerHandles {
+  return kind === "car" ? buildCar() : buildKid();
+}
+
+// Backwards-compatible alias — older callers just want the original kid.
 export function buildPlayer(): PlayerHandles {
+  return buildKid();
+}
+
+function buildKid(): PlayerHandles {
   const group = new THREE.Group();
   group.name = "Player";
 
@@ -89,6 +101,154 @@ export function buildPlayer(): PlayerHandles {
       }
       const bobAmt = isMoving ? 0.12 : 0.05;
       group.position.y = Math.abs(Math.sin(bob)) * bobAmt;
+    },
+    position() {
+      return group.position;
+    },
+  };
+}
+
+// ─── Car avatar ─────────────────────────────────────────────────────────
+// A cartoony low-poly buggy. Exposes the same PlayerHandles shape as the
+// kid so the engine treats it identically. The body and cabin are
+// rounded boxes; the wheels rotate based on travelled distance, and the
+// chassis bobs faintly while moving for an "engine vibration" feel.
+//
+// Controls are deliberately not realistic — no inertia, no traditional
+// steering. Same omnidirectional input as the kid because a 3yo cannot
+// reverse-park anything.
+
+const CAR_COLOR = 0xff5555; // bright cherry red
+const CAR_ACCENT = 0xfff7d6; // soft cream for cabin / details
+const CAR_TIRE = 0x222222;
+const CAR_RIM = 0xffd56b;
+
+function buildCar(): PlayerHandles {
+  const group = new THREE.Group();
+  group.name = "Player";
+
+  // Chassis: a rounded box (BoxGeometry with bevel-ish look via slight
+  // separate shapes). For pre-K simplicity we use a single BoxGeometry
+  // and rely on the cute proportions + face to read as cartoony.
+  const bodyMat = new THREE.MeshStandardMaterial({ color: CAR_COLOR, roughness: 0.5, metalness: 0.05 });
+  const accentMat = new THREE.MeshStandardMaterial({ color: CAR_ACCENT, roughness: 0.7 });
+
+  const body = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.5, 1.9), bodyMat);
+  body.position.y = 0.45;
+  body.castShadow = true;
+  group.add(body);
+
+  // Hood — slight wedge at the front so the car has a visible "front".
+  const hood = new THREE.Mesh(new THREE.BoxGeometry(1.3, 0.18, 0.55), bodyMat);
+  hood.position.set(0, 0.62, 0.65);
+  hood.castShadow = true;
+  group.add(hood);
+
+  // Cabin — rounded-roof block on top centred slightly back.
+  const cabin = new THREE.Mesh(new THREE.BoxGeometry(1.1, 0.55, 0.95), bodyMat);
+  cabin.position.set(0, 0.95, -0.15);
+  cabin.castShadow = true;
+  group.add(cabin);
+
+  // Cabin roof topper — a lighter cream stripe so the cabin reads
+  // visually distinct from the body even on small screens.
+  const roof = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.08, 0.85), accentMat);
+  roof.position.set(0, 1.27, -0.15);
+  group.add(roof);
+
+  // Windshield — a tilted dark plate front of the cabin so it reads
+  // as glass rather than another solid panel.
+  const windshield = new THREE.Mesh(
+    new THREE.BoxGeometry(1.05, 0.45, 0.08),
+    new THREE.MeshStandardMaterial({ color: 0x2a4a6a, roughness: 0.2, metalness: 0.4, transparent: true, opacity: 0.8 })
+  );
+  windshield.position.set(0, 0.97, 0.34);
+  windshield.rotation.x = -Math.PI / 12;
+  group.add(windshield);
+
+  // Headlight "eyes" — big white spheres so the kid recognises which
+  // way the car is facing.
+  const whiteMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.3, emissive: 0xfff8c2, emissiveIntensity: 0.25 });
+  const pupilMat = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.4 });
+  for (const dx of [-0.42, 0.42]) {
+    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.16, 14, 12), whiteMat);
+    eye.position.set(dx, 0.6, 0.92);
+    group.add(eye);
+    const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.07, 10, 8), pupilMat);
+    pupil.position.set(dx, 0.6, 1.05);
+    group.add(pupil);
+  }
+
+  // Cute grille smile under the headlights.
+  const smile = new THREE.Mesh(
+    new THREE.TorusGeometry(0.18, 0.04, 8, 16, Math.PI),
+    new THREE.MeshStandardMaterial({ color: 0x3a1c10 })
+  );
+  smile.position.set(0, 0.34, 0.96);
+  smile.rotation.x = Math.PI / 2;
+  group.add(smile);
+
+  // Wheels — 4 cylinders, capped on each side so the rim shows from any
+  // angle. Stored so the update loop can spin them with travel speed.
+  const wheelMat = new THREE.MeshStandardMaterial({ color: CAR_TIRE, roughness: 0.9 });
+  const rimMat = new THREE.MeshStandardMaterial({ color: CAR_RIM, roughness: 0.6 });
+  const wheels: THREE.Group[] = [];
+  const wheelGeo = new THREE.CylinderGeometry(0.3, 0.3, 0.22, 18);
+  const rimGeo = new THREE.CylinderGeometry(0.16, 0.16, 0.24, 12);
+  for (const [dx, dz] of [
+    [-0.7, -0.6],
+    [0.7, -0.6],
+    [-0.7, 0.6],
+    [0.7, 0.6],
+  ] as [number, number][]) {
+    const wheel = new THREE.Group();
+    const tire = new THREE.Mesh(wheelGeo, wheelMat);
+    tire.rotation.z = Math.PI / 2;
+    tire.castShadow = true;
+    wheel.add(tire);
+    const rim = new THREE.Mesh(rimGeo, rimMat);
+    rim.rotation.z = Math.PI / 2;
+    wheel.add(rim);
+    wheel.position.set(dx, 0.3, dz);
+    group.add(wheel);
+    wheels.push(wheel);
+  }
+
+  let facing = 0;
+  let bob = 0;
+  let wheelSpin = 0;
+
+  return {
+    group,
+    update(dt, input) {
+      const isMoving = Math.hypot(input.x, input.y) > 0.05;
+      if (isMoving) {
+        const speed = SPEED * dt;
+        group.position.x += input.x * speed;
+        group.position.z += input.y * speed;
+        const targetYaw = Math.atan2(input.x, input.y);
+        let delta = targetYaw - facing;
+        while (delta > Math.PI) delta -= Math.PI * 2;
+        while (delta < -Math.PI) delta += Math.PI * 2;
+        // Slightly snappier turn than the kid because a car turning
+        // slowly looks lazier than a character.
+        facing += delta * (TURN_LERP + 0.05);
+        group.rotation.y = facing;
+        bob += dt * 18;
+        // Spin wheels at travel speed. tire radius = 0.3, so radians per
+        // second = linear speed / radius. We use SPEED directly because
+        // the input magnitude is clamped to 1 and we want full-speed
+        // wheel rotation when fully forward.
+        wheelSpin += dt * (SPEED / 0.3) * Math.hypot(input.x, input.y);
+      } else {
+        bob += dt * 4;
+      }
+      // Engine-vibration bob: only a few mm — never below the rest pose.
+      const bobAmt = isMoving ? 0.04 : 0.012;
+      group.position.y = Math.abs(Math.sin(bob)) * bobAmt;
+      // Apply wheel spin around each wheel's local X (already rotated
+      // 90° on Z to lay flat, so X is now the world rolling axis).
+      for (const w of wheels) w.rotation.x = wheelSpin;
     },
     position() {
       return group.position;
