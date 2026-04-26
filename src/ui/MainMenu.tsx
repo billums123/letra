@@ -3,6 +3,7 @@ import { useGameStore } from "../state/store";
 import { audio } from "../audio/Player";
 import { StickerBook } from "./StickerBook";
 import { ALPHABET } from "../audio/types";
+import { isDev } from "../util/isDev";
 
 // Picture-based main menu. Designed for ages 3-6: huge buttons, big icons,
 // audio narration on hover, no required reading. Pre-readers can navigate
@@ -157,24 +158,28 @@ export function MainMenu() {
         </span>
       </footer>
 
-      <div style={{ position: "absolute", top: 24, left: 24, display: "flex", gap: 8 }}>
-        <button
-          type="button"
-          onClick={() => setScreen("letter-test")}
-          aria-label="Open the letter test page"
-          style={cornerBtn}
-        >
-          🔍 Letter test
-        </button>
-        <button
-          type="button"
-          onClick={() => setScreen("letter-editor")}
-          aria-label="Open the 3D letter editor"
-          style={cornerBtn}
-        >
-          ✏️ Editor
-        </button>
-      </div>
+      {/* Authoring tools — only mounted on localhost / dev builds, never
+          shown to actual kid users. See src/util/isDev.ts. */}
+      {isDev() && (
+        <div style={{ position: "absolute", top: 24, left: 24, display: "flex", gap: 8 }}>
+          <button
+            type="button"
+            onClick={() => setScreen("letter-test")}
+            aria-label="Open the letter test page"
+            style={cornerBtn}
+          >
+            🔍 Letter test
+          </button>
+          <button
+            type="button"
+            onClick={() => setScreen("letter-editor")}
+            aria-label="Open the 3D letter editor"
+            style={cornerBtn}
+          >
+            ✏️ Editor
+          </button>
+        </div>
+      )}
 
       <button
         type="button"
