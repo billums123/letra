@@ -882,13 +882,16 @@ export function LetterEditor() {
           const s = 1 + 0.15 * Math.sin(k * Math.PI * 2);
           built.inner.scale.setScalar(s);
           if (k >= 1) {
-            // End of celebration — restore the rest pose.
+            // End of celebration — restore the authored rest pose so any
+            // arm rotation the user set on the gizmo isn't wiped.
             celebrationTRef.current = -1;
             built.root.position.y = built.baseY;
             built.inner.rotation.y = 0;
             built.inner.scale.setScalar(1);
-            built.armPivotR.rotation.set(0, 0, 0);
-            if (built.armPivotL) built.armPivotL.rotation.set(0, 0, 0);
+            const armR = partsRef.current?.arm.R.rot;
+            const armL = partsRef.current?.arm.L.rot;
+            if (armR) built.armPivotR.rotation.set(armR.x, armR.y, armR.z);
+            if (armL && built.armPivotL) built.armPivotL.rotation.set(armL.x, armL.y, armL.z);
           }
         } else if (isWavingRef.current) {
           // Continuous wave with the *current letter's* shape parameters.
@@ -906,12 +909,17 @@ export function LetterEditor() {
           built.armPivotR.rotation.z = v * cfg.amplitude + cfg.offset;
           if (built.armPivotL) built.armPivotL.rotation.z = -(v * cfg.amplitude) - cfg.offset;
         } else {
-          // Hold rest pose so the part the user is editing stays put.
+          // Hold rest pose. Restore the *authored* arm rotations (whatever
+          // the user set via the gizmo / number inputs) instead of forcing
+          // them to zero — otherwise stopping a wave erases the user's
+          // tweaks. The same logic runs at celebration end below.
           built.root.position.y = built.baseY;
           built.inner.rotation.y = 0;
           built.inner.scale.setScalar(1);
-          built.armPivotR.rotation.set(0, 0, 0);
-          if (built.armPivotL) built.armPivotL.rotation.set(0, 0, 0);
+          const armR = partsRef.current?.arm.R.rot;
+          const armL = partsRef.current?.arm.L.rot;
+          if (armR) built.armPivotR.rotation.set(armR.x, armR.y, armR.z);
+          if (armL && built.armPivotL) built.armPivotL.rotation.set(armL.x, armL.y, armL.z);
         }
       }
 
