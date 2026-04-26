@@ -865,15 +865,20 @@ export function LetterEditor() {
       const built = sceneRef.current?.built;
       if (built) {
         if (celebrationTRef.current >= 0) {
-          // Full celebration always wins over the wave loop.
+          // Full celebration always wins over the wave loop. The arms swing
+          // using the letter's own wave parameters so the celebration
+          // honours the personality the author tuned for this letter.
           celebrationTRef.current += dt;
           const c = celebrationTRef.current;
           const k = Math.min(c / 1.6, 1);
           const jump = Math.sin(k * Math.PI) * 1.4;
           built.root.position.y = built.baseY + jump;
           built.inner.rotation.y = k * Math.PI * 2;
-          built.armPivotR.rotation.z = Math.sin(c * 18) * 1.0 - 0.6;
-          if (built.armPivotL) built.armPivotL.rotation.z = -Math.sin(c * 18) * 1.0 + 0.6;
+          const cfg = partsRef.current?.wave ?? DEFAULT_WAVE;
+          const phase = c * cfg.frequency * Math.PI * 2;
+          const v = wavePatternValue(cfg.pattern, phase);
+          built.armPivotR.rotation.z = v * cfg.amplitude + cfg.offset;
+          if (built.armPivotL) built.armPivotL.rotation.z = -(v * cfg.amplitude) - cfg.offset;
           const s = 1 + 0.15 * Math.sin(k * Math.PI * 2);
           built.inner.scale.setScalar(s);
           if (k >= 1) {
