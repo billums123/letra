@@ -2,6 +2,7 @@ import { useEffect, useRef } from "react";
 import * as THREE from "three";
 import { Engine } from "../engine/Engine";
 import { getInputDebugState } from "../input/useInput";
+import { useGameStore } from "../state/store";
 
 type SceneProps = {
   onEngineReady?: (engine: Engine) => void;
@@ -11,10 +12,14 @@ type SceneProps = {
 export function Scene({ onEngineReady, onPlayerPosition }: SceneProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const engineRef = useRef<Engine | null>(null);
+  // Read once on mount — switching avatar mid-game would require teardown
+  // anyway, and the menu is the only place users can change it. This
+  // makes the engine lifecycle clean: one game session = one avatar.
+  const avatar = useGameStore((s) => s.avatar);
 
   useEffect(() => {
     if (!canvasRef.current) return;
-    const engine = new Engine(canvasRef.current, { onPlayerPosition });
+    const engine = new Engine(canvasRef.current, { onPlayerPosition }, avatar);
     engineRef.current = engine;
     if (import.meta.env.DEV) {
       const w = window as unknown as { __letra: Engine; __letraInput: typeof getInputDebugState };

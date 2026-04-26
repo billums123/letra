@@ -1,5 +1,6 @@
 import * as THREE from "three";
-import { buildPlayer, type PlayerHandles } from "./player";
+import { buildAvatar, type PlayerHandles } from "./player";
+import type { AvatarKind } from "../state/store";
 import { buildWorld, type Obstacle } from "./world";
 import { readInput } from "../input/useInput";
 
@@ -43,7 +44,7 @@ export class Engine {
     this.actors.delete(actor);
   }
 
-  constructor(canvas: HTMLCanvasElement, events: EngineEvents = {}) {
+  constructor(canvas: HTMLCanvasElement, events: EngineEvents = {}, avatar: AvatarKind = "kid") {
     this.events = events;
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -86,7 +87,7 @@ export class Engine {
     this.scene.add(world.group);
     this.obstacles = world.obstacles;
 
-    this.player = buildPlayer();
+    this.player = buildAvatar(avatar);
     this.scene.add(this.player.group);
 
     this.clock = new THREE.Clock();
