@@ -958,10 +958,10 @@ export function LetterEditor() {
             <NumberRow label="Y" value={parts[selectedPart].pos.y} onChange={(v) => onPosInput("y", v)} />
             <NumberRow label="Z" value={parts[selectedPart].pos.z} onChange={(v) => onPosInput("z", v)} />
 
-            <h3 style={{ margin: "16px 0 6px 0" }}>{PART_LABELS[selectedPart]} rotation (rad)</h3>
-            <NumberRow label="X" value={parts[selectedPart].rot.x} onChange={(v) => onRotInput("x", v)} step={Math.PI / 36} min={-Math.PI * 2} max={Math.PI * 2} />
-            <NumberRow label="Y" value={parts[selectedPart].rot.y} onChange={(v) => onRotInput("y", v)} step={Math.PI / 36} min={-Math.PI * 2} max={Math.PI * 2} />
-            <NumberRow label="Z" value={parts[selectedPart].rot.z} onChange={(v) => onRotInput("z", v)} step={Math.PI / 36} min={-Math.PI * 2} max={Math.PI * 2} />
+            <h3 style={{ margin: "16px 0 6px 0" }}>{PART_LABELS[selectedPart]} rotation (°)</h3>
+            <NumberRow label="X" value={radToDeg(parts[selectedPart].rot.x)} onChange={(v) => onRotInput("x", degToRad(v))} step={5} min={-360} max={360} />
+            <NumberRow label="Y" value={radToDeg(parts[selectedPart].rot.y)} onChange={(v) => onRotInput("y", degToRad(v))} step={5} min={-360} max={360} />
+            <NumberRow label="Z" value={radToDeg(parts[selectedPart].rot.z)} onChange={(v) => onRotInput("z", degToRad(v))} step={5} min={-360} max={360} />
 
             <h3 style={{ margin: "16px 0 6px 0" }}>Sizes</h3>
             <NumberRow label="Eye r" value={parts.eyeRadius} onChange={(v) => setParts((p) => p && persistAndReturn({ ...p, eyeRadius: v }, letter, setOverrides))} step={0.005} />
@@ -1030,6 +1030,16 @@ function NumberRow({
       />
     </div>
   );
+}
+
+// The Three.js scene stores rotations as radians (Object3D.rotation.x/y/z),
+// but degrees are friendlier to author with — and they round to whole numbers.
+// We convert at the UI boundary only.
+function radToDeg(r: number): number {
+  return (r * 180) / Math.PI;
+}
+function degToRad(d: number): number {
+  return (d * Math.PI) / 180;
 }
 
 function tab(active: boolean): React.CSSProperties {
