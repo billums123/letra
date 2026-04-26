@@ -137,11 +137,14 @@ export class Engine {
         }
       }
 
-      // Smooth follow camera
+      // Smooth follow camera. We follow only the XZ plane — the player's
+      // Y oscillates from idle bob, but a camera that bobs with them
+      // makes the whole world feel like it's nodding. Anchor Y to the
+      // ground (player.y = 0) so the camera glides flat.
       const pos = this.player.position();
-      this.tmpVec.copy(pos).add(this.cameraOffset);
+      this.tmpVec.set(pos.x, 0, pos.z).add(this.cameraOffset);
       this.camera.position.lerp(this.tmpVec, 0.08);
-      this.tmpVec.copy(pos).add(this.cameraLookOffset);
+      this.tmpVec.set(pos.x, 0, pos.z).add(this.cameraLookOffset);
       this.camera.lookAt(this.tmpVec);
 
       // Per-actor update first (so collected letters can hide before render).

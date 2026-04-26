@@ -266,7 +266,9 @@ export function buildLetterCharacter(font: Font, opts: LetterOptions): LetterCha
       // don't touch group.rotation.y here — that's owned by faceTowards()
       // for camera billboarding. A tiny rotation.z gives the "alive" feel
       // without fighting the parent's yaw.
-      const baseBob = Math.sin(bobPhase) * 0.12;
+      // Bob upward only — Math.abs keeps the lower half of the sine wave
+      // out of the equation so feet never sink through the ground.
+      const baseBob = Math.abs(Math.sin(bobPhase)) * 0.12;
       group.position.y = baseY + baseBob;
       inner.rotation.z = Math.sin(swayPhase) * 0.05;
       inner.rotation.y = 0; // reset celebration spin between frames
@@ -546,7 +548,9 @@ function buildFromOverride(
     update(dt, _t) {
       bobPhase += dt * 2;
       swayPhase += dt * 1.4;
-      const baseBob = Math.sin(bobPhase) * 0.12;
+      // Bob upward only — Math.abs keeps the lower half of the sine wave
+      // out of the equation so feet never sink through the ground.
+      const baseBob = Math.abs(Math.sin(bobPhase)) * 0.12;
       group.position.y = baseY + baseBob;
       inner.rotation.z = Math.sin(swayPhase) * 0.05;
       inner.rotation.y = 0;
