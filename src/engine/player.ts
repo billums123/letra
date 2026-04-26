@@ -194,16 +194,18 @@ function buildCar(): PlayerHandles {
     group.add(pupil);
   }
 
-  // Cute grille smile under the headlights. The default half-torus arc
-  // opens downward (frown), so we rotate the geometry around its local Z
-  // axis by PI to flip the cup upward, then tilt forward by PI/2 to put
-  // it on the front bumper plane facing the camera.
+  // Cute grille smile under the headlights. The torus sits IN the front-
+  // face plane (XY at the bumper) so the camera sees it broadside; we
+  // only need a Z-axis flip to turn the default upper-half arc (frown)
+  // into a lower-half smile. The previous extra X rotation rolled the
+  // torus 90° forward so it appeared as a thin edge-on line from the
+  // front — which is what the screenshot showed.
   const smile = new THREE.Mesh(
     new THREE.TorusGeometry(0.18, 0.04, 8, 16, Math.PI),
     new THREE.MeshStandardMaterial({ color: 0x3a1c10 })
   );
-  smile.position.set(0, 0.34, 0.96);
-  smile.rotation.set(Math.PI / 2, 0, Math.PI);
+  smile.position.set(0, 0.34, 0.97);
+  smile.rotation.z = Math.PI;
   group.add(smile);
 
   // Wheels — 4 cylinders, capped on each side so the rim shows from any
