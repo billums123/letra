@@ -51,6 +51,67 @@ const ZERO_ROT: Vec3 = { x: 0, y: 0, z: 0 };
 const ARM_REST_ROT: Vec3 = { x: 0, y: 0, z: 0 }; // pivot has no inherent rotation
 const SMILE_REST_ROT: Vec3 = { x: Math.PI / 2, y: 0, z: 0 };
 
+// ─── Wave authoring ──────────────────────────────────────────────────────
+// All five built-in patterns map a phase value (in radians) into a
+// normalised [-1, 1] amplitude. The arm angle is then `offset +
+// pattern(phase * frequency) * amplitude`. Adding new patterns means
+// extending this table and the dropdown.
+type WavePattern = "sine" | "triangle" | "square" | "sawtooth" | "bounce" | "double-pulse";
+type WaveConfig = {
+  pattern: WavePattern;
+  amplitude: number;   // radians — peak swing magnitude
+  frequency: number;   // hz — full cycles per second
+  offset: number;      // radians — rest bias added to the swing
+};
+const DEFAULT_WAVE: WaveConfig = {
+  pattern: "sine",
+  amplitude: 1.0,
+  frequency: 2.86, // matches the in-game (sin(c*18))-ish feel: 18 rad/s ≈ 2.86 Hz
+  offset: -0.6,
+};
+const WAVE_PATTERN_LABEL: Record<WavePattern, string> = {
+  sine: "Sine (smooth)",
+  triangle: "Triangle (linear)",
+  square: "Square (snap)",
+  sawtooth: "Sawtooth (ramp)",
+  bounce: "Bounce (ease-out)",
+  "double-pulse": "Double pulse",
+};
+function wavePatternValue(pattern: WavePattern, phaseRad: number): number {
+  // Normalise phase to [0, 2π) for stable shapes regardless of accumulated
+  // time. Angle units throughout this module: radians.
+  const TWO_PI = Math.PI * 2;
+  const p = ((phaseRad % TWO_PI) + TWO_PI) % TWO_PI;
+  switch (pattern) {
+    case "sine":
+      return Math.sin(p);
+    case "triangle": {
+      // Goes 0→1→0→-1→0 across one cycle, linearly.
+      const t = p / TWO_PI; // 0..1
+      if (t < 0.25) return t * 4;
+      if (t < 0.75) return 2 - t * 4;
+      return t * 4 - 4;
+    }
+    case "square":
+      return p < Math.PI ? 1 : -1;
+    case "sawtooth": {
+      // Linear ramp -1 → 1 then snap back.
+      return (p / Math.PI) - 1;
+    }
+    case "bounce": {
+      // Two halves: ease-out up, ease-in down. Like a hand "throwing"
+      // a wave then settling back.
+      const t = p / TWO_PI;
+      const x = t < 0.5 ? t * 2 : 2 - t * 2;
+      return -1 + (1 - (1 - x) * (1 - x)) * 2;
+    }
+    case "double-pulse": {
+      // Two short waves per cycle — feels like an excited "hi! hi!" wave.
+      return Math.sin(p * 2) * (1 - p / TWO_PI * 0.4);
+    }
+  }
+}
+
 type PartId = keyof Omit<EditableParts, "eyeRadius" | "pupilRadius" | "shineRadius" | "smileRadius" | "cheekRadius" | "footRadius">;
 const PART_IDS: PartId[] = ["eye", "pupil", "shine", "smile", "cheek", "arm", "foot"];
 const PART_LABELS: Record<PartId, string> = {
@@ -354,6 +415,13 @@ export function LetterEditor() {
   const [isWaving, setIsWaving] = useState(false);
   const isWavingRef = useRef(false);
   const wavePhaseRef = useRef(0);
+  // Wave shape parameters — fully editable so the author can dial in the
+  // exact arm motion they want before locking it into the engine. All
+  // angles are stored in radians (the gizmo / Three.js use radians); the
+  // UI converts to degrees at the boundary.
+  const [waveConfig, setWaveConfig] = useState<WaveConfig>(DEFAULT_WAVE);
+  const waveConfigRef = useRef<WaveConfig>(DEFAULT_WAVE);
+  useEffect(() => { waveConfigRef.current = waveConfig; }, [waveConfig]);
 
   // Per-letter undo/redo history. Only the current letter has history at a
   // time — switching letters keeps each letter's history separate.
@@ -552,17 +620,20 @@ export function LetterEditor() {
             if (built.armPivotL) built.armPivotL.rotation.set(0, 0, 0);
           }
         } else if (isWavingRef.current) {
-          // Continuous wave: same motion as the celebration's arm pass, but
-          // with the body otherwise at rest so the user can audit limb
-          // placement in isolation. Advances regardless of pause toggling
-          // because we only increment when active.
+          // Continuous wave with editable shape parameters. Lets the author
+          // dial in the exact wave style without rebuilding the engine.
+          const cfg = waveConfigRef.current;
           wavePhaseRef.current += dt;
-          const c = wavePhaseRef.current;
+          // Phase units: radians. frequency Hz × 2π × dt would be the
+          // delta, but we accumulate in seconds and multiply on read so
+          // changing the frequency mid-wave doesn't cause a phase jump.
+          const phase = wavePhaseRef.current * cfg.frequency * Math.PI * 2;
+          const v = wavePatternValue(cfg.pattern, phase);
           built.root.position.y = built.baseY;
           built.inner.rotation.y = 0;
           built.inner.scale.setScalar(1);
-          built.armPivotR.rotation.z = Math.sin(c * 18) * 1.0 - 0.6;
-          if (built.armPivotL) built.armPivotL.rotation.z = -Math.sin(c * 18) * 1.0 + 0.6;
+          built.armPivotR.rotation.z = v * cfg.amplitude + cfg.offset;
+          if (built.armPivotL) built.armPivotL.rotation.z = -(v * cfg.amplitude) - cfg.offset;
         } else {
           // Hold rest pose so the part the user is editing stays put.
           built.root.position.y = built.baseY;
@@ -1013,6 +1084,72 @@ export function LetterEditor() {
             <NumberRow label="Foot r" value={parts.footRadius} onChange={(v) => setParts((p) => p && persistAndReturn({ ...p, footRadius: v }, letter, setOverrides))} step={0.005} />
           </>
         )}
+
+        <h3 style={{ margin: "20px 0 6px 0", display: "flex", alignItems: "center", gap: 8 }}>
+          Wave animation
+          <span style={{ fontSize: 11, opacity: 0.6, fontWeight: 500 }}>
+            {isWaving ? "playing" : "paused"}
+          </span>
+        </h3>
+        <p style={{ marginTop: 0, fontSize: 11, opacity: 0.7 }}>
+          Tunes the standalone 👋 Wave loop. Pattern, amplitude, frequency,
+          and resting offset all preview live.
+        </p>
+        <div style={{ marginBottom: 8 }}>
+          <label style={{ fontSize: 12, fontWeight: 700, display: "block", marginBottom: 4 }}>Pattern</label>
+          <select
+            value={waveConfig.pattern}
+            onChange={(e) => setWaveConfig({ ...waveConfig, pattern: e.target.value as WavePattern })}
+            style={{
+              width: "100%",
+              padding: 6,
+              fontSize: 13,
+              fontWeight: 700,
+              border: "1px solid #d8e6f0",
+              borderRadius: 6,
+            }}
+          >
+            {(Object.keys(WAVE_PATTERN_LABEL) as WavePattern[]).map((p) => (
+              <option key={p} value={p}>{WAVE_PATTERN_LABEL[p]}</option>
+            ))}
+          </select>
+        </div>
+        <NumberRow
+          label="Amp °"
+          value={radToDeg(waveConfig.amplitude)}
+          onChange={(v) => setWaveConfig({ ...waveConfig, amplitude: degToRad(v) })}
+          step={1}
+          min={0}
+          max={180}
+        />
+        <NumberRow
+          label="Freq Hz"
+          value={waveConfig.frequency}
+          onChange={(v) => setWaveConfig({ ...waveConfig, frequency: v })}
+          step={0.1}
+          min={0.1}
+          max={10}
+        />
+        <NumberRow
+          label="Rest °"
+          value={radToDeg(waveConfig.offset)}
+          onChange={(v) => setWaveConfig({ ...waveConfig, offset: degToRad(v) })}
+          step={1}
+          min={-90}
+          max={90}
+        />
+        <button
+          type="button"
+          onClick={() => setWaveConfig(DEFAULT_WAVE)}
+          style={{
+            ...btn("#ffd56b", "#3a2a14"),
+            width: "100%",
+            marginTop: 6,
+            boxShadow: "0 3px 0 rgba(0,0,0,0.12)",
+          }}
+        >
+          Reset wave
+        </button>
 
         <p style={{ marginTop: 24, fontSize: 11, opacity: 0.6 }}>
           Edits save automatically per-letter to localStorage. "Export" copies the
