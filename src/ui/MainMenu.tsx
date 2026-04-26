@@ -70,6 +70,8 @@ export function MainMenu() {
   const setScreen = useGameStore((s) => s.setScreen);
   const audioMode = useGameStore((s) => s.audioMode);
   const collected = useGameStore((s) => s.collected);
+  const avatar = useGameStore((s) => s.avatar);
+  const setAvatar = useGameStore((s) => s.setAvatar);
   const [showStickers, setShowStickers] = useState(false);
 
   // Welcome line on first paint.
@@ -142,6 +144,8 @@ export function MainMenu() {
           ariaLabel="Match the sound to the letter"
         />
       </main>
+
+      <AvatarPicker avatar={avatar} setAvatar={setAvatar} />
       <footer
         style={{
           padding: "12px 24px 16px",
@@ -223,6 +227,86 @@ export function MainMenu() {
       </button>
 
       <StickerBook open={showStickers} onClose={() => setShowStickers(false)} />
+    </div>
+  );
+}
+
+type AvatarOption = { kind: "kid" | "car"; label: string; emoji: string; color: string };
+const AVATAR_OPTIONS: AvatarOption[] = [
+  { kind: "kid", label: "Kid", emoji: "🧒", color: "#ff8c4a" },
+  { kind: "car", label: "Car", emoji: "🚗", color: "#ff5555" },
+];
+
+// Two cartoony cards floating along the bottom-left of the menu so kids
+// can switch what they drive without having to leave the menu screen.
+// The active option gets a thicker ring + slight pop. Voiceover speaks
+// the option name when hovered/touched (helps non-readers).
+function AvatarPicker({
+  avatar,
+  setAvatar,
+}: {
+  avatar: "kid" | "car";
+  setAvatar: (a: "kid" | "car") => void;
+}) {
+  return (
+    <div
+      style={{
+        position: "absolute",
+        bottom: 24,
+        left: 24,
+        display: "flex",
+        gap: 10,
+        zIndex: 8,
+      }}
+      aria-label="Pick your character"
+    >
+      <span
+        style={{
+          alignSelf: "center",
+          fontSize: 13,
+          fontWeight: 800,
+          background: "rgba(255,255,255,0.8)",
+          color: "#3a2a14",
+          padding: "6px 10px",
+          borderRadius: 10,
+          marginRight: 4,
+        }}
+      >
+        Play as:
+      </span>
+      {AVATAR_OPTIONS.map((opt) => {
+        const active = avatar === opt.kind;
+        return (
+          <button
+            key={opt.kind}
+            type="button"
+            onClick={() => {
+              setAvatar(opt.kind);
+              audio.speak(opt.label);
+            }}
+            onMouseEnter={() => audio.speak(opt.label)}
+            onTouchStart={() => audio.speak(opt.label)}
+            aria-label={`Play as ${opt.label}${active ? ", currently selected" : ""}`}
+            aria-pressed={active}
+            style={{
+              appearance: "none",
+              border: active ? "5px solid white" : "3px solid rgba(255,255,255,0.6)",
+              background: opt.color,
+              color: "white",
+              borderRadius: 22,
+              padding: "10px 14px 6px",
+              cursor: "pointer",
+              boxShadow: active ? "0 8px 0 rgba(0,0,0,0.2)" : "0 4px 0 rgba(0,0,0,0.15)",
+              minWidth: 76,
+              transform: active ? "translateY(-2px)" : "none",
+              transition: "transform 0.12s ease",
+            }}
+          >
+            <div style={{ fontSize: 36, lineHeight: 1 }} aria-hidden>{opt.emoji}</div>
+            <div style={{ fontSize: 12, fontWeight: 900, marginTop: 4 }}>{opt.label}</div>
+          </button>
+        );
+      })}
     </div>
   );
 }
