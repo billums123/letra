@@ -157,28 +157,24 @@ export function MainMenu() {
         </span>
       </footer>
 
-      <button
-        type="button"
-        onClick={() => setScreen("letter-test")}
-        aria-label="Open the letter test page"
-        style={{
-          position: "absolute",
-          top: 24,
-          left: 24,
-          appearance: "none",
-          border: "4px solid white",
-          background: "rgba(255,255,255,0.7)",
-          color: "#3a2a14",
-          borderRadius: 16,
-          padding: "8px 14px",
-          fontSize: 14,
-          fontWeight: 800,
-          cursor: "pointer",
-          boxShadow: "0 4px 0 rgba(0,0,0,0.12)",
-        }}
-      >
-        🔍 Letter test
-      </button>
+      <div style={{ position: "absolute", top: 24, left: 24, display: "flex", gap: 8 }}>
+        <button
+          type="button"
+          onClick={() => setScreen("letter-test")}
+          aria-label="Open the letter test page"
+          style={cornerBtn}
+        >
+          🔍 Letter test
+        </button>
+        <button
+          type="button"
+          onClick={() => setScreen("letter-editor")}
+          aria-label="Open the 3D letter editor"
+          style={cornerBtn}
+        >
+          ✏️ Editor
+        </button>
+      </div>
 
       <button
         type="button"
@@ -225,3 +221,16 @@ export function MainMenu() {
     </div>
   );
 }
+
+const cornerBtn: React.CSSProperties = {
+  appearance: "none",
+  border: "4px solid white",
+  background: "rgba(255,255,255,0.7)",
+  color: "#3a2a14",
+  borderRadius: 16,
+  padding: "8px 14px",
+  fontSize: 14,
+  fontWeight: 800,
+  cursor: "pointer",
+  boxShadow: "0 4px 0 rgba(0,0,0,0.12)",
+};
