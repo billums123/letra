@@ -1,0 +1,145 @@
+{
+  "voiceId": "A2JkxH7o94rRxvRjHHLO",
+  "modelId": "eleven_multilingual_v2",
+  "generatedAt": "2026-04-26T23:43:10.116Z",
+  "letters": {
+    "A": {
+      "name": "letter-A-name",
+      "sound": "letter-A-sound"
+    },
+    "B": {
+      "name": "letter-B-name",
+      "sound": "letter-B-sound"
+    },
+    "C": {
+      "name": "letter-C-name",
+      "sound": "letter-C-sound"
+    },
+    "D": {
+      "name": "letter-D-name",
+      "sound": "letter-D-sound"
+    },
+    "E": {
+      "name": "letter-E-name",
+      "sound": "letter-E-sound"
+    },
+    "F": {
+      "name": "letter-F-name",
+      "sound": "letter-F-sound"
+    },
+    "G": {
+      "name": "letter-G-name",
+      "sound": "letter-G-sound"
+    },
+    "H": {
+      "name": "letter-H-name",
+      "sound": "letter-H-sound"
+    },
+    "I": {
+      "name": "letter-I-name",
+      "sound": "letter-I-sound"
+    },
+    "J": {
+      "name": "letter-J-name",
+      "sound": "letter-J-sound"
+    },
+    "K": {
+      "name": "letter-K-name",
+      "sound": "letter-K-sound"
+    },
+    "L": {
+      "name": "letter-L-name",
+      "sound": "letter-L-sound"
+    },
+    "M": {
+      "name": "letter-M-name",
+      "sound": "letter-M-sound"
+    },
+    "N": {
+      "name": "letter-N-name",
+      "sound": "letter-N-sound"
+    },
+    "O": {
+      "name": "letter-O-name",
+      "sound": "letter-O-sound"
+    },
+    "P": {
+      "name": "letter-P-name",
+      "sound": "letter-P-sound"
+    },
+    "Q": {
+      "name": "letter-Q-name",
+      "sound": "letter-Q-sound"
+    },
+    "R": {
+      "name": "letter-R-name",
+      "sound": "letter-R-sound"
+    },
+    "S": {
+      "name": "letter-S-name",
+      "sound": "letter-S-sound"
+    },
+    "T": {
+      "name": "letter-T-name",
+      "sound": "letter-T-sound"
+    },
+    "U": {
+      "name": "letter-U-name",
+      "sound": "letter-U-sound"
+    },
+    "V": {
+      "name": "letter-V-name",
+      "sound": "letter-V-sound"
+    },
+    "W": {
+      "name": "letter-W-name",
+      "sound": "letter-W-sound"
+    },
+    "X": {
+      "name": "letter-X-name",
+      "sound": "letter-X-sound"
+    },
+    "Y": {
+      "name": "letter-Y-name",
+      "sound": "letter-Y-sound"
+    },
+    "Z": {
+      "name": "letter-Z-name",
+      "sound": "letter-Z-sound"
+    }
+  },
+  "prompts": {
+    "spell-CAT": "prompt-spell-CAT",
+    "spell-CAT-reveal": "reveal-spell-CAT",
+    "spell-DOG": "prompt-spell-DOG",
+    "spell-DOG-reveal": "reveal-spell-DOG",
+    "spell-SUN": "prompt-spell-SUN",
+    "spell-SUN-reveal": "reveal-spell-SUN",
+    "spell-BUS": "prompt-spell-BUS",
+    "spell-BUS-reveal": "reveal-spell-BUS",
+    "spell-PIG": "prompt-spell-PIG",
+    "spell-PIG-reveal": "reveal-spell-PIG",
+    "find-alphabet": "prompt-find-alphabet",
+    "sound-match": "prompt-sound-match",
+    "sound-match-replay": "prompt-sound-match-replay"
+  },
+  "celebrate": [
+    "celebrate-1",
+    "celebrate-2",
+    "celebrate-3",
+    "celebrate-4",
+    "celebrate-5",
+    "celebrate-6"
+  ],
+  "hints": {
+    "keepLooking": "hint-keep-looking",
+    "lookAround": "hint-look-around"
+  },
+  "menu": {
+    "welcome": "menu-welcome",
+    "spell": "menu-spell",
+    "alphabet": "menu-alphabet",
+    "sounds": "menu-sounds",
+    "back": "menu-back"
+  }
+}
