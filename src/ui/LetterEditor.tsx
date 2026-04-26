@@ -6,7 +6,50 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { TransformControls } from "three/examples/jsm/controls/TransformControls.js";
 import { ALPHABET } from "../audio/types";
 import { colorFor, loadFont } from "../engine/letters";
+import {
+  type EditableParts as SharedEditableParts,
+  type MouthShape as SharedMouthShape,
+  type Pair as SharedPair,
+  type Transform as SharedTransform,
+  type Vec3 as SharedVec3,
+  type WaveConfig as SharedWaveConfig,
+  type WavePattern as SharedWavePattern,
+  ARM_REST_ROT as SHARED_ARM_REST,
+  DEFAULT_WAVE as SHARED_DEFAULT_WAVE,
+  MOUTH_LABEL as SHARED_MOUTH_LABEL,
+  SMILE_REST_ROT as SHARED_SMILE_REST,
+  WAVE_PATTERN_LABEL as SHARED_WAVE_PATTERN_LABEL,
+  ZERO_ROT as SHARED_ZERO_ROT,
+  makeMouth as sharedMakeMouth,
+  mirrorT as sharedMirrorT,
+  pairFromR as sharedPairFromR,
+  wavePatternValue as sharedWavePatternValue,
+} from "../engine/letterShapes";
 import { useGameStore } from "../state/store";
+
+// The editor still owns the higher-level UI types (PartId, Side, etc.)
+// but every concept that touches the runtime (transforms, mouth geometry,
+// wave math, the EditableParts shape) is now imported from
+// engine/letterShapes so the editor and game render identically. The
+// local aliases below preserve the existing names so the rest of the
+// file doesn't need rewiring.
+type Vec3 = SharedVec3;
+type Transform = SharedTransform;
+type Pair = SharedPair;
+type MouthShape = SharedMouthShape;
+type WavePattern = SharedWavePattern;
+type WaveConfig = SharedWaveConfig;
+type EditableParts = SharedEditableParts;
+const ZERO_ROT = SHARED_ZERO_ROT;
+const ARM_REST_ROT = SHARED_ARM_REST;
+const SMILE_REST_ROT = SHARED_SMILE_REST;
+const DEFAULT_WAVE = SHARED_DEFAULT_WAVE;
+const WAVE_PATTERN_LABEL = SHARED_WAVE_PATTERN_LABEL;
+const MOUTH_LABEL = SHARED_MOUTH_LABEL;
+const mirrorT = sharedMirrorT;
+const pairFromR = sharedPairFromR;
+const wavePatternValue = sharedWavePatternValue;
+const makeMouth = sharedMakeMouth;
 
 // 3D letter editor.
 //
@@ -27,58 +70,7 @@ import { useGameStore } from "../state/store";
 // game uses, with the same materials, just rebuilt every frame from the
 // editable transforms instead of a fixed function.
 
-type Vec3 = { x: number; y: number; z: number };
-type Transform = { pos: Vec3; rot: Vec3 };
-// Symmetric parts hold both sides explicitly so the user can break the
-// mirror on any individual feature (e.g. wonky-eye letters). The build
-// logic reads each side directly — no global mirror flag any more.
-type Pair = { R: Transform; L: Transform };
 type Side = "R" | "L" | "both";
-type MouthShape = "smile" | "big-smile" | "open-smile" | "frown" | "smirk-left" | "smirk-right" | "open-o" | "flat";
-type EditableParts = {
-  eye: Pair;
-  pupil: Pair; // pos relative to its eye
-  shine: Pair; // pos relative to its eye
-  smile: Transform; // single (centred mouth)
-  mouthShape: MouthShape;
-  cheek: Pair;
-  arm: Pair;
-  foot: Pair;
-  // Sizes (single value, applies to whichever side is rendered)
-  eyeRadius: number;
-  pupilRadius: number;
-  shineRadius: number;
-  smileRadius: number;
-  cheekRadius: number;
-  footRadius: number;
-  // Wave animation tuning is *per-letter* — different letters can have
-  // different arm-swing personalities (B might do a big slow wave, I a
-  // tight quick one).
-  wave: WaveConfig;
-  // Hidden parts. Keys: "eye:R" | "eye:L" | "pupil:R" | "pupil:L" |
-  // "shine:R" | "shine:L" | "cheek:R" | "cheek:L" | "arm:R" | "arm:L" |
-  // "foot:R" | "foot:L" | "smile". A truthy value means "don't render
-  // this part" — lets the author build eyeless, mouthless, one-eyed, or
-  // armless letters.
-  hidden: Partial<Record<string, boolean>>;
-};
-
-const ZERO_ROT: Vec3 = { x: 0, y: 0, z: 0 };
-const ARM_REST_ROT: Vec3 = { x: 0, y: 0, z: 0 }; // pivot has no inherent rotation
-const SMILE_REST_ROT: Vec3 = { x: Math.PI / 2, y: 0, z: 0 };
-
-// Mirror a Transform across the X axis. Position negates X; rotations
-// around Y and Z negate (rotation about X stays the same — that's still
-// the same axis after a left/right flip).
-function mirrorT(t: Transform): Transform {
-  return {
-    pos: { x: -t.pos.x, y: t.pos.y, z: t.pos.z },
-    rot: { x: t.rot.x, y: -t.rot.y, z: -t.rot.z },
-  };
-}
-function pairFromR(R: Transform): Pair {
-  return { R, L: mirrorT(R) };
-}
 
 // Helpers for reading / writing per-side data given the current selection.
 function isPaired(id: "eye" | "pupil" | "shine" | "smile" | "cheek" | "arm" | "foot"): id is "eye" | "pupil" | "shine" | "cheek" | "arm" | "foot" {
@@ -132,67 +124,6 @@ function applyEdit(
   return { ...parts, [id]: { R: newT, L: mirrorT(newT) } };
 }
 
-// ─── Wave authoring ──────────────────────────────────────────────────────
-// All five built-in patterns map a phase value (in radians) into a
-// normalised [-1, 1] amplitude. The arm angle is then `offset +
-// pattern(phase * frequency) * amplitude`. Adding new patterns means
-// extending this table and the dropdown.
-type WavePattern = "sine" | "triangle" | "square" | "sawtooth" | "bounce" | "double-pulse";
-type WaveConfig = {
-  pattern: WavePattern;
-  amplitude: number;   // radians — peak swing magnitude
-  frequency: number;   // hz — full cycles per second
-  offset: number;      // radians — rest bias added to the swing
-};
-const DEFAULT_WAVE: WaveConfig = {
-  pattern: "sine",
-  amplitude: 1.0,
-  frequency: 2.86, // matches the in-game (sin(c*18))-ish feel: 18 rad/s ≈ 2.86 Hz
-  offset: -0.6,
-};
-const WAVE_PATTERN_LABEL: Record<WavePattern, string> = {
-  sine: "Sine (smooth)",
-  triangle: "Triangle (linear)",
-  square: "Square (snap)",
-  sawtooth: "Sawtooth (ramp)",
-  bounce: "Bounce (ease-out)",
-  "double-pulse": "Double pulse",
-};
-function wavePatternValue(pattern: WavePattern, phaseRad: number): number {
-  // Normalise phase to [0, 2π) for stable shapes regardless of accumulated
-  // time. Angle units throughout this module: radians.
-  const TWO_PI = Math.PI * 2;
-  const p = ((phaseRad % TWO_PI) + TWO_PI) % TWO_PI;
-  switch (pattern) {
-    case "sine":
-      return Math.sin(p);
-    case "triangle": {
-      // Goes 0→1→0→-1→0 across one cycle, linearly.
-      const t = p / TWO_PI; // 0..1
-      if (t < 0.25) return t * 4;
-      if (t < 0.75) return 2 - t * 4;
-      return t * 4 - 4;
-    }
-    case "square":
-      return p < Math.PI ? 1 : -1;
-    case "sawtooth": {
-      // Linear ramp -1 → 1 then snap back.
-      return (p / Math.PI) - 1;
-    }
-    case "bounce": {
-      // Two halves: ease-out up, ease-in down. Like a hand "throwing"
-      // a wave then settling back.
-      const t = p / TWO_PI;
-      const x = t < 0.5 ? t * 2 : 2 - t * 2;
-      return -1 + (1 - (1 - x) * (1 - x)) * 2;
-    }
-    case "double-pulse": {
-      // Two short waves per cycle — feels like an excited "hi! hi!" wave.
-      return Math.sin(p * 2) * (1 - p / TWO_PI * 0.4);
-    }
-  }
-}
-
 type PartId = "eye" | "pupil" | "shine" | "smile" | "cheek" | "arm" | "foot";
 const PART_IDS: PartId[] = ["eye", "pupil", "shine", "smile", "cheek", "arm", "foot"];
 const PART_LABELS: Record<PartId, string> = {
@@ -206,17 +137,6 @@ const PART_LABELS: Record<PartId, string> = {
 };
 const SYMMETRIC: Record<PartId, boolean> = {
   eye: true, pupil: true, shine: true, smile: false, cheek: true, arm: true, foot: true,
-};
-
-const MOUTH_LABEL: Record<MouthShape, string> = {
-  smile: "Smile",
-  "big-smile": "Big smile",
-  "open-smile": "Open mouth",
-  frown: "Frown",
-  "smirk-left": "Smirk (left)",
-  "smirk-right": "Smirk (right)",
-  "open-o": "Surprised O",
-  flat: "Flat line",
 };
 
 // Bumped to v2 — the storage shape changed when symmetric parts started
@@ -564,80 +484,6 @@ function buildEditableLetter(
     size: { width: size.x, height: size.y },
     dispose,
   };
-}
-
-// Build the chosen mouth geometry. Each shape is wrapped in a group so the
-// gizmo handles a consistent target regardless of the underlying primitive.
-function makeMouth(shape: MouthShape, radius: number, mat: THREE.Material): THREE.Group {
-  const g = new THREE.Group();
-  const tube = Math.max(0.03, radius * 0.22);
-  switch (shape) {
-    case "smile": {
-      const m = new THREE.Mesh(new THREE.TorusGeometry(radius, tube, 8, 16, Math.PI), mat);
-      g.add(m);
-      break;
-    }
-    case "big-smile": {
-      // Wider arc + thicker tube for an exuberant grin.
-      const m = new THREE.Mesh(new THREE.TorusGeometry(radius * 1.3, tube * 1.3, 8, 18, Math.PI * 1.1), mat);
-      g.add(m);
-      break;
-    }
-    case "open-smile": {
-      // Smile + a tiny dark inside-mouth shape so it reads "open".
-      const arc = new THREE.Mesh(new THREE.TorusGeometry(radius, tube * 1.2, 8, 18, Math.PI), mat);
-      g.add(arc);
-      const inside = new THREE.Mesh(
-        new THREE.SphereGeometry(radius * 0.6, 12, 8, 0, Math.PI * 2, Math.PI / 2, Math.PI / 2),
-        new THREE.MeshStandardMaterial({ color: 0x2b0d05 })
-      );
-      inside.position.y = -radius * 0.15;
-      inside.scale.set(1, 0.6, 0.5);
-      g.add(inside);
-      break;
-    }
-    case "frown": {
-      // Same arc, flipped — angry/sad letter.
-      const m = new THREE.Mesh(new THREE.TorusGeometry(radius, tube, 8, 16, Math.PI), mat);
-      m.rotation.z = Math.PI;
-      m.position.y = -radius * 0.6; // raise so the corners sit at smile-Y
-      g.add(m);
-      break;
-    }
-    case "smirk-left": {
-      // Half a smile, the left half longer.
-      const m = new THREE.Mesh(new THREE.TorusGeometry(radius, tube, 8, 14, Math.PI * 0.7), mat);
-      m.position.x = -radius * 0.25;
-      g.add(m);
-      break;
-    }
-    case "smirk-right": {
-      const m = new THREE.Mesh(new THREE.TorusGeometry(radius, tube, 8, 14, Math.PI * 0.7), mat);
-      m.position.x = radius * 0.25;
-      m.rotation.y = Math.PI; // flips the arc orientation
-      g.add(m);
-      break;
-    }
-    case "open-o": {
-      // Surprised "o" — full ring, smaller.
-      const m = new THREE.Mesh(new THREE.TorusGeometry(radius * 0.65, tube * 1.1, 10, 20), mat);
-      g.add(m);
-      const inside = new THREE.Mesh(
-        new THREE.CircleGeometry(radius * 0.55, 16),
-        new THREE.MeshStandardMaterial({ color: 0x2b0d05, side: THREE.DoubleSide })
-      );
-      g.add(inside);
-      break;
-    }
-    case "flat": {
-      // Stoic line — a thin capsule.
-      const m = new THREE.Mesh(new THREE.CapsuleGeometry(tube * 1.2, radius * 1.4, 4, 8), mat);
-      m.rotation.z = Math.PI / 2;
-      g.add(m);
-      break;
-    }
-  }
-  return g;
 }
 
 type GizmoMode = "translate" | "rotate";

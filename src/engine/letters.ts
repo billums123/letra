@@ -1,6 +1,20 @@
 import * as THREE from "three";
 import { Font, FontLoader } from "three/examples/jsm/loaders/FontLoader.js";
 import { TextGeometry } from "three/examples/jsm/geometries/TextGeometry.js";
+import {
+  type EditableParts,
+  type Transform,
+  DEFAULT_WAVE,
+  makeMouth,
+  wavePatternValue,
+} from "./letterShapes";
+import letterFixtures from "./letterFixtures.json";
+
+// Authored per-letter overrides exported from the in-app editor. Keys are
+// the case-preserved glyph ("A", "a", …). When an override exists for the
+// glyph we render from the JSON; otherwise we fall through to the
+// procedural builder (used by un-authored letters and any future glyph).
+const LETTER_OVERRIDES = letterFixtures as Record<string, EditableParts>;
 
 // Cute, walking-around letter characters. Each letter is an extruded glyph from
 // helvetiker_bold, with googly eyes, little arms, feet, and a smile. The
@@ -69,6 +83,16 @@ export function buildLetterCharacter(font: Font, opts: LetterOptions): LetterCha
   const upper = opts.letter.toUpperCase();
   const display = opts.lowercase ? opts.letter.toLowerCase() : upper;
   const color = colorFor(upper);
+
+  // If the editor has authored an override for this exact glyph, render
+  // from that. We key by the displayed character so 'A' and 'a' have
+  // independent layouts — uppercase forms ship today; lowercase will
+  // get its own fixtures later.
+  const override = LETTER_OVERRIDES[display];
+  if (override) {
+    return buildFromOverride(font, display, upper, override, color);
+  }
+
   // Outer group: world position + Y-axis billboard.
   // Inner group: every cosmetic mesh + idle/celebration animation.
   // Splitting the two means we can rotate the body for celebration spin
@@ -315,3 +339,265 @@ export function distanceXZ(a: { x: number; z: number }, b: { x: number; z: numbe
 
 // Avoid linter warnings about unused box helper.
 void tmpBox;
+
+// ─── Override-driven builder ────────────────────────────────────────────
+// Renders a letter using authored EditableParts data instead of computing
+// everything procedurally. Animation behaviour mirrors the procedural
+// path (idle bob, sway, celebration jump+spin+pulse) but the celebration
+// arm pass uses the authored wave config so each letter's personality
+// shows through during pickup. Hidden parts are skipped, including
+// pupil/shine when their parent eye is hidden.
+function buildFromOverride(
+  font: Font,
+  display: string,
+  upperKey: string,
+  parts: EditableParts,
+  color: THREE.Color
+): LetterCharacter {
+  const group = new THREE.Group();
+  const inner = new THREE.Group();
+  group.name = `Letter-${upperKey}`;
+  group.add(inner);
+
+  const isHidden = (key: string) => !!parts.hidden?.[key];
+  // Treat zero / negative authored radii as hidden too — that's how the
+  // editor's slider effectively "removes" a part on some letters.
+  const isVisibleSize = (r: number) => r > 0.005;
+
+  const letterMat = new THREE.MeshStandardMaterial({
+    color,
+    roughness: 0.55,
+    metalness: 0.05,
+    emissive: color.clone().multiplyScalar(0.08),
+  });
+  const geo = new TextGeometry(display, {
+    font,
+    size: 1.6,
+    depth: 0.55,
+    curveSegments: 6,
+    bevelEnabled: true,
+    bevelThickness: 0.07,
+    bevelSize: 0.05,
+    bevelSegments: 3,
+  });
+  geo.computeBoundingBox();
+  const bb = geo.boundingBox!;
+  const cx = (bb.min.x + bb.max.x) / 2;
+  geo.translate(-cx, -bb.min.y, 0);
+  geo.computeBoundingBox();
+  const letterMesh = new THREE.Mesh(geo, letterMat);
+  letterMesh.castShadow = true;
+  letterMesh.receiveShadow = true;
+  inner.add(letterMesh);
+
+  const setRot = (obj: THREE.Object3D, r: { x: number; y: number; z: number }) =>
+    obj.rotation.set(r.x, r.y, r.z);
+
+  // Eyes — both sides explicitly. Pupil/shine are eye-children, so a
+  // hidden pupil means "no pupil mesh inside this eye" but the eye still
+  // shows. A hidden eye drops the whole sub-tree.
+  const buildEye = (eyeT: Transform, pupilT: Transform, shineT: Transform, sideKey: "R" | "L") => {
+    if (isHidden(`eye:${sideKey}`)) return;
+    const eyeGroup = new THREE.Group();
+    eyeGroup.position.set(eyeT.pos.x, eyeT.pos.y, eyeT.pos.z);
+    setRot(eyeGroup, eyeT.rot);
+    if (isVisibleSize(parts.eyeRadius)) {
+      const sclera = new THREE.Mesh(
+        new THREE.SphereGeometry(parts.eyeRadius, 16, 12),
+        new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.35 })
+      );
+      eyeGroup.add(sclera);
+    }
+    if (!isHidden(`pupil:${sideKey}`) && isVisibleSize(parts.pupilRadius)) {
+      const pupil = new THREE.Mesh(
+        new THREE.SphereGeometry(parts.pupilRadius, 12, 10),
+        new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.5 })
+      );
+      pupil.position.set(pupilT.pos.x, pupilT.pos.y, pupilT.pos.z);
+      setRot(pupil, pupilT.rot);
+      eyeGroup.add(pupil);
+    }
+    if (!isHidden(`shine:${sideKey}`) && isVisibleSize(parts.shineRadius)) {
+      const shine = new THREE.Mesh(
+        new THREE.SphereGeometry(parts.shineRadius, 8, 6),
+        new THREE.MeshBasicMaterial({ color: 0xffffff })
+      );
+      shine.position.set(shineT.pos.x, shineT.pos.y, shineT.pos.z);
+      setRot(shine, shineT.rot);
+      eyeGroup.add(shine);
+    }
+    inner.add(eyeGroup);
+  };
+  buildEye(parts.eye.R, parts.pupil.R, parts.shine.R, "R");
+  buildEye(parts.eye.L, parts.pupil.L, parts.shine.L, "L");
+
+  // Mouth
+  if (!isHidden("smile") && isVisibleSize(parts.smileRadius)) {
+    const mouthMat = new THREE.MeshStandardMaterial({ color: 0x6b1d10 });
+    const mouthGroup = makeMouth(parts.mouthShape, parts.smileRadius, mouthMat);
+    mouthGroup.position.set(parts.smile.pos.x, parts.smile.pos.y, parts.smile.pos.z);
+    setRot(mouthGroup, parts.smile.rot);
+    inner.add(mouthGroup);
+  }
+
+  // Cheeks
+  if (isVisibleSize(parts.cheekRadius)) {
+    const cheekMat = new THREE.MeshStandardMaterial({ color: 0xff8aaa, transparent: true, opacity: 0.75 });
+    const cheekGeo = new THREE.SphereGeometry(parts.cheekRadius, 10, 8);
+    if (!isHidden("cheek:R")) {
+      const cheekR = new THREE.Mesh(cheekGeo, cheekMat);
+      cheekR.position.set(parts.cheek.R.pos.x, parts.cheek.R.pos.y, parts.cheek.R.pos.z);
+      setRot(cheekR, parts.cheek.R.rot);
+      cheekR.scale.set(1, 0.7, 0.4);
+      inner.add(cheekR);
+    }
+    if (!isHidden("cheek:L")) {
+      const cheekL = new THREE.Mesh(cheekGeo, cheekMat);
+      cheekL.position.set(parts.cheek.L.pos.x, parts.cheek.L.pos.y, parts.cheek.L.pos.z);
+      setRot(cheekL, parts.cheek.L.rot);
+      cheekL.scale.set(1, 0.7, 0.4);
+      inner.add(cheekL);
+    }
+  }
+
+  // Arms — pivots are always created so the animation code can write to
+  // them without null checks; we only suppress adding them to the scene
+  // when hidden. Authored rest rotation is captured for restoring after
+  // celebrations / waves.
+  const limbMat = new THREE.MeshStandardMaterial({ color, roughness: 0.5 });
+  const armGeo = new THREE.CapsuleGeometry(0.1, 0.45, 4, 8);
+  const armPivotR = new THREE.Group();
+  armPivotR.position.set(parts.arm.R.pos.x, parts.arm.R.pos.y, parts.arm.R.pos.z);
+  setRot(armPivotR, parts.arm.R.rot);
+  const armR = new THREE.Mesh(armGeo, limbMat);
+  armR.position.set(0.25, -0.05, 0);
+  armR.rotation.z = Math.PI / 4;
+  armR.castShadow = true;
+  armPivotR.add(armR);
+  if (!isHidden("arm:R")) inner.add(armPivotR);
+  const armPivotL = new THREE.Group();
+  armPivotL.position.set(parts.arm.L.pos.x, parts.arm.L.pos.y, parts.arm.L.pos.z);
+  setRot(armPivotL, parts.arm.L.rot);
+  const armL = new THREE.Mesh(armGeo, limbMat);
+  armL.position.set(-0.25, -0.05, 0);
+  armL.rotation.z = -Math.PI / 4;
+  armL.castShadow = true;
+  armPivotL.add(armL);
+  if (!isHidden("arm:L")) inner.add(armPivotL);
+
+  // Capture the authored rest rotations once so the idle / post-celebrate
+  // restore is independent of any later overwrites.
+  const armRestR = { ...parts.arm.R.rot };
+  const armRestL = { ...parts.arm.L.rot };
+
+  // Feet
+  if (isVisibleSize(parts.footRadius)) {
+    const footMat = new THREE.MeshStandardMaterial({ color: 0x3a2a14, roughness: 0.7 });
+    const footGeo = new THREE.SphereGeometry(parts.footRadius, 10, 8);
+    if (!isHidden("foot:R")) {
+      const footR = new THREE.Mesh(footGeo, footMat);
+      footR.position.set(parts.foot.R.pos.x, parts.foot.R.pos.y, parts.foot.R.pos.z);
+      setRot(footR, parts.foot.R.rot);
+      footR.scale.set(1, 0.6, 1.2);
+      footR.castShadow = true;
+      inner.add(footR);
+    }
+    if (!isHidden("foot:L")) {
+      const footL = new THREE.Mesh(footGeo, footMat);
+      footL.position.set(parts.foot.L.pos.x, parts.foot.L.pos.y, parts.foot.L.pos.z);
+      setRot(footL, parts.foot.L.rot);
+      footL.scale.set(1, 0.6, 1.2);
+      footL.castShadow = true;
+      inner.add(footL);
+    }
+  }
+
+  // Soft glow disc on the ground. Uses the glyph's actual width so it
+  // hugs the letter even when the user shrunk other features.
+  const size = new THREE.Vector3();
+  geo.boundingBox!.getSize(size);
+  const glow = new THREE.Mesh(
+    new THREE.CircleGeometry(Math.max(size.x * 0.7, 0.9), 24),
+    new THREE.MeshBasicMaterial({
+      color,
+      transparent: true,
+      opacity: 0.25,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    })
+  );
+  glow.rotation.x = -Math.PI / 2;
+  glow.position.y = 0.02;
+  inner.add(glow);
+
+  // Animation state
+  let bobPhase = Math.random() * Math.PI * 2;
+  let swayPhase = Math.random() * Math.PI * 2;
+  let celebrationT = -1;
+  const baseY = 0;
+  let isCollected = false;
+  const wave = parts.wave ?? DEFAULT_WAVE;
+
+  const character: LetterCharacter = {
+    group,
+    letter: upperKey,
+    get isCollected() { return isCollected; },
+    set isCollected(_v) {},
+    update(dt, _t) {
+      bobPhase += dt * 2;
+      swayPhase += dt * 1.4;
+      const baseBob = Math.sin(bobPhase) * 0.12;
+      group.position.y = baseY + baseBob;
+      inner.rotation.z = Math.sin(swayPhase) * 0.05;
+      inner.rotation.y = 0;
+
+      // Idle arms: oscillate around the AUTHORED rest rotation rather
+      // than zero, so a letter posed with arms-akimbo or arms-up still
+      // reads correctly when it's just standing there.
+      const idleSwing = Math.sin(bobPhase * 1.2) * 0.12;
+      armPivotR.rotation.set(armRestR.x, armRestR.y, armRestR.z + idleSwing);
+      armPivotL.rotation.set(armRestL.x, armRestL.y, armRestL.z - idleSwing);
+
+      if (celebrationT >= 0) {
+        celebrationT += dt;
+        const k = Math.min(celebrationT / 1.6, 1);
+        const jump = Math.sin(k * Math.PI) * 1.4;
+        group.position.y = baseY + baseBob + jump;
+        inner.rotation.y = k * Math.PI * 2;
+        // Wave both arms using THIS letter's authored wave config —
+        // the same motion the editor's preview shows.
+        const phase = celebrationT * wave.frequency * Math.PI * 2;
+        const v = wavePatternValue(wave.pattern, phase);
+        armPivotR.rotation.z = v * wave.amplitude + wave.offset;
+        armPivotL.rotation.z = -(v * wave.amplitude) - wave.offset;
+        const s = 1 + 0.15 * Math.sin(k * Math.PI * 2);
+        inner.scale.setScalar(s);
+        if (k >= 1) {
+          isCollected = true;
+        }
+      } else {
+        inner.scale.setScalar(1);
+      }
+    },
+    celebrate() {
+      if (celebrationT < 0) celebrationT = 0;
+    },
+    positionXZ() {
+      return { x: group.position.x, z: group.position.z };
+    },
+    faceTowards(x, z) {
+      const dx = x - group.position.x;
+      const dz = z - group.position.z;
+      group.rotation.y = Math.atan2(dx, dz);
+    },
+  };
+
+  group.userData.dispose = () => {
+    geo.dispose();
+    letterMat.dispose();
+    armGeo.dispose();
+    limbMat.dispose();
+  };
+
+  return character;
+}
