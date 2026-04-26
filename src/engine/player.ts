@@ -1,10 +1,14 @@
 import * as THREE from "three";
 import type { AvatarKind } from "../state/store";
+import { motor, playKidStep } from "../audio/sfx";
 
 export type PlayerHandles = {
   group: THREE.Group;
   update: (dt: number, input: { x: number; y: number }) => void;
   position: () => THREE.Vector3;
+  // Tear-down hook called by Engine.dispose(). Used by avatars that
+  // own continuous resources (the car's motor loop, etc.).
+  dispose?: () => void;
 };
 
 const SPEED = 7;
@@ -76,6 +80,7 @@ function buildKid(): PlayerHandles {
 
   let facing = 0;
   let bob = 0;
+  let prevBobAbs = 0;
 
   return {
     group,
@@ -100,7 +105,17 @@ function buildKid(): PlayerHandles {
         bob += dt * 3;
       }
       const bobAmt = isMoving ? 0.12 : 0.05;
-      group.position.y = Math.abs(Math.sin(bob)) * bobAmt;
+      const curBobAbs = Math.abs(Math.sin(bob));
+      group.position.y = curBobAbs * bobAmt;
+      // Trigger a footstep blip each time the bob peaks while moving — the
+      // peak coincides with the foot landing visually. We detect the peak
+      // by watching for the |sin| derivative changing from rising to
+      // falling. playKidStep is internally throttled so we can call it
+      // freely.
+      if (isMoving && prevBobAbs > 0.92 && curBobAbs < prevBobAbs) {
+        playKidStep();
+      }
+      prevBobAbs = curBobAbs;
     },
     position() {
       return group.position;
@@ -179,13 +194,16 @@ function buildCar(): PlayerHandles {
     group.add(pupil);
   }
 
-  // Cute grille smile under the headlights.
+  // Cute grille smile under the headlights. The default half-torus arc
+  // opens downward (frown), so we rotate the geometry around its local Z
+  // axis by PI to flip the cup upward, then tilt forward by PI/2 to put
+  // it on the front bumper plane facing the camera.
   const smile = new THREE.Mesh(
     new THREE.TorusGeometry(0.18, 0.04, 8, 16, Math.PI),
     new THREE.MeshStandardMaterial({ color: 0x3a1c10 })
   );
   smile.position.set(0, 0.34, 0.96);
-  smile.rotation.x = Math.PI / 2;
+  smile.rotation.set(Math.PI / 2, 0, Math.PI);
   group.add(smile);
 
   // Wheels — 4 cylinders, capped on each side so the rim shows from any
@@ -218,10 +236,16 @@ function buildCar(): PlayerHandles {
   let bob = 0;
   let wheelSpin = 0;
 
+  // Kick the motor loop the moment the car spawns so the kid hears an
+  // idle purr while parked. setActivity() in update() animates between
+  // idle and full-throttle.
+  motor.start();
+
   return {
     group,
     update(dt, input) {
-      const isMoving = Math.hypot(input.x, input.y) > 0.05;
+      const mag = Math.hypot(input.x, input.y);
+      const isMoving = mag > 0.05;
       if (isMoving) {
         const speed = SPEED * dt;
         group.position.x += input.x * speed;
@@ -239,7 +263,7 @@ function buildCar(): PlayerHandles {
         // second = linear speed / radius. We use SPEED directly because
         // the input magnitude is clamped to 1 and we want full-speed
         // wheel rotation when fully forward.
-        wheelSpin += dt * (SPEED / 0.3) * Math.hypot(input.x, input.y);
+        wheelSpin += dt * (SPEED / 0.3) * mag;
       } else {
         bob += dt * 4;
       }
@@ -249,9 +273,14 @@ function buildCar(): PlayerHandles {
       // Apply wheel spin around each wheel's local X (already rotated
       // 90° on Z to lay flat, so X is now the world rolling axis).
       for (const w of wheels) w.rotation.x = wheelSpin;
+      // Engine pitch + volume tracks input magnitude.
+      motor.setActivity(mag);
     },
     position() {
       return group.position;
+    },
+    dispose() {
+      motor.stop();
     },
   };
 }

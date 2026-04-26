@@ -160,6 +160,113 @@ export function playChime() {
   PICKUP_VARIANTS[idx]();
 }
 
+// ─── Kid footstep blip ───────────────────────────────────────────────────
+// Short, low, soft pop the kid emits each time their bob peaks. Throttled
+// internally so callers can poke it from a tight render loop without
+// worrying about layering hundreds per second.
+let lastStepAt = 0;
+export function playKidStep() {
+  const now = performance.now();
+  if (now - lastStepAt < 220) return;
+  lastStepAt = now;
+  const c = getCtx();
+  if (!c) return;
+  const osc = c.createOscillator();
+  const gain = c.createGain();
+  osc.type = "sine";
+  // Quick 180→120 Hz drop gives a "puh" pop that feels like a footstep.
+  const t0 = c.currentTime;
+  osc.frequency.setValueAtTime(180, t0);
+  osc.frequency.exponentialRampToValueAtTime(120, t0 + 0.06);
+  gain.gain.setValueAtTime(0.0001, t0);
+  gain.gain.exponentialRampToValueAtTime(0.04, t0 + 0.005);
+  gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.1);
+  osc.connect(gain).connect(c.destination);
+  osc.start(t0);
+  osc.stop(t0 + 0.15);
+}
+
+// ─── Car motor loop ──────────────────────────────────────────────────────
+// A continuous low rumble (sawtooth at ~50 Hz) layered with a higher
+// "purr" buzz (~140 Hz triangle). The mix gain follows setActivity()
+// from idle (very quiet rumble) to full revs (louder, brighter). Built
+// as a singleton so repeated start() calls are no-ops; stop() tears it
+// down so we don't leak oscillators across letter pickups.
+type Motor = {
+  start: () => void;
+  stop: () => void;
+  setActivity: (a: number) => void; // 0 = idle, 1 = full throttle
+};
+
+function makeMotor(): Motor {
+  let nodes: {
+    rumble: OscillatorNode;
+    buzz: OscillatorNode;
+    rumbleGain: GainNode;
+    buzzGain: GainNode;
+    master: GainNode;
+  } | null = null;
+  return {
+    start() {
+      if (nodes) return;
+      const c = getCtx();
+      if (!c) return;
+      const rumble = c.createOscillator();
+      rumble.type = "sawtooth";
+      rumble.frequency.value = 52;
+      const rumbleGain = c.createGain();
+      rumbleGain.gain.value = 0.018;
+      rumble.connect(rumbleGain);
+
+      const buzz = c.createOscillator();
+      buzz.type = "triangle";
+      buzz.frequency.value = 142;
+      const buzzGain = c.createGain();
+      buzzGain.gain.value = 0.008;
+      buzz.connect(buzzGain);
+
+      const master = c.createGain();
+      master.gain.value = 0.5;
+      rumbleGain.connect(master);
+      buzzGain.connect(master);
+      master.connect(c.destination);
+
+      rumble.start();
+      buzz.start();
+      nodes = { rumble, buzz, rumbleGain, buzzGain, master };
+    },
+    stop() {
+      if (!nodes) return;
+      const { rumble, buzz, master } = nodes;
+      const c = getCtx();
+      if (!c) return;
+      // Quick fade-out so stopping doesn't click.
+      master.gain.cancelScheduledValues(c.currentTime);
+      master.gain.setValueAtTime(master.gain.value, c.currentTime);
+      master.gain.linearRampToValueAtTime(0.0001, c.currentTime + 0.08);
+      rumble.stop(c.currentTime + 0.1);
+      buzz.stop(c.currentTime + 0.1);
+      nodes = null;
+    },
+    setActivity(a: number) {
+      if (!nodes) return;
+      const c = getCtx();
+      if (!c) return;
+      const clamped = Math.max(0, Math.min(1, a));
+      // Ramp, don't set, to avoid clicks. Targets:
+      //   master: idle 0.35, full 1.0
+      //   rumble freq: idle 52 Hz, full 80 Hz
+      //   buzz freq:   idle 142 Hz, full 220 Hz
+      const now = c.currentTime;
+      nodes.master.gain.setTargetAtTime(0.35 + clamped * 0.65, now, 0.08);
+      nodes.rumble.frequency.setTargetAtTime(52 + clamped * 28, now, 0.08);
+      nodes.buzz.frequency.setTargetAtTime(142 + clamped * 78, now, 0.08);
+    },
+  };
+}
+
+export const motor = makeMotor();
+
 // Bigger flourish for end-of-word / end-of-round. Octave jump at the end.
 export function playWoo() {
   tone(N.G4, 0, 0.16);

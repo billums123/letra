@@ -117,7 +117,9 @@ export function FindAlphabetGame() {
     });
     playChime();
     audio.stop();
-    audio.play(audio.letterName(entry.letter)).then(() => audio.play(audio.letterSound(entry.letter), { interrupt: false }));
+    // Find-the-Alphabet currently plays only the letter name on pickup.
+    // Phonetic sound + example word will join in a later milestone.
+    audio.play(audio.letterName(entry.letter));
     collect(entry.letter);
     setFoundCount((n) => n + 1);
     currentIndex.current += 1;

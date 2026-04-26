@@ -171,6 +171,9 @@ export class Engine {
     cancelAnimationFrame(this.rafId);
     window.removeEventListener("resize", this.onResizeBound);
     this.resizeObserver.disconnect();
+    // Avatars own continuous resources (e.g., the car's motor loop) —
+    // give them a chance to tear down before we dispose meshes.
+    this.player.dispose?.();
     this.scene.traverse((obj) => {
       const m = obj as THREE.Mesh;
       if (m.geometry) m.geometry.dispose();
