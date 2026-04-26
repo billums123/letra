@@ -348,6 +348,12 @@ export function LetterEditor() {
   // Celebration animation. When > 0, the render loop applies the celebrate
   // transform on top of the editable letter.
   const celebrationTRef = useRef<number>(-1);
+  // Continuous arm-wave loop. When true, the tick advances `wavePhaseRef`
+  // and sets the arm pivots' Z rotation each frame. Independent of the
+  // full celebration so the user can isolate the wave for editing.
+  const [isWaving, setIsWaving] = useState(false);
+  const isWavingRef = useRef(false);
+  const wavePhaseRef = useRef(0);
 
   // Per-letter undo/redo history. Only the current letter has history at a
   // time — switching letters keeps each letter's history separate.
@@ -525,6 +531,7 @@ export function LetterEditor() {
       const built = sceneRef.current?.built;
       if (built) {
         if (celebrationTRef.current >= 0) {
+          // Full celebration always wins over the wave loop.
           celebrationTRef.current += dt;
           const c = celebrationTRef.current;
           const k = Math.min(c / 1.6, 1);
@@ -536,7 +543,7 @@ export function LetterEditor() {
           const s = 1 + 0.15 * Math.sin(k * Math.PI * 2);
           built.inner.scale.setScalar(s);
           if (k >= 1) {
-            // End of celebration — restore.
+            // End of celebration — restore the rest pose.
             celebrationTRef.current = -1;
             built.root.position.y = built.baseY;
             built.inner.rotation.y = 0;
@@ -544,11 +551,25 @@ export function LetterEditor() {
             built.armPivotR.rotation.set(0, 0, 0);
             if (built.armPivotL) built.armPivotL.rotation.set(0, 0, 0);
           }
+        } else if (isWavingRef.current) {
+          // Continuous wave: same motion as the celebration's arm pass, but
+          // with the body otherwise at rest so the user can audit limb
+          // placement in isolation. Advances regardless of pause toggling
+          // because we only increment when active.
+          wavePhaseRef.current += dt;
+          const c = wavePhaseRef.current;
+          built.root.position.y = built.baseY;
+          built.inner.rotation.y = 0;
+          built.inner.scale.setScalar(1);
+          built.armPivotR.rotation.z = Math.sin(c * 18) * 1.0 - 0.6;
+          if (built.armPivotL) built.armPivotL.rotation.z = -Math.sin(c * 18) * 1.0 + 0.6;
         } else {
           // Hold rest pose so the part the user is editing stays put.
           built.root.position.y = built.baseY;
           built.inner.rotation.y = 0;
           built.inner.scale.setScalar(1);
+          built.armPivotR.rotation.set(0, 0, 0);
+          if (built.armPivotL) built.armPivotL.rotation.set(0, 0, 0);
         }
       }
 
@@ -805,7 +826,24 @@ export function LetterEditor() {
 
   const triggerFound = () => {
     celebrationTRef.current = 0;
+    // Cancel the standalone wave loop so the celebration's own arm pass
+    // is the only thing animating the arms.
+    isWavingRef.current = false;
+    setIsWaving(false);
     void import("../audio/sfx").then(({ playChime }) => playChime());
+  };
+
+  const toggleWave = () => {
+    const next = !isWavingRef.current;
+    isWavingRef.current = next;
+    setIsWaving(next);
+    if (next) {
+      // Reset the phase so a fresh start always begins at zero arm rotation
+      // (avoids a jolt when un-pausing from a random angle).
+      wavePhaseRef.current = 0;
+      // If a celebration was running we let the wave take over.
+      celebrationTRef.current = -1;
+    }
   };
 
   const onExport = async () => {
@@ -883,6 +921,9 @@ export function LetterEditor() {
           <button onClick={redo} disabled={!canRedo} style={btn(canRedo ? "#a8e2ff" : "#e0e0e0", "#3a2a14")} title="Redo (⌘⇧Z)">↷ Redo</button>
         </div>
         <button onClick={triggerFound} style={btn("#9bdc4a", "white")}>🎉 Found!</button>
+        <button onClick={toggleWave} style={btn(isWaving ? "#ff8c4a" : "#b886ff", "white")}>
+          {isWaving ? "⏸ Pause wave" : "👋 Wave"}
+        </button>
         <button onClick={onResetLetter} style={btn("#ffd56b", "#3a2a14")}>Reset {letter}</button>
         <button onClick={onExport} style={btn("#46c2cb", "white")}>📋 Export</button>
         <button onClick={() => goToMenu()} style={btn("#ff8c4a", "white")}>◀ Home</button>
