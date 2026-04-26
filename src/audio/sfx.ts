@@ -211,22 +211,26 @@ function makeMotor(): Motor {
       if (nodes) return;
       const c = getCtx();
       if (!c) return;
+      // Sine waves keep this warm and unobtrusive — sawtooth/triangle
+      // versions had too many harmonics and grew tiring fast. Both
+      // oscillators sit way below normal music levels so a kid
+      // playing for 30 minutes doesn't develop motor fatigue.
       const rumble = c.createOscillator();
-      rumble.type = "sawtooth";
-      rumble.frequency.value = 52;
+      rumble.type = "sine";
+      rumble.frequency.value = 48;
       const rumbleGain = c.createGain();
-      rumbleGain.gain.value = 0.018;
+      rumbleGain.gain.value = 0.006;
       rumble.connect(rumbleGain);
 
       const buzz = c.createOscillator();
-      buzz.type = "triangle";
-      buzz.frequency.value = 142;
+      buzz.type = "sine";
+      buzz.frequency.value = 96;
       const buzzGain = c.createGain();
-      buzzGain.gain.value = 0.008;
+      buzzGain.gain.value = 0.0015;
       buzz.connect(buzzGain);
 
       const master = c.createGain();
-      master.gain.value = 0.5;
+      master.gain.value = 0.35;
       rumbleGain.connect(master);
       buzzGain.connect(master);
       master.connect(c.destination);
@@ -253,14 +257,17 @@ function makeMotor(): Motor {
       const c = getCtx();
       if (!c) return;
       const clamped = Math.max(0, Math.min(1, a));
-      // Ramp, don't set, to avoid clicks. Targets:
-      //   master: idle 0.35, full 1.0
-      //   rumble freq: idle 52 Hz, full 80 Hz
-      //   buzz freq:   idle 142 Hz, full 220 Hz
+      // Ramp, don't set, to avoid clicks. Targets are deliberately
+      // narrow so the motor reads as ambient rather than dynamic — kids
+      // notice the difference between idle and moving without it ever
+      // demanding attention.
+      //   master: idle 0.20, full 0.45
+      //   rumble freq: idle 48 Hz, full 60 Hz (small Δ feels alive)
+      //   buzz freq:   idle 96 Hz, full 124 Hz
       const now = c.currentTime;
-      nodes.master.gain.setTargetAtTime(0.35 + clamped * 0.65, now, 0.08);
-      nodes.rumble.frequency.setTargetAtTime(52 + clamped * 28, now, 0.08);
-      nodes.buzz.frequency.setTargetAtTime(142 + clamped * 78, now, 0.08);
+      nodes.master.gain.setTargetAtTime(0.20 + clamped * 0.25, now, 0.12);
+      nodes.rumble.frequency.setTargetAtTime(48 + clamped * 12, now, 0.12);
+      nodes.buzz.frequency.setTargetAtTime(96 + clamped * 28, now, 0.12);
     },
   };
 }
