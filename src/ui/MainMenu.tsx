@@ -154,12 +154,12 @@ export function MainMenu() {
           opacity: 0.7,
           display: "flex",
           justifyContent: "space-between",
+          alignItems: "center",
+          gap: 12,
         }}
       >
         <span>WASD / arrows / controller / touch joystick</span>
-        <span>
-          Voice: {audioMode === "elevenlabs" ? "ElevenLabs" : audioMode === "speech" ? "Browser" : "Off"}
-        </span>
+        <VoicePicker audioMode={audioMode} />
       </footer>
 
       {/* Authoring tools — only mounted on localhost / dev builds, never
@@ -228,6 +228,61 @@ export function MainMenu() {
 
       <StickerBook open={showStickers} onClose={() => setShowStickers(false)} />
     </div>
+  );
+}
+
+// Footer-right voice picker. Shows "Voice: <name>" plus a select if more
+// than one voice has been generated. The select syncs to the store, which
+// triggers Game.tsx to swap the active voice in the AudioPlayer without
+// a full reload.
+function VoicePicker({ audioMode }: { audioMode: "elevenlabs" | "speech" | "muted" }) {
+  const voiceSlug = useGameStore((s) => s.voiceSlug);
+  const setVoiceSlug = useGameStore((s) => s.setVoiceSlug);
+  // Subscribe to the AudioPlayer so the dropdown updates after init / setVoice.
+  const [voices, setVoices] = useState(audio.voices);
+  const [activeSlug, setActiveSlug] = useState<string | null>(audio.activeVoice?.slug ?? null);
+  useEffect(() => {
+    const refresh = () => {
+      setVoices([...audio.voices]);
+      setActiveSlug(audio.activeVoice?.slug ?? null);
+    };
+    refresh();
+    return audio.subscribe(refresh);
+  }, []);
+
+  const showSelect = voices.length > 1;
+  const currentName =
+    audioMode === "muted"
+      ? "Off"
+      : audioMode === "speech"
+        ? "Browser"
+        : audio.activeVoice?.name ?? "ElevenLabs";
+
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+      <span>Voice: {currentName}</span>
+      {showSelect && audioMode === "elevenlabs" && (
+        <select
+          value={voiceSlug ?? activeSlug ?? voices[0].slug}
+          onChange={(e) => setVoiceSlug(e.target.value)}
+          aria-label="Choose voice"
+          style={{
+            padding: "4px 6px",
+            fontSize: 12,
+            fontWeight: 700,
+            border: "2px solid white",
+            borderRadius: 8,
+            background: "rgba(255,255,255,0.85)",
+            color: "#3a2a14",
+            cursor: "pointer",
+          }}
+        >
+          {voices.map((v) => (
+            <option key={v.slug} value={v.slug}>{v.name}</option>
+          ))}
+        </select>
+      )}
+    </span>
   );
 }
 

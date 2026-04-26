@@ -26,10 +26,16 @@ type GameState = {
   // sees their choice the next time they boot the game.
   avatar: AvatarKind;
   setAvatar: (avatar: AvatarKind) => void;
+
+  // Slug of the active ElevenLabs voice (matches a slug in
+  // /audio/voices.json). null means "use the registry default".
+  voiceSlug: string | null;
+  setVoiceSlug: (slug: string | null) => void;
 };
 
 const STORAGE_KEY = "letra:collected";
 const AVATAR_KEY = "letra:avatar";
+const VOICE_KEY = "letra:voiceSlug";
 
 function loadAvatar(): AvatarKind {
   try {
@@ -44,6 +50,24 @@ function loadAvatar(): AvatarKind {
 function saveAvatar(avatar: AvatarKind) {
   try {
     localStorage.setItem(AVATAR_KEY, avatar);
+  } catch {
+    // Non-fatal.
+  }
+}
+
+function loadVoiceSlug(): string | null {
+  try {
+    const raw = localStorage.getItem(VOICE_KEY);
+    return raw && raw.length > 0 ? raw : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveVoiceSlug(slug: string | null) {
+  try {
+    if (slug) localStorage.setItem(VOICE_KEY, slug);
+    else localStorage.removeItem(VOICE_KEY);
   } catch {
     // Non-fatal.
   }
@@ -92,5 +116,11 @@ export const useGameStore = create<GameState>((set, get) => ({
   setAvatar: (avatar) => {
     saveAvatar(avatar);
     set({ avatar });
+  },
+
+  voiceSlug: loadVoiceSlug(),
+  setVoiceSlug: (slug) => {
+    saveVoiceSlug(slug);
+    set({ voiceSlug: slug });
   },
 }));

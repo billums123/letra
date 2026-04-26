@@ -4,10 +4,13 @@
 //   2. Web Speech API fallback so the game still talks even without an API key
 //      (no kid is going to enjoy a silent letter game).
 //
-// The mode is decided once on boot: try fetching public/audio/manifest.json,
-// pick "elevenlabs" if it loads, "speech" otherwise.
+// Voice selection: on boot we read /audio/voices.json (the registry the
+// generation script maintains). If present, we pick a voice — either the
+// one passed via setActiveVoice() or the first in the registry — and
+// resolve clip URLs as /audio/<slug>/<id>.mp3. Without a registry we fall
+// back to the legacy flat layout (/audio/<id>.mp3) for backward compat.
 
-import type { AudioManifest } from "./types";
+import type { AudioManifest, VoicesRegistry, VoiceRegistryEntry } from "./types";
 import { ALPHABET, LETTER_NAME_TEXT, LETTER_SOUND_TEXT } from "./types";
 
 type Mode = "elevenlabs" | "speech" | "muted";
@@ -15,24 +18,68 @@ type Mode = "elevenlabs" | "speech" | "muted";
 class AudioPlayer {
   mode: Mode = "speech";
   manifest: AudioManifest | null = null;
+  voices: VoiceRegistryEntry[] = [];
+  activeVoice: VoiceRegistryEntry | null = null;
+  // Subscribers receive notifications when init/voice changes complete.
+  private listeners = new Set<() => void>();
   private current: HTMLAudioElement | null = null;
   private speechVoice: SpeechSynthesisVoice | null = null;
   private speechReady = false;
 
+  // Optional preferred slug applied at init time. Pages that depend on a
+  // particular voice can call setPreferredVoice before init.
+  private preferredSlug: string | null = null;
+
+  setPreferredVoice(slug: string | null): void {
+    this.preferredSlug = slug;
+  }
+
+  subscribe(listener: () => void): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
+  private emit() {
+    for (const l of this.listeners) l();
+  }
+
   async init(): Promise<void> {
-    // Try the static manifest first.
+    // Try the registry first.
+    try {
+      const regRes = await fetch("/audio/voices.json", { cache: "no-store" });
+      if (regRes.ok) {
+        const reg = (await regRes.json()) as VoicesRegistry;
+        if (reg && Array.isArray(reg.voices) && reg.voices.length > 0) {
+          this.voices = reg.voices;
+          // Pick the active voice: preferred slug → flagged default → first.
+          const pick =
+            (this.preferredSlug && reg.voices.find((v) => v.slug === this.preferredSlug)) ||
+            reg.voices.find((v) => v.isDefault) ||
+            reg.voices[0];
+          const ok = await this.loadVoice(pick.slug);
+          if (ok) {
+            this.emit();
+            return;
+          }
+        }
+      }
+    } catch {
+      // ignore — fall through to legacy
+    }
+
+    // Legacy flat-layout fallback.
     try {
       const res = await fetch("/audio/manifest.json", { cache: "no-store" });
       if (res.ok) {
         const manifest = (await res.json()) as AudioManifest;
-        // Verify a single clip exists — we don't want to claim ElevenLabs
-        // mode if the user only generated the manifest without API access.
         const probe = manifest.letters?.A?.name;
         if (probe) {
           const probeRes = await fetch(`/audio/${probe}.mp3`, { method: "HEAD" });
           if (probeRes.ok) {
             this.manifest = manifest;
             this.mode = "elevenlabs";
+            this.activeVoice = null; // legacy flat
+            this.emit();
             return;
           }
         }
@@ -40,12 +87,54 @@ class AudioPlayer {
     } catch {
       // No manifest — fall through to speech.
     }
+
     if (typeof window !== "undefined" && "speechSynthesis" in window) {
       this.mode = "speech";
       this.primeSpeechVoice();
     } else {
       this.mode = "muted";
     }
+    this.emit();
+  }
+
+  // Switch to a different voice from the registry. Returns true on success.
+  async setVoice(slug: string): Promise<boolean> {
+    const ok = await this.loadVoice(slug);
+    if (ok) this.emit();
+    return ok;
+  }
+
+  // Loads a per-voice manifest and verifies a probe clip exists. Sets
+  // mode to "elevenlabs" on success.
+  private async loadVoice(slug: string): Promise<boolean> {
+    try {
+      const manifestRes = await fetch(`/audio/${slug}/manifest.json`, { cache: "no-store" });
+      if (!manifestRes.ok) return false;
+      const manifest = (await manifestRes.json()) as AudioManifest;
+      const probe = manifest.letters?.A?.name;
+      if (!probe) return false;
+      const probeRes = await fetch(`/audio/${slug}/${probe}.mp3`, { method: "HEAD" });
+      if (!probeRes.ok) return false;
+      this.manifest = manifest;
+      this.activeVoice = this.voices.find((v) => v.slug === slug) ?? {
+        slug,
+        name: slug,
+        voiceId: manifest.voiceId,
+        modelId: manifest.modelId,
+        generatedAt: manifest.generatedAt,
+      };
+      this.mode = "elevenlabs";
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  // Compute the URL for a clip id, accounting for whether we're in
+  // per-voice (registry) or legacy flat layout.
+  private clipUrl(id: string): string {
+    if (this.activeVoice) return `/audio/${this.activeVoice.slug}/${id}.mp3`;
+    return `/audio/${id}.mp3`;
   }
 
   private primeSpeechVoice() {
@@ -96,7 +185,7 @@ class AudioPlayer {
     if (opts.interrupt !== false) this.stop();
     if (this.mode === "elevenlabs") {
       return new Promise((resolve) => {
-        const audio = new Audio(`/audio/${id}.mp3`);
+        const audio = new Audio(this.clipUrl(id));
         this.current = audio;
         audio.addEventListener("ended", () => resolve());
         audio.addEventListener("error", () => resolve());

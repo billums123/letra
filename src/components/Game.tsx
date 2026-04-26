@@ -16,11 +16,15 @@ export function Game() {
   const screen = useGameStore((s) => s.screen);
   const setAudioMode = useGameStore((s) => s.setAudioMode);
   const goToMenu = useGameStore((s) => s.goToMenu);
+  const voiceSlug = useGameStore((s) => s.voiceSlug);
   const dev = isDev();
 
-  // One-shot audio init at app boot.
+  // One-shot audio init at app boot. The store-resolved voice slug (if
+  // any) is fed in before init so the player picks the correct voice
+  // from the registry on first load.
   useEffect(() => {
     let cancelled = false;
+    audio.setPreferredVoice(voiceSlug);
     audio.init().then(() => {
       if (!cancelled) setAudioMode(audio.mode);
     });
@@ -28,7 +32,15 @@ export function Game() {
       cancelled = true;
       audio.stop();
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [setAudioMode]);
+
+  // When the user picks a different voice from the menu, swap manifests
+  // and clip URLs without a full app reload.
+  useEffect(() => {
+    if (!voiceSlug) return;
+    audio.setVoice(voiceSlug).then(() => setAudioMode(audio.mode));
+  }, [voiceSlug, setAudioMode]);
 
   // If a non-dev visitor lands on a dev-only screen (e.g. via leftover
   // localStorage state or a stale link), bounce them back to the main menu.
