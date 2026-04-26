@@ -55,6 +55,12 @@ type EditableParts = {
   // different arm-swing personalities (B might do a big slow wave, I a
   // tight quick one).
   wave: WaveConfig;
+  // Hidden parts. Keys: "eye:R" | "eye:L" | "pupil:R" | "pupil:L" |
+  // "shine:R" | "shine:L" | "cheek:R" | "cheek:L" | "arm:R" | "arm:L" |
+  // "foot:R" | "foot:L" | "smile". A truthy value means "don't render
+  // this part" — lets the author build eyeless, mouthless, one-eyed, or
+  // armless letters.
+  hidden: Partial<Record<string, boolean>>;
 };
 
 const ZERO_ROT: Vec3 = { x: 0, y: 0, z: 0 };
@@ -259,6 +265,7 @@ function defaultParts(width: number, height: number): EditableParts {
     cheekRadius,
     footRadius: 0.16,
     wave: { ...DEFAULT_WAVE },
+    hidden: {},
   };
 }
 
@@ -303,6 +310,7 @@ function migrate(p: unknown): EditableParts | null {
     cheekRadius: typeof o.cheekRadius === "number" ? o.cheekRadius : 0.1,
     footRadius: typeof o.footRadius === "number" ? o.footRadius : 0.16,
     wave: migrateWave(o.wave),
+    hidden: o.hidden && typeof o.hidden === "object" ? (o.hidden as Record<string, boolean>) : {},
   };
 }
 
@@ -409,11 +417,13 @@ function buildEditableLetter(
 
   const partGroups: Record<string, THREE.Object3D> = {};
   const setRot = (obj: THREE.Object3D, r: Vec3) => obj.rotation.set(r.x, r.y, r.z);
+  const isHidden = (key: string) => !!parts.hidden?.[key];
 
-  // Eyes — render BOTH sides explicitly from the per-side transforms. No
-  // mirror flag: if you want symmetry, edit in mirror mode and we sync
-  // the other side; if you want asymmetry, edit each side independently.
-  const makeEye = (eyeT: Transform, pupilT: Transform, shineT: Transform) => {
+  // Eyes — render BOTH sides explicitly from the per-side transforms.
+  // Hidden parts are skipped entirely, including their children
+  // (pupil/shine), since those are positioned in eye-local space and
+  // would float around without their parent.
+  const makeEye = (eyeT: Transform, pupilT: Transform, shineT: Transform, sideKey: "R" | "L") => {
     const eyeGroup = new THREE.Group();
     eyeGroup.position.set(eyeT.pos.x, eyeT.pos.y, eyeT.pos.z);
     setRot(eyeGroup, eyeT.rot);
@@ -422,60 +432,73 @@ function buildEditableLetter(
       new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.35 })
     );
     eyeGroup.add(sclera);
-    const pupil = new THREE.Mesh(
-      new THREE.SphereGeometry(parts.pupilRadius, 12, 10),
-      new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.5 })
-    );
-    pupil.position.set(pupilT.pos.x, pupilT.pos.y, pupilT.pos.z);
-    setRot(pupil, pupilT.rot);
-    eyeGroup.add(pupil);
-    const shine = new THREE.Mesh(
-      new THREE.SphereGeometry(parts.shineRadius, 8, 6),
-      new THREE.MeshBasicMaterial({ color: 0xffffff })
-    );
-    shine.position.set(shineT.pos.x, shineT.pos.y, shineT.pos.z);
-    setRot(shine, shineT.rot);
-    eyeGroup.add(shine);
+    if (!isHidden(`pupil:${sideKey}`)) {
+      const pupil = new THREE.Mesh(
+        new THREE.SphereGeometry(parts.pupilRadius, 12, 10),
+        new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.5 })
+      );
+      pupil.position.set(pupilT.pos.x, pupilT.pos.y, pupilT.pos.z);
+      setRot(pupil, pupilT.rot);
+      eyeGroup.add(pupil);
+      partGroups[`pupil:${sideKey}`] = pupil;
+    }
+    if (!isHidden(`shine:${sideKey}`)) {
+      const shine = new THREE.Mesh(
+        new THREE.SphereGeometry(parts.shineRadius, 8, 6),
+        new THREE.MeshBasicMaterial({ color: 0xffffff })
+      );
+      shine.position.set(shineT.pos.x, shineT.pos.y, shineT.pos.z);
+      setRot(shine, shineT.rot);
+      eyeGroup.add(shine);
+      partGroups[`shine:${sideKey}`] = shine;
+    }
     return eyeGroup;
   };
-  const eyeR = makeEye(parts.eye.R, parts.pupil.R, parts.shine.R);
-  const eyeL = makeEye(parts.eye.L, parts.pupil.L, parts.shine.L);
-  inner.add(eyeR);
-  inner.add(eyeL);
-  partGroups["eye:R"] = eyeR;
-  partGroups["eye:L"] = eyeL;
-  // Pupil/shine are children of their eye — selecting them returns the
-  // child mesh so the gizmo edits eye-local coordinates.
-  partGroups["pupil:R"] = eyeR.children[1];
-  partGroups["pupil:L"] = eyeL.children[1];
-  partGroups["shine:R"] = eyeR.children[2];
-  partGroups["shine:L"] = eyeL.children[2];
+  if (!isHidden("eye:R")) {
+    const eyeR = makeEye(parts.eye.R, parts.pupil.R, parts.shine.R, "R");
+    inner.add(eyeR);
+    partGroups["eye:R"] = eyeR;
+  }
+  if (!isHidden("eye:L")) {
+    const eyeL = makeEye(parts.eye.L, parts.pupil.L, parts.shine.L, "L");
+    inner.add(eyeL);
+    partGroups["eye:L"] = eyeL;
+  }
 
   // Mouth
-  const mouthMat = new THREE.MeshStandardMaterial({ color: 0x6b1d10 });
-  const mouthGroup = makeMouth(parts.mouthShape, parts.smileRadius, mouthMat);
-  mouthGroup.position.set(parts.smile.pos.x, parts.smile.pos.y, parts.smile.pos.z);
-  setRot(mouthGroup, parts.smile.rot);
-  inner.add(mouthGroup);
-  partGroups.smile = mouthGroup;
+  if (!isHidden("smile")) {
+    const mouthMat = new THREE.MeshStandardMaterial({ color: 0x6b1d10 });
+    const mouthGroup = makeMouth(parts.mouthShape, parts.smileRadius, mouthMat);
+    mouthGroup.position.set(parts.smile.pos.x, parts.smile.pos.y, parts.smile.pos.z);
+    setRot(mouthGroup, parts.smile.rot);
+    inner.add(mouthGroup);
+    partGroups.smile = mouthGroup;
+  }
 
   // Cheeks
   const cheekMat = new THREE.MeshStandardMaterial({ color: 0xff8aaa, transparent: true, opacity: 0.75 });
   const cheekGeo = new THREE.SphereGeometry(parts.cheekRadius, 10, 8);
-  const cheekR = new THREE.Mesh(cheekGeo, cheekMat);
-  cheekR.position.set(parts.cheek.R.pos.x, parts.cheek.R.pos.y, parts.cheek.R.pos.z);
-  setRot(cheekR, parts.cheek.R.rot);
-  cheekR.scale.set(1, 0.7, 0.4);
-  inner.add(cheekR);
-  const cheekL = new THREE.Mesh(cheekGeo, cheekMat);
-  cheekL.position.set(parts.cheek.L.pos.x, parts.cheek.L.pos.y, parts.cheek.L.pos.z);
-  setRot(cheekL, parts.cheek.L.rot);
-  cheekL.scale.set(1, 0.7, 0.4);
-  inner.add(cheekL);
-  partGroups["cheek:R"] = cheekR;
-  partGroups["cheek:L"] = cheekL;
+  if (!isHidden("cheek:R")) {
+    const cheekR = new THREE.Mesh(cheekGeo, cheekMat);
+    cheekR.position.set(parts.cheek.R.pos.x, parts.cheek.R.pos.y, parts.cheek.R.pos.z);
+    setRot(cheekR, parts.cheek.R.rot);
+    cheekR.scale.set(1, 0.7, 0.4);
+    inner.add(cheekR);
+    partGroups["cheek:R"] = cheekR;
+  }
+  if (!isHidden("cheek:L")) {
+    const cheekL = new THREE.Mesh(cheekGeo, cheekMat);
+    cheekL.position.set(parts.cheek.L.pos.x, parts.cheek.L.pos.y, parts.cheek.L.pos.z);
+    setRot(cheekL, parts.cheek.L.rot);
+    cheekL.scale.set(1, 0.7, 0.4);
+    inner.add(cheekL);
+    partGroups["cheek:L"] = cheekL;
+  }
 
-  // Arms
+  // Arms — pivots are still created (the wave loop expects them) but not
+  // added to the scene when hidden, so the user sees nothing where the
+  // arm would be while the animation code can still safely write to
+  // armPivotR/L without a null check.
   const limbMat = new THREE.MeshStandardMaterial({ color, roughness: 0.5 });
   const armGeo = new THREE.CapsuleGeometry(0.1, 0.45, 4, 8);
   const armPivotR = new THREE.Group();
@@ -485,7 +508,10 @@ function buildEditableLetter(
   armR.position.set(0.25, -0.05, 0);
   armR.rotation.z = Math.PI / 4;
   armPivotR.add(armR);
-  inner.add(armPivotR);
+  if (!isHidden("arm:R")) {
+    inner.add(armPivotR);
+    partGroups["arm:R"] = armPivotR;
+  }
   const armPivotL = new THREE.Group();
   armPivotL.position.set(parts.arm.L.pos.x, parts.arm.L.pos.y, parts.arm.L.pos.z);
   setRot(armPivotL, parts.arm.L.rot);
@@ -493,25 +519,30 @@ function buildEditableLetter(
   armL.position.set(-0.25, -0.05, 0);
   armL.rotation.z = -Math.PI / 4;
   armPivotL.add(armL);
-  inner.add(armPivotL);
-  partGroups["arm:R"] = armPivotR;
-  partGroups["arm:L"] = armPivotL;
+  if (!isHidden("arm:L")) {
+    inner.add(armPivotL);
+    partGroups["arm:L"] = armPivotL;
+  }
 
   // Feet
   const footMat = new THREE.MeshStandardMaterial({ color: 0x3a2a14, roughness: 0.7 });
   const footGeo = new THREE.SphereGeometry(parts.footRadius, 10, 8);
-  const footR = new THREE.Mesh(footGeo, footMat);
-  footR.position.set(parts.foot.R.pos.x, parts.foot.R.pos.y, parts.foot.R.pos.z);
-  setRot(footR, parts.foot.R.rot);
-  footR.scale.set(1, 0.6, 1.2);
-  inner.add(footR);
-  const footL = new THREE.Mesh(footGeo, footMat);
-  footL.position.set(parts.foot.L.pos.x, parts.foot.L.pos.y, parts.foot.L.pos.z);
-  setRot(footL, parts.foot.L.rot);
-  footL.scale.set(1, 0.6, 1.2);
-  inner.add(footL);
-  partGroups["foot:R"] = footR;
-  partGroups["foot:L"] = footL;
+  if (!isHidden("foot:R")) {
+    const footR = new THREE.Mesh(footGeo, footMat);
+    footR.position.set(parts.foot.R.pos.x, parts.foot.R.pos.y, parts.foot.R.pos.z);
+    setRot(footR, parts.foot.R.rot);
+    footR.scale.set(1, 0.6, 1.2);
+    inner.add(footR);
+    partGroups["foot:R"] = footR;
+  }
+  if (!isHidden("foot:L")) {
+    const footL = new THREE.Mesh(footGeo, footMat);
+    footL.position.set(parts.foot.L.pos.x, parts.foot.L.pos.y, parts.foot.L.pos.z);
+    setRot(footL, parts.foot.L.rot);
+    footL.scale.set(1, 0.6, 1.2);
+    inner.add(footL);
+    partGroups["foot:L"] = footL;
+  }
 
   const dispose = () => {
     root.traverse((obj) => {
@@ -614,7 +645,11 @@ type GizmoMode = "translate" | "rotate";
 export function LetterEditor() {
   const goToMenu = useGameStore((s) => s.goToMenu);
   const [font, setFont] = useState<Font | null>(null);
+  // letter holds the literal character to author — "A".."Z" or "a".."z".
+  // Each case has its own storage entry so you can author the uppercase
+  // and lowercase forms independently.
   const [letter, setLetter] = useState<string>("A");
+  const lowercase = letter === letter.toLowerCase() && letter !== letter.toUpperCase();
   const [selectedPart, setSelectedPart] = useState<PartId>("eye");
   // Which side of a symmetric pair to edit. "both" mirrors edits across.
   const [side, setSide] = useState<Side>("both");
@@ -642,6 +677,17 @@ export function LetterEditor() {
   // Wave shape parameters live on `parts.wave` — see EditableParts.wave —
   // because each letter has its own wave personality. The tick loop reads
   // partsRef.current?.wave directly, so no separate ref is needed.
+
+  // Toast — small in-app confirmation banner. Auto-dismisses; far less
+  // disruptive than the browser's window.alert which we used previously.
+  const [toast, setToast] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
+  const toastTimerRef = useRef<number>(0);
+  const showToast = (kind: "ok" | "err", text: string) => {
+    setToast({ kind, text });
+    window.clearTimeout(toastTimerRef.current);
+    toastTimerRef.current = window.setTimeout(() => setToast(null), 2400);
+  };
+  useEffect(() => () => window.clearTimeout(toastTimerRef.current), []);
 
   // Per-letter undo/redo history. Only the current letter has history at a
   // time — switching letters keeps each letter's history separate.
@@ -1097,23 +1143,26 @@ export function LetterEditor() {
   // when the user has dialled in a wave they like.
   const copyWaveToAllLetters = (wave: WaveConfig) => {
     if (!font) return;
+    showToast("ok", "✓ Wave applied to all 52 letters (upper + lower)");
     setOverrides((prev) => {
       const merged: Record<string, EditableParts> = { ...prev };
+      // Apply to BOTH cases so authors don't have to flip the toggle and
+      // re-click. Uppercase and lowercase have independent overrides but
+      // typically share wave personality.
       for (const L of ALPHABET) {
-        const existing = merged[L];
-        if (existing) {
-          merged[L] = { ...existing, wave: { ...wave } };
-        } else {
-          // Build defaults for letters that don't yet have an override.
-          const probe = buildEditableLetter(font, L, defaultParts(1.4, 1.6));
-          const def = defaultParts(probe.size.width, probe.size.height);
-          probe.dispose();
-          merged[L] = { ...def, wave: { ...wave } };
+        for (const ch of [L, L.toLowerCase()]) {
+          const existing = merged[ch];
+          if (existing) {
+            merged[ch] = { ...existing, wave: { ...wave } };
+          } else {
+            const probe = buildEditableLetter(font, ch, defaultParts(1.4, 1.6));
+            const def = defaultParts(probe.size.width, probe.size.height);
+            probe.dispose();
+            merged[ch] = { ...def, wave: { ...wave } };
+          }
         }
       }
       saveOverrides(merged);
-      // Also push the current letter's resulting state into history so the
-      // user can undo a runaway "apply to all" if they didn't mean it.
       const currentNext = merged[letter];
       if (currentNext) {
         setParts(currentNext);
@@ -1121,6 +1170,35 @@ export function LetterEditor() {
       }
       return merged;
     });
+  };
+
+  // Toggle visibility of a part (or a side of a part). The change is
+  // tracked in parts.hidden, so undo/redo and persistence already work.
+  const togglePartHidden = () => {
+    if (!parts) return;
+    const id = selectedPart;
+    const keys: string[] = id === "smile"
+      ? ["smile"]
+      : side === "both"
+        ? [`${id}:R`, `${id}:L`]
+        : [`${id}:${side}`];
+    const wasHidden = keys.every((k) => parts.hidden?.[k]);
+    const next: EditableParts = {
+      ...parts,
+      hidden: { ...parts.hidden },
+    };
+    for (const k of keys) {
+      if (wasHidden) delete next.hidden[k];
+      else next.hidden[k] = true;
+    }
+    setParts(next);
+    setOverrides((prev) => {
+      const merged = { ...prev, [letter]: next };
+      saveOverrides(merged);
+      return merged;
+    });
+    pushHistory(letter, next);
+    showToast("ok", wasHidden ? `✓ Restored ${keys.join(", ")}` : `🗑 Hidden ${keys.join(", ")}`);
   };
 
   const onMouthShapeChange = (shape: MouthShape) => {
@@ -1220,14 +1298,16 @@ export function LetterEditor() {
 
   const onExport = async () => {
     const json = JSON.stringify(overrides, null, 2);
+    const letterCount = Object.keys(overrides).length;
+    const sizeKb = (json.length / 1024).toFixed(1);
     try {
       await navigator.clipboard.writeText(json);
-      alert("Editor overrides copied to clipboard.");
+      showToast("ok", `✓ Copied ${letterCount} letter${letterCount === 1 ? "" : "s"} (${sizeKb} KB) to clipboard`);
     } catch {
-      // Fallback: dump to console
+      // Fallback: dump to console so the user can grab it manually.
       // eslint-disable-next-line no-console
       console.log("Editor overrides:\n" + json);
-      alert("Could not access clipboard — check the browser console for the JSON.");
+      showToast("err", "⚠ Clipboard blocked — check the browser console for the JSON");
     }
   };
 
@@ -1267,10 +1347,21 @@ export function LetterEditor() {
             borderRadius: 10,
           }}
         >
-          {ALPHABET.map((L) => (
-            <option key={L} value={L}>{L}{overrides[L] ? " *" : ""}</option>
-          ))}
+          {ALPHABET.map((L) => {
+            const ch = lowercase ? L.toLowerCase() : L;
+            return (
+              <option key={ch} value={ch}>{ch}{overrides[ch] ? " *" : ""}</option>
+            );
+          })}
         </select>
+        <button
+          type="button"
+          onClick={() => setLetter((l) => (l === l.toLowerCase() && l !== l.toUpperCase() ? l.toUpperCase() : l.toLowerCase()))}
+          title="Toggle uppercase / lowercase"
+          style={tab(lowercase)}
+        >
+          {lowercase ? "abc" : "ABC"}
+        </button>
         <div style={{ display: "flex", borderRadius: 10, overflow: "hidden", border: "2px solid #d8e6f0" }}>
           <button onClick={() => setGizmoMode("translate")} style={tab(gizmoMode === "translate")} title="Move (W)">↔ Move</button>
           <button onClick={() => setGizmoMode("rotate")} style={tab(gizmoMode === "rotate")} title="Rotate (E)">⟳ Rotate</button>
@@ -1370,6 +1461,43 @@ export function LetterEditor() {
                 </div>
               </>
             )}
+
+            {(() => {
+              const id = selectedPart;
+              const keys: string[] = id === "smile"
+                ? ["smile"]
+                : side === "both"
+                  ? [`${id}:R`, `${id}:L`]
+                  : [`${id}:${side}`];
+              const allHidden = keys.every((k) => parts.hidden?.[k]);
+              const someHidden = keys.some((k) => parts.hidden?.[k]) && !allHidden;
+              const label = allHidden
+                ? "👁 Restore"
+                : someHidden
+                  ? "👁 Restore both sides"
+                  : `🗑 Hide ${id === "smile" ? "mouth" : (side === "both" ? "both " + id + "s" : `${side} ${id}`)}`;
+              return (
+                <button
+                  type="button"
+                  onClick={togglePartHidden}
+                  style={{
+                    width: "100%",
+                    appearance: "none",
+                    border: "2px solid #d8e6f0",
+                    background: allHidden ? "#fff7d6" : "white",
+                    color: "#3a2a14",
+                    borderRadius: 10,
+                    padding: "8px 12px",
+                    fontSize: 13,
+                    fontWeight: 800,
+                    cursor: "pointer",
+                    marginBottom: 14,
+                  }}
+                >
+                  {label}
+                </button>
+              );
+            })()}
 
             {selectedPart === "smile" && (
               <>
@@ -1504,6 +1632,36 @@ export function LetterEditor() {
           to <code>src/engine/letters.ts</code>.
         </p>
       </aside>
+
+      {toast && (
+        <div
+          role="status"
+          style={{
+            position: "absolute",
+            bottom: 24,
+            left: "50%",
+            transform: "translateX(-50%)",
+            background: toast.kind === "ok" ? "#3a2a14" : "#a13b1b",
+            color: "white",
+            padding: "12px 22px",
+            borderRadius: 14,
+            fontSize: 14,
+            fontWeight: 800,
+            boxShadow: "0 8px 24px rgba(0,0,0,0.25), 0 4px 0 rgba(0,0,0,0.15)",
+            pointerEvents: "none",
+            zIndex: 100,
+            animation: "letra-toast-in 0.2s ease-out",
+          }}
+        >
+          {toast.text}
+        </div>
+      )}
+      <style>{`
+        @keyframes letra-toast-in {
+          from { transform: translate(-50%, 8px); opacity: 0; }
+          to   { transform: translate(-50%, 0);   opacity: 1; }
+        }
+      `}</style>
     </div>
   );
 }
