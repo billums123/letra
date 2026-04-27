@@ -25,6 +25,11 @@ export type BiomeContext = {
   // teardown. Biomes should null-check before reading. Used by props
   // that react to the player — e.g. moon aliens waving when bumped.
   getPlayerPosition: () => THREE.Vector3 | null;
+  // Biomes that deform the ground (e.g. moon craters) call this with
+  // a sampler so the engine can drop the avatar into terrain
+  // depressions instead of hovering over them. Sampler returns the
+  // ground Y at the supplied (x, z); 0 means flat ground.
+  setTerrainHeight: (sampler: (x: number, z: number) => number) => void;
 };
 
 export type Biome = {

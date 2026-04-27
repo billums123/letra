@@ -54,6 +54,10 @@ export class Engine {
   // Cleanup hook the active biome registers via applyScene — runs in
   // dispose() so removing the engine takes the biome's lights with it.
   private disposeBiome: (() => void) | null = null;
+  // Optional ground-height sampler from the active biome. When set,
+  // the per-frame loop offsets the player Y by it so e.g. the car
+  // visibly dips into moon craters.
+  private terrainHeight: ((x: number, z: number) => number) | null = null;
 
   constructor(
     canvas: HTMLCanvasElement,
@@ -82,9 +86,12 @@ export class Engine {
 
     // World + player. The biome's tick callbacks may want to read the
     // player position (e.g. moon aliens that wave when bumped) — pass
-    // a getter so they can null-check during teardown.
+    // a getter so they can null-check during teardown. Biomes that
+    // deform the ground can also register a height sampler we read in
+    // the per-frame loop so the avatar dips into depressions.
     const world = buildWorld(biome, () => this.player?.group.position ?? null);
     this.scene.add(world.group);
+    this.terrainHeight = world.terrainHeight;
     this.obstacles = world.obstacles;
     this.worldRadius = world.worldRadius;
     // Per-frame world animations (drifting butterflies etc) are
@@ -166,14 +173,23 @@ export class Engine {
         pp.z *= k;
       }
 
+      // Terrain follow — biomes that deform the ground (e.g. moon
+      // craters) register a height sampler. We add the sampled offset
+      // to the player Y AFTER the avatar's own bob so the kid/car
+      // settles into the depression and the rocket dips with it.
+      if (this.terrainHeight) {
+        pp.y += this.terrainHeight(pp.x, pp.z);
+      }
+
       // Smooth follow camera. We follow only the XZ plane — the player's
       // Y oscillates from idle bob, but a camera that bobs with them
       // makes the whole world feel like it's nodding. Anchor Y to the
-      // ground (player.y = 0) so the camera glides flat.
+      // terrain so the camera dips into craters along with the player.
       const pos = this.player.position();
-      this.tmpVec.set(pos.x, 0, pos.z).add(this.cameraOffset);
+      const cameraAnchorY = this.terrainHeight ? this.terrainHeight(pos.x, pos.z) : 0;
+      this.tmpVec.set(pos.x, cameraAnchorY, pos.z).add(this.cameraOffset);
       this.camera.position.lerp(this.tmpVec, 0.08);
-      this.tmpVec.set(pos.x, 0, pos.z).add(this.cameraLookOffset);
+      this.tmpVec.set(pos.x, cameraAnchorY, pos.z).add(this.cameraLookOffset);
       this.camera.lookAt(this.tmpVec);
 
       // Per-actor update first (so collected letters can hide before render).

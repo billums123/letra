@@ -80,14 +80,22 @@ export function findOpenSpot(
 // (ground, scenery, sky-furniture); buildWorld is the dispatcher that
 // hands the biome a context to populate. Engine adds the resulting
 // group to the scene and wires the tick callbacks into its actor loop.
+export type WorldBuildResult = WorldHandles & {
+  // Biomes that deform the ground register a sampler via
+  // ctx.setTerrainHeight; we expose it back to the engine here so it
+  // can offset the avatar's Y each frame to follow the surface.
+  terrainHeight: ((x: number, z: number) => number) | null;
+};
+
 export function buildWorld(
   biome: Biome,
   getPlayerPosition: () => THREE.Vector3 | null = () => null
-): WorldHandles {
+): WorldBuildResult {
   const group = new THREE.Group();
   group.name = `World:${biome.id}`;
   const obstacles: Obstacle[] = [];
   const tick: Array<(dt: number, t: number) => void> = [];
+  let terrainHeight: ((x: number, z: number) => number) | null = null;
   const ctx: BiomeContext = {
     group,
     obstacles,
@@ -95,9 +103,12 @@ export function buildWorld(
     worldRadius: WORLD_RADIUS,
     random: Math.random,
     getPlayerPosition,
+    setTerrainHeight: (fn) => {
+      terrainHeight = fn;
+    },
   };
   biome.buildProps(ctx);
-  return { group, worldRadius: WORLD_RADIUS, obstacles, tick };
+  return { group, worldRadius: WORLD_RADIUS, obstacles, tick, terrainHeight };
 }
 
 // The original meadow content is now the body of `buildMeadow` so it

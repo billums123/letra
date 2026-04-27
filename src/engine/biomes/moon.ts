@@ -58,7 +58,7 @@ export const moonBiome: Biome = {
 };
 
 function buildProps(ctx: BiomeContext): void {
-  const { group, obstacles, tick, worldRadius, getPlayerPosition } = ctx;
+  const { group, obstacles, tick, worldRadius, getPlayerPosition, setTerrainHeight } = ctx;
 
   // ── Crater plan ──────────────────────────────────────────────────
   // Pick all crater positions BEFORE we build the ground, because the
@@ -79,48 +79,185 @@ function buildProps(ctx: BiomeContext): void {
       maxAttempts: 14,
     });
     if (!spot) continue;
-    // Varying depths — some shallow, some deep impacts. Smaller
-    // craters can't go as deep without their walls becoming weirdly
-    // steep, so depth tracks radius.
     const depth = 0.35 + craterRand() * 0.5 + radius * 0.18;
     craterPlans.push({ x: spot.x, z: spot.z, radius, depth });
   }
 
-  // ── Ground ────────────────────────────────────────────────────────
-  // Tessellated disc — RingGeometry with many radial + angular
-  // subdivisions so we have enough vertices to displace into crater
-  // bowls. Inner hole is sub-pixel small (the kid spawns at origin
-  // and stands above it; nothing visibly touches the centre).
-  const groundGeo = new THREE.RingGeometry(0.05, worldRadius + 30, 96, 40);
-  groundGeo.rotateX(-Math.PI / 2);
-  // Walk every vertex and push it down by the deepest crater that
-  // affects it. smoothstep falloff keeps the lip soft so it reads as
-  // an erosion crater rather than a hard cookie-cutter hole.
-  const positions = groundGeo.attributes.position;
-  for (let i = 0; i < positions.count; i++) {
-    const x = positions.getX(i);
-    const z = positions.getZ(i);
+  // Closure over craterPlans — used both to deform the ground at
+  // build time and as a per-frame terrain-height sampler the engine
+  // calls so the avatar dips into the craters as it drives over them.
+  const craterDip = (x: number, z: number): number => {
     let lowest = 0;
     for (const c of craterPlans) {
       const outerR = c.radius * 1.6;
       const d = Math.hypot(x - c.x, z - c.z);
       if (d >= outerR) continue;
-      const t = 1 - d / outerR; // 1 at centre, 0 at outer edge
-      // smoothstep s-curve: gentle at the edges, steep in the middle.
+      const t = 1 - d / outerR;
       const k = t * t * (3 - 2 * t);
       const y = -c.depth * k;
       if (y < lowest) lowest = y;
     }
-    positions.setY(i, lowest);
+    return lowest;
+  };
+  // Lightweight value-noise function — a hash on the integer grid
+  // bilinearly-interpolated. Used for both surface-bumpiness Y
+  // displacement and per-vertex colour variation, so the moon
+  // surface reads as textured rather than a smooth grey disc.
+  const hash2 = (xi: number, zi: number): number => {
+    let h = xi * 374761393 + zi * 668265263;
+    h = (h ^ (h >>> 13)) >>> 0;
+    h = Math.imul(h, 1274126177);
+    return ((h ^ (h >>> 16)) >>> 0) / 4294967295;
+  };
+  const surfaceNoise = (x: number, z: number, scale: number): number => {
+    const xs = x * scale;
+    const zs = z * scale;
+    const xi = Math.floor(xs);
+    const zi = Math.floor(zs);
+    const xf = xs - xi;
+    const zf = zs - zi;
+    // Smoothstep within the cell so the bilinear seams aren't visible.
+    const u = xf * xf * (3 - 2 * xf);
+    const v = zf * zf * (3 - 2 * zf);
+    const a = hash2(xi, zi);
+    const b = hash2(xi + 1, zi);
+    const c = hash2(xi, zi + 1);
+    const d = hash2(xi + 1, zi + 1);
+    return a * (1 - u) * (1 - v) + b * u * (1 - v) + c * (1 - u) * v + d * u * v;
+  };
+  // Combined surface texture: gentle rolling height + dust-shade
+  // variation. Same noise field consulted for both so light + dark
+  // patches are spatially correlated with the bumps.
+  const surfaceHeight = (x: number, z: number): number => {
+    return (
+      (surfaceNoise(x, z, 0.06) - 0.5) * 0.18 +
+      (surfaceNoise(x, z, 0.18) - 0.5) * 0.06
+    );
+  };
+
+  // The engine reads this each frame and offsets the avatar's Y by
+  // its return value. craterDip dominates (negative); the surface
+  // noise rides on top so kids feel small rolling bumps as they
+  // drive across the regolith.
+  setTerrainHeight((x, z) => craterDip(x, z) + surfaceHeight(x, z));
+
+  // ── Ground ────────────────────────────────────────────────────────
+  // Tessellated disc — RingGeometry with many radial + angular
+  // subdivisions so we have enough vertices to displace into crater
+  // bowls AND show small surface texture variation. Vertex colours
+  // do triple duty: darken the inside of each crater, paint
+  // lighter dust patches, and shade rolling-noise high spots.
+  const groundGeo = new THREE.RingGeometry(0.05, worldRadius + 30, 128, 56);
+  groundGeo.rotateX(-Math.PI / 2);
+  const positions = groundGeo.attributes.position;
+  const colors = new Float32Array(positions.count * 3);
+  const baseColor = new THREE.Color(0xa1a7b0);
+  const lightDust = new THREE.Color(0xc7ccd2);
+  const shadowDust = new THREE.Color(0x4f535d);
+  const vec = new THREE.Color();
+  for (let i = 0; i < positions.count; i++) {
+    const x = positions.getX(i);
+    const z = positions.getZ(i);
+    // Crater dip + small surface roll combined. Surface roll is
+    // muted near the world edge so the boundary still reads flat
+    // against the skirt.
+    const edgeFalloff = THREE.MathUtils.clamp(1 - (Math.hypot(x, z) - (worldRadius - 6)) / 8, 0, 1);
+    const noiseY = surfaceHeight(x, z) * edgeFalloff;
+    const dipY = craterDip(x, z);
+    positions.setY(i, dipY + noiseY);
+
+    // Vertex colour:
+    //   - depth tint: lerp toward shadowDust as we go below ground
+    //   - dust tint: lerp toward lightDust on the lighter noise
+    //     patches (uses the larger-scale band of the same field)
+    const depthT = THREE.MathUtils.clamp(-dipY / 1.5, 0, 1);
+    const dustT = THREE.MathUtils.clamp((surfaceNoise(x, z, 0.04) - 0.5) * 1.6, -0.4, 0.4);
+    vec.copy(baseColor);
+    if (dustT > 0) vec.lerp(lightDust, dustT);
+    else vec.lerp(shadowDust, -dustT);
+    // Crater shading wins — lerp toward shadowDust harder near the
+    // bottom so the centre of every crater reads as a dark sink
+    // before any texture noise.
+    if (depthT > 0) vec.lerp(shadowDust, depthT * 0.85);
+    colors[i * 3 + 0] = vec.r;
+    colors[i * 3 + 1] = vec.g;
+    colors[i * 3 + 2] = vec.b;
   }
   positions.needsUpdate = true;
+  groundGeo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
   groundGeo.computeVertexNormals();
   const ground = new THREE.Mesh(
     groundGeo,
-    new THREE.MeshStandardMaterial({ color: 0x9aa0aa, roughness: 1, flatShading: false })
+    new THREE.MeshStandardMaterial({
+      color: 0xffffff,
+      vertexColors: true,
+      roughness: 1,
+      flatShading: false,
+    })
   );
   ground.receiveShadow = true;
   group.add(ground);
+
+  // ── Surface dust patches ─────────────────────────────────────────
+  // Flat lighter discs scattered across the ground to break up the
+  // plain grey. Sit just above the surface so they layer on top of
+  // the vertex-colour terrain without z-fighting. No collision.
+  const dustRand = mulberry32(freshSeed());
+  for (let i = 0; i < 30; i++) {
+    const dx = (dustRand() - 0.5) * (worldRadius - 4) * 2;
+    const dz = (dustRand() - 0.5) * (worldRadius - 4) * 2;
+    if (Math.hypot(dx, dz) > worldRadius - 4) continue;
+    const r = 1.4 + dustRand() * 2.5;
+    // Skip patches that would sit inside a crater — they look weird
+    // overlaid on the dark sink.
+    if (craterDip(dx, dz) < -0.05) continue;
+    const shade = 0.78 + dustRand() * 0.15;
+    const patch = new THREE.Mesh(
+      new THREE.CircleGeometry(r, 14),
+      new THREE.MeshStandardMaterial({
+        color: new THREE.Color().setHSL(0.62, 0.04, shade),
+        roughness: 1,
+        transparent: true,
+        opacity: 0.55,
+        depthWrite: false,
+      })
+    );
+    patch.rotation.x = -Math.PI / 2;
+    // Float just above the surface noise at this spot so the patch
+    // hugs the ground instead of intersecting it.
+    patch.position.set(dx, surfaceHeight(dx, dz) + 0.01, dz);
+    patch.receiveShadow = true;
+    group.add(patch);
+  }
+
+  // ── Pebble litter ────────────────────────────────────────────────
+  // Tiny rocks scattered in clumps so the surface has small-scale
+  // detail when the camera is close. Cheap (small dodecahedrons),
+  // no collision.
+  const pebbleRand = mulberry32(freshSeed());
+  for (let i = 0; i < 90; i++) {
+    const dx = (pebbleRand() - 0.5) * (worldRadius - 4) * 2;
+    const dz = (pebbleRand() - 0.5) * (worldRadius - 4) * 2;
+    if (Math.hypot(dx, dz) > worldRadius - 4) continue;
+    const size = 0.05 + pebbleRand() * 0.1;
+    const baseShade = 0.42 + pebbleRand() * 0.18;
+    const pebble = new THREE.Mesh(
+      new THREE.DodecahedronGeometry(size, 0),
+      new THREE.MeshStandardMaterial({
+        color: new THREE.Color().setHSL(0.62, 0.05, baseShade),
+        roughness: 1,
+      })
+    );
+    pebble.position.set(
+      dx,
+      craterDip(dx, dz) + surfaceHeight(dx, dz) + size * 0.5,
+      dz
+    );
+    pebble.rotation.set(pebbleRand() * Math.PI, pebbleRand() * Math.PI, pebbleRand() * Math.PI);
+    pebble.castShadow = true;
+    pebble.receiveShadow = true;
+    group.add(pebble);
+  }
 
   const skirt = new THREE.Mesh(
     new THREE.RingGeometry(worldRadius + 30, worldRadius + 80, 48),
@@ -165,12 +302,11 @@ function buildProps(ctx: BiomeContext): void {
   // ── Crater rim debris ────────────────────────────────────────────
   // The craters are now real depressions in the ground (handled
   // above). All we need on top is a scattered ring of impact debris
-  // around each rim — the dipping ground does the rest of the work.
+  // around each rim. Each chunk samples the deformed terrain at its
+  // own (x, z) so chunks sit ON the dipped rim, not floating above it.
   const debrisRand = mulberry32(freshSeed());
   for (const c of craterPlans) {
-    const rimDebris = makeCraterRimDebris(c.radius, debrisRand);
-    rimDebris.position.set(c.x, 0, c.z);
-    rimDebris.rotation.y = debrisRand() * Math.PI * 2;
+    const rimDebris = makeCraterRimDebris(c, debrisRand, (x, z) => craterDip(x, z) + surfaceHeight(x, z));
     group.add(rimDebris);
   }
 
@@ -273,28 +409,33 @@ function makeMoonRock(size: number): THREE.Object3D {
 // Just the rim debris around a crater. The crater itself is now a
 // real depression in the ground geometry (see buildProps), so all
 // this does is scatter dodecahedron chunks around the rim's outer
-// edge to read as ejected impact debris.
-function makeCraterRimDebris(radius: number, rand: () => number): THREE.Object3D {
+// edge to read as ejected impact debris. Each chunk samples the
+// deformed terrain at its own (x, z) so it sits on the dipped rim
+// instead of hovering at y=0.
+function makeCraterRimDebris(
+  c: { x: number; z: number; radius: number },
+  rand: () => number,
+  sampleHeight: (x: number, z: number) => number
+): THREE.Object3D {
   const g = new THREE.Group();
   const baseShade = 0.42 + rand() * 0.08;
   const rimMat = new THREE.MeshStandardMaterial({
     color: new THREE.Color().setHSL(0.62, 0.06, baseShade + 0.08),
     roughness: 1,
   });
-  const debrisCount = 18 + Math.floor(radius * 4);
+  const debrisCount = 18 + Math.floor(c.radius * 4);
   for (let i = 0; i < debrisCount; i++) {
     const a = (i / debrisCount) * Math.PI * 2 + (rand() - 0.5) * 0.18;
-    const dist = radius + (rand() - 0.5) * radius * 0.22;
+    const dist = c.radius + (rand() - 0.5) * c.radius * 0.22;
     const size = 0.12 + rand() * 0.22;
+    const wx = c.x + Math.cos(a) * dist;
+    const wz = c.z + Math.sin(a) * dist;
+    const wy = sampleHeight(wx, wz) + size * 0.5;
     const chunk = new THREE.Mesh(
       new THREE.DodecahedronGeometry(size, 0),
       rimMat
     );
-    chunk.position.set(
-      Math.cos(a) * dist,
-      size * 0.55,
-      Math.sin(a) * dist
-    );
+    chunk.position.set(wx, wy, wz);
     chunk.rotation.set(rand() * Math.PI, rand() * Math.PI, rand() * Math.PI);
     chunk.castShadow = true;
     chunk.receiveShadow = true;
@@ -323,50 +464,82 @@ function makeAlien(
   const group = new THREE.Group();
   group.position.set(homeX, 0, homeZ);
 
-  // ── Body — small egg, slightly squashed bottom.
-  const bodyColor = new THREE.Color().setHSL(hue, 0.78, 0.6);
+  // Soft contact shadow under the alien — flat dark disc that anchors
+  // it to the ground. Lives in the outer group (not the bobbing
+  // body sub-group below) so it stays put while the alien breathes
+  // above it.
+  const shadow = new THREE.Mesh(
+    new THREE.CircleGeometry(0.45, 24),
+    new THREE.MeshBasicMaterial({
+      color: 0x000000,
+      transparent: true,
+      opacity: 0.25,
+      depthWrite: false,
+    })
+  );
+  shadow.rotation.x = -Math.PI / 2;
+  shadow.position.y = 0.02;
+  group.add(shadow);
+
+  // Inner sub-group for everything that bobs / walks-bounces. Walking
+  // moves the outer group's xz; bobbing moves this inner group's y;
+  // the shadow stays planted on the regolith while the alien
+  // breathes above it.
+  const bob = new THREE.Group();
+  group.add(bob);
+
+  // ── Body — round, slightly egg-shaped, two-tone. Head is a
+  // slightly lighter shade than the body so the silhouette reads
+  // even from far away.
+  const bodyColor = new THREE.Color().setHSL(hue, 0.78, 0.55);
+  const headColor = new THREE.Color().setHSL(hue, 0.78, 0.65);
   const bodyMat = new THREE.MeshStandardMaterial({
     color: bodyColor,
-    roughness: 0.5,
+    roughness: 0.45,
     emissive: bodyColor.clone().multiplyScalar(0.2),
     emissiveIntensity: 0.45,
   });
-  const body = new THREE.Mesh(new THREE.SphereGeometry(0.5, 18, 14), bodyMat);
-  body.scale.set(1, 1.08, 1);
+  const headMat = new THREE.MeshStandardMaterial({
+    color: headColor,
+    roughness: 0.4,
+    emissive: headColor.clone().multiplyScalar(0.2),
+    emissiveIntensity: 0.45,
+  });
+  const body = new THREE.Mesh(new THREE.SphereGeometry(0.5, 20, 16), bodyMat);
+  body.scale.set(1, 1.05, 1);
   body.position.y = 0.5;
   body.castShadow = true;
   body.receiveShadow = true;
-  group.add(body);
+  bob.add(body);
 
-  // Lighter belly inset so the front catches light.
+  // Lighter belly inset.
   const bellyMat = new THREE.MeshStandardMaterial({
-    color: bodyColor.clone().lerp(new THREE.Color(0xffffff), 0.42),
+    color: bodyColor.clone().lerp(new THREE.Color(0xffffff), 0.5),
     roughness: 0.7,
   });
   const belly = new THREE.Mesh(new THREE.SphereGeometry(0.3, 14, 10), bellyMat);
   belly.position.set(0, 0.42, 0.3);
-  group.add(belly);
+  bob.add(belly);
 
-  // ── Big head — sits on top of the body, larger than the body for
-  // an extra-cute "all eyes" silhouette.
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.42, 18, 14), bodyMat);
+  // ── Big oversized head.
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.46, 20, 16), headMat);
   head.position.y = 1.05;
   head.castShadow = true;
   head.receiveShadow = true;
-  group.add(head);
+  bob.add(head);
 
-  // Cheek blushes — soft pink discs on each side of the head.
+  // Bigger, brighter cheek blushes.
   const blushMat = new THREE.MeshBasicMaterial({
-    color: 0xff9bb8,
+    color: 0xff7faa,
     transparent: true,
-    opacity: 0.65,
+    opacity: 0.85,
     depthWrite: false,
   });
   for (const side of [-1, 1] as const) {
-    const blush = new THREE.Mesh(new THREE.CircleGeometry(0.09, 14), blushMat);
-    blush.position.set(side * 0.25, 0.95, 0.32);
-    blush.lookAt(side * 0.25, 0.95, 1);
-    group.add(blush);
+    const blush = new THREE.Mesh(new THREE.CircleGeometry(0.13, 16), blushMat);
+    blush.position.set(side * 0.28, 0.92, 0.33);
+    blush.lookAt(side * 0.28, 0.92, 1);
+    bob.add(blush);
   }
 
   // ── Eye stalks — short cylinders rising from the head with big
@@ -380,7 +553,7 @@ function makeAlien(
   for (const side of [-1, 1] as const) {
     const pivot = new THREE.Group();
     pivot.position.set(side * 0.16, 1.32, 0.06);
-    group.add(pivot);
+    bob.add(pivot);
     stalkPivots.push(pivot);
 
     const stalk = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.05, 0.18, 8), stalkMat);
@@ -415,7 +588,7 @@ function makeAlien(
     const pivot = new THREE.Group();
     pivot.position.set(side * 0.24, 1.4, -0.08);
     pivot.rotation.z = -side * 0.3;
-    group.add(pivot);
+    bob.add(pivot);
     antennaPivots.push(pivot);
     const wire = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.025, 0.32, 6), antennaMat);
     wire.position.y = 0.16;
@@ -425,15 +598,27 @@ function makeAlien(
     pivot.add(tip);
   }
 
-  // ── Wide smile.
+  // ── Wide smile — a thicker torus arc, pushed forward enough to
+  // sit clearly on the front of the head and not get hidden by the
+  // belly silhouette.
+  const mouthMat = new THREE.MeshStandardMaterial({ color: 0x1f1428, roughness: 0.55 });
   const mouth = new THREE.Mesh(
-    new THREE.TorusGeometry(0.1, 0.022, 6, 14, Math.PI),
-    new THREE.MeshStandardMaterial({ color: 0x2a1a30, roughness: 0.7 })
+    new THREE.TorusGeometry(0.16, 0.03, 8, 18, Math.PI),
+    mouthMat
   );
   mouth.rotation.x = Math.PI / 2;
   mouth.rotation.z = Math.PI; // flip so the curve smiles
-  mouth.position.set(0, 0.92, 0.4);
-  group.add(mouth);
+  mouth.position.set(0, 0.9, 0.42);
+  bob.add(mouth);
+  // Tiny tongue blob inside the smile so the mouth feels open and
+  // friendly rather than flat.
+  const tongue = new THREE.Mesh(
+    new THREE.SphereGeometry(0.07, 10, 8),
+    new THREE.MeshStandardMaterial({ color: 0xff6f9c, roughness: 0.6 })
+  );
+  tongue.scale.set(1, 0.45, 0.6);
+  tongue.position.set(0, 0.83, 0.45);
+  bob.add(tongue);
 
   // ── Arms — short cylinder with a sphere hand at each end. Pivot
   // at shoulder so we can swing them when walking and raise + wave
@@ -449,7 +634,7 @@ function makeAlien(
     const pivot = new THREE.Group();
     pivot.position.set(a.x, a.y, a.z);
     pivot.rotation.z = a.restRot;
-    group.add(pivot);
+    bob.add(pivot);
     armPivots.push(pivot);
     const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.06, 0.32, 8), armMat);
     arm.position.y = -0.16;
@@ -468,7 +653,7 @@ function makeAlien(
     foot.scale.set(1, 0.4, 1.2);
     foot.position.set(side * 0.2, 0.06, 0.02);
     foot.castShadow = true;
-    group.add(foot);
+    bob.add(foot);
   }
 
   // ── Per-instance state ──────────────────────────────────────────
@@ -494,7 +679,7 @@ function makeAlien(
   const swaySpeed = 0.7 + Math.random() * 0.5;
   const blinkOffset = Math.random() * 8;
   const eyeballs: THREE.Mesh[] = [];
-  group.traverse((obj) => {
+  bob.traverse((obj) => {
     const m = obj as THREE.Mesh;
     if (m.isMesh && m.material === eyeWhiteMat) eyeballs.push(m);
   });
@@ -551,7 +736,7 @@ function makeAlien(
       // While walking, bob a little faster + bigger to imply
       // bouncy steps; while waving, slow gentle bob in place.
       const bobAmt = walking ? 0.11 : 0.06;
-      group.position.y = Math.abs(Math.sin(t * bobSpeed + phase)) * bobAmt;
+      bob.position.y = Math.abs(Math.sin(t * bobSpeed + phase)) * bobAmt;
 
       // ── Eye stalk sway ────────────────────────────────────────
       for (let i = 0; i < stalkPivots.length; i++) {
