@@ -21,6 +21,7 @@ export class Engine {
   readonly clock: THREE.Clock;
   readonly player: PlayerHandles;
   readonly obstacles: Obstacle[];
+  readonly worldRadius: number;
 
   private rafId = 0;
   private events: EngineEvents;
@@ -86,6 +87,12 @@ export class Engine {
     const world = buildWorld();
     this.scene.add(world.group);
     this.obstacles = world.obstacles;
+    this.worldRadius = world.worldRadius;
+    // Per-frame world animations (drifting butterflies etc) are
+    // exposed by buildWorld as a list of update callbacks.
+    for (const fn of world.tick) {
+      this.addActor({ update: fn });
+    }
 
     this.player = buildAvatar(avatar);
     this.scene.add(this.player.group);
@@ -136,6 +143,17 @@ export class Engine {
           pp.x += dx * push;
           pp.z += dz * push;
         }
+      }
+      // Hard world boundary — independent of the visible boundary props
+      // so a kid can never sneak through a gap and drive off the map.
+      // Clamp the player back inside a circle of radius (worldRadius -
+      // PLAYER_RADIUS) so they stop a half-step short of the edge.
+      const distFromCenter = Math.hypot(pp.x, pp.z);
+      const maxDist = this.worldRadius - PLAYER_RADIUS;
+      if (distFromCenter > maxDist) {
+        const k = maxDist / distFromCenter;
+        pp.x *= k;
+        pp.z *= k;
       }
 
       // Smooth follow camera. We follow only the XZ plane — the player's
