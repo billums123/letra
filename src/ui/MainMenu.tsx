@@ -10,7 +10,10 @@ import { isDev } from "../util/isDev";
 // by visual identification + voice cue.
 
 type GameCardProps = {
-  emoji: string;
+  // Either an emoji glyph or a URL for a PNG icon. PNG wins when both
+  // are provided — emoji is a friendly fallback if the file is missing.
+  emoji?: string;
+  iconUrl?: string;
   title: string;
   subtitle: string;
   color: string;
@@ -19,7 +22,7 @@ type GameCardProps = {
   ariaLabel: string;
 };
 
-function GameCard({ emoji, title, subtitle, color, voiceClipId, onSelect, ariaLabel }: GameCardProps) {
+function GameCard({ emoji, iconUrl, title, subtitle, color, voiceClipId, onSelect, ariaLabel }: GameCardProps) {
   const lastSpoken = useRef(0);
   const speak = () => {
     // Throttle speak so a kid bouncing the cursor doesn't trigger a stutter.
@@ -57,8 +60,25 @@ function GameCard({ emoji, title, subtitle, color, voiceClipId, onSelect, ariaLa
       onMouseUp={(e) => (e.currentTarget.style.transform = "")}
       onMouseLeave={(e) => (e.currentTarget.style.transform = "")}
     >
-      <div style={{ fontSize: 96, lineHeight: 1, marginBottom: 12 }} aria-hidden>
-        {emoji}
+      <div style={{ height: 128, marginBottom: 8, display: "flex", alignItems: "center", justifyContent: "center" }} aria-hidden>
+        {iconUrl ? (
+          <img
+            src={iconUrl}
+            alt=""
+            // Drop-shadow gives the icon some lift off the card; the
+            // PNGs are transparent so the card colour shows through
+            // around the character without a white box.
+            style={{
+              width: 128,
+              height: 128,
+              objectFit: "contain",
+              filter: "drop-shadow(0 6px 0 rgba(0,0,0,0.18))",
+            }}
+            draggable={false}
+          />
+        ) : (
+          <div style={{ fontSize: 96, lineHeight: 1 }}>{emoji}</div>
+        )}
       </div>
       <div style={{ fontSize: 30, fontWeight: 900, letterSpacing: 0.5 }}>{title}</div>
       <div style={{ fontSize: 18, fontWeight: 700, opacity: 0.85, marginTop: 6 }}>{subtitle}</div>
@@ -117,6 +137,7 @@ export function MainMenu() {
         }}
       >
         <GameCard
+          iconUrl="/icons/spell-word.png"
           emoji="🐱"
           title="Spell the Word"
           subtitle="Find the missing pet"
@@ -126,6 +147,7 @@ export function MainMenu() {
           ariaLabel="Spell the Word — find the letters that spell missing animals"
         />
         <GameCard
+          iconUrl="/icons/find-alphabet.png"
           emoji="🔤"
           title="Find the Alphabet"
           subtitle="A all the way to Z"
@@ -135,6 +157,7 @@ export function MainMenu() {
           ariaLabel="Find the alphabet from A to Z"
         />
         <GameCard
+          iconUrl="/icons/match-sound.png"
           emoji="👂"
           title="Match the Sound"
           subtitle="Hear it, find it"

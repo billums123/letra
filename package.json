@@ -15,7 +15,10 @@
     "audio:list": "node --import tsx scripts/generate-audio.ts --list",
     "music:generate": "node --import tsx scripts/generate-music.ts",
     "music:generate-force": "node --import tsx scripts/generate-music.ts --force",
-    "music:list": "node --import tsx scripts/generate-music.ts --list"
+    "music:list": "node --import tsx scripts/generate-music.ts --list",
+    "icons:generate": "node --import tsx scripts/generate-icons.ts",
+    "icons:generate-force": "node --import tsx scripts/generate-icons.ts --force",
+    "icons:list": "node --import tsx scripts/generate-icons.ts --list"
   },
   "dependencies": {
     "nipplejs": "^0.10.2",
