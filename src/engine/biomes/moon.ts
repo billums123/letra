@@ -930,14 +930,6 @@ function makeFlag(): { group: THREE.Group; tick: (dt: number, t: number) => void
   cloth.position.set(0.45, 1.95, 0);
   cloth.castShadow = true;
   group.add(cloth);
-  // Stripe accent on the lower half of the cloth.
-  const stripeGeo = new THREE.PlaneGeometry(0.9, 0.18);
-  const stripe = new THREE.Mesh(
-    stripeGeo,
-    new THREE.MeshStandardMaterial({ color: 0xfafafa, roughness: 0.8, side: THREE.DoubleSide })
-  );
-  stripe.position.set(0.45, 1.78, 0.001);
-  group.add(stripe);
 
   // Cache the cloth geometry's base x positions so we can apply a
   // travelling wave without accumulating drift across frames.
