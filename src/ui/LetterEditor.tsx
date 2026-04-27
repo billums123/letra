@@ -1,11 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { Font, FontLoader } from "three/examples/jsm/loaders/FontLoader.js";
-import { TextGeometry } from "three/examples/jsm/geometries/TextGeometry.js";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { TransformControls } from "three/examples/jsm/controls/TransformControls.js";
 import { ALPHABET } from "../audio/types";
-import { colorFor, loadFont } from "../engine/letters";
+import { colorFor, loadFont, makeLetterShape } from "../engine/letters";
 import {
   type EditableParts as SharedEditableParts,
   type MouthShape as SharedMouthShape,
@@ -312,28 +311,13 @@ function buildEditableLetter(
   const display = letter;
   const color = colorFor(letter);
   const letterMat = new THREE.MeshStandardMaterial({ color, roughness: 0.55, metalness: 0.05, emissive: color.clone().multiplyScalar(0.08) });
-  const geo = new TextGeometry(display, {
-    font,
-    size: 1.6,
-    depth: 0.55,
-    curveSegments: 6,
-    bevelEnabled: true,
-    bevelThickness: 0.07,
-    bevelSize: 0.05,
-    bevelSegments: 3,
-  });
-  geo.computeBoundingBox();
-  const bb = geo.boundingBox!;
-  const cx = (bb.min.x + bb.max.x) / 2;
-  geo.translate(-cx, -bb.min.y, 0);
-  geo.computeBoundingBox();
-  const size = new THREE.Vector3();
-  geo.boundingBox!.getSize(size);
-
-  const letterMesh = new THREE.Mesh(geo, letterMat);
-  letterMesh.castShadow = true;
-  letterMesh.receiveShadow = true;
-  inner.add(letterMesh);
+  // Share the runtime's letter geometry helper so glyph swaps (e.g.
+  // the serif uppercase I) appear identically in the editor — the
+  // editor was previously building its own TextGeometry and missed
+  // any non-Helvetiker shapes the runtime had.
+  const shape = makeLetterShape(font, display, letterMat);
+  const size = new THREE.Vector3(shape.width, shape.height, 0);
+  inner.add(shape.object);
 
   const partGroups: Record<string, THREE.Object3D> = {};
   const setRot = (obj: THREE.Object3D, r: Vec3) => obj.rotation.set(r.x, r.y, r.z);

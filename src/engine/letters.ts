@@ -62,7 +62,7 @@ const tmpBox = new THREE.Box3();
 // alphabet can't mistake it for an "l". Both build paths (procedural
 // and override-driven) call this so the override authors can position
 // features against the same shape they see in-game.
-type LetterShape = {
+export type LetterShape = {
   // Object the caller adds to its inner group. Already centred so
   // baseline sits at y=0 and horizontal centre at x=0.
   object: THREE.Object3D;
@@ -71,7 +71,7 @@ type LetterShape = {
   dispose: () => void;
 };
 
-function makeLetterShape(font: Font, display: string, mat: THREE.Material): LetterShape {
+export function makeLetterShape(font: Font, display: string, mat: THREE.Material): LetterShape {
   if (display === "I") return makeSerifI(mat);
 
   const geo = new TextGeometry(display, {
