@@ -116,10 +116,10 @@ export function FindAlphabetGame() {
       },
     });
     playChime();
-    audio.stop();
-    // Find-the-Alphabet currently plays only the letter name on pickup.
-    // Phonetic sound + example word will join in a later milestone.
-    audio.play(audio.letterName(entry.letter));
+    // Queue the letter name. Multiple rapid pickups (the kid speed-walks
+    // through close-together letters) will play in order rather than
+    // each cancelling the last and leaving the user in silence.
+    audio.enqueue(audio.letterName(entry.letter));
     collect(entry.letter);
     setFoundCount((n) => n + 1);
     currentIndex.current += 1;

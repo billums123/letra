@@ -23,6 +23,19 @@ class AudioPlayer {
   // Subscribers receive notifications when init/voice changes complete.
   private listeners = new Set<() => void>();
   private current: HTMLAudioElement | null = null;
+  // The resolver of the in-flight play() promise, so stop() can resolve
+  // it instead of leaving the caller hanging forever (which used to break
+  // .then() chains for letter name → letter sound).
+  private currentResolver: (() => void) | null = null;
+  // Background queue of clip ids waiting to be played one-at-a-time.
+  // Used by enqueue() so rapid collection of nearby letters doesn't cancel
+  // every previous audio and end up silent.
+  private queue: string[] = [];
+  private queueDraining = false;
+  // Increments whenever stop()/flushQueue()/setVoice() is called; lets
+  // playSequence() know its sequence has been cancelled so it won't keep
+  // firing the next clip in the chain.
+  private sequenceVersion = 0;
   private speechVoice: SpeechSynthesisVoice | null = null;
   private speechReady = false;
 
@@ -173,9 +186,26 @@ class AudioPlayer {
       this.current.currentTime = 0;
       this.current = null;
     }
+    if (this.currentResolver) {
+      // Resolve the pending play() promise so any awaiter (e.g. the
+      // queue drain loop or a playSequence step) can move on instead
+      // of hanging forever.
+      this.currentResolver();
+      this.currentResolver = null;
+    }
+    // Bumping the sequence version cancels any in-flight playSequence().
+    this.sequenceVersion++;
     if (this.mode === "speech" && typeof window !== "undefined") {
       window.speechSynthesis.cancel();
     }
+  }
+
+  // Drop everything in the queue and stop the current clip. Used when
+  // switching screens / games — prevents leftover queued audio from a
+  // previous round bleeding into the new one.
+  flushQueue() {
+    this.queue = [];
+    this.stop();
   }
 
   // Plays a clip by id (key into the manifest). Returns a promise that resolves
@@ -185,11 +215,18 @@ class AudioPlayer {
     if (opts.interrupt !== false) this.stop();
     if (this.mode === "elevenlabs") {
       return new Promise((resolve) => {
-        const audio = new Audio(this.clipUrl(id));
-        this.current = audio;
-        audio.addEventListener("ended", () => resolve());
-        audio.addEventListener("error", () => resolve());
-        audio.play().catch(() => resolve());
+        const a = new Audio(this.clipUrl(id));
+        this.current = a;
+        const finish = () => {
+          // Only clear the resolver pointer if it still points at us;
+          // a later play() may have already replaced it.
+          if (this.currentResolver === resolve) this.currentResolver = null;
+          resolve();
+        };
+        this.currentResolver = resolve;
+        a.addEventListener("ended", finish);
+        a.addEventListener("error", finish);
+        a.play().catch(finish);
       });
     }
     // Speech fallback: derive the natural-language text from the id.
@@ -215,6 +252,47 @@ class AudioPlayer {
       utter.onerror = () => resolve();
       window.speechSynthesis.speak(utter);
     });
+  }
+
+  // Queue a clip to play after the currently-queued audio finishes.
+  // Useful when several clips might fire in quick succession (e.g. the
+  // kid speed-walks through three letters) — without queueing, each new
+  // play() would interrupt the previous one and leave the user hearing
+  // only the last clip.
+  enqueue(id: string): void {
+    this.queue.push(id);
+    void this.drainQueue();
+  }
+
+  private async drainQueue(): Promise<void> {
+    if (this.queueDraining) return;
+    this.queueDraining = true;
+    try {
+      while (this.queue.length > 0) {
+        const id = this.queue.shift()!;
+        // interrupt:false → if something else is playing, this would
+        // overlap; but the drain loop only runs one clip at a time, so
+        // by the time we await play() the previous clip has already
+        // completed (or been cancelled, in which case stop() resolved
+        // its promise).
+        await this.play(id, { interrupt: true });
+      }
+    } finally {
+      this.queueDraining = false;
+    }
+  }
+
+  // Plays the given clip ids strictly in order. If anything cancels the
+  // sequence (stop(), another play(), a voice swap), remaining clips are
+  // skipped instead of playing late or out of context.
+  async playSequence(ids: string[]): Promise<void> {
+    if (this.mode === "muted" || ids.length === 0) return;
+    this.stop();
+    const myVersion = this.sequenceVersion;
+    for (const id of ids) {
+      if (myVersion !== this.sequenceVersion) return;
+      await this.play(id, { interrupt: false });
+    }
   }
 
   letterName(letter: string): string {

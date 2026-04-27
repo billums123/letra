@@ -128,8 +128,10 @@ function SpellWordRound({
       },
     });
     playChime();
-    audio.stop();
-    audio.play(audio.letterName(entry.letter)).then(() => audio.play(audio.letterSound(entry.letter), { interrupt: false }));
+    // playSequence cancels itself if anything else interrupts (e.g. the
+    // next letter is collected before the chain finishes), so we never
+    // hear letter-A's phonetic sound after the player has moved on to B.
+    void audio.playSequence([audio.letterName(entry.letter), audio.letterSound(entry.letter)]);
     collect(entry.letter);
     setFoundCount((n) => n + 1);
     currentIndex.current += 1;

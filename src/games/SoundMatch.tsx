@@ -146,9 +146,7 @@ export function SoundMatchGame() {
         },
       });
       playChime();
-      audio.stop();
-      await audio.play(audio.letterName(entry.letter));
-      await audio.play(audio.randomCelebrate(), { interrupt: false });
+      await audio.playSequence([audio.letterName(entry.letter), audio.randomCelebrate()]);
       collect(entry.letter);
       const next = round + 1;
       setRound(next);
@@ -166,10 +164,11 @@ export function SoundMatchGame() {
       }, 700);
     } else {
       // Wrong: gentle hint and replay the sound.
-      audio.stop();
-      await audio.play(audio.letterName(entry.letter));
-      await audio.play("prompt-sound-match-replay", { interrupt: false });
-      await audio.play(audio.letterSound(target), { interrupt: false });
+      await audio.playSequence([
+        audio.letterName(entry.letter),
+        "prompt-sound-match-replay",
+        audio.letterSound(target),
+      ]);
       // Player needs to actually leave the wrong letter before we re-arm so we
       // don't immediately re-trigger the hit.
       const wrongPos = entry.character.positionXZ();
