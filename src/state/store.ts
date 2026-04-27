@@ -2,11 +2,12 @@ import { create } from "zustand";
 
 export type Screen = "menu" | "spell-word" | "find-alphabet" | "sound-match" | "letter-test" | "letter-editor";
 
-// The character the kid drives around. The "kid" is the default chubby
-// orange capsule character; "car" is a cartoony low-poly buggy. Both
-// share the same omnidirectional movement model so controls feel
-// identical regardless of choice.
-export type AvatarKind = "kid" | "car";
+// The character the kid drives around. "kid" is the default chubby
+// orange capsule character; "car" is a cartoony low-poly buggy;
+// "rocket" hovers a couple of units off the ground and tilts in the
+// direction it's flying. All three share the same omnidirectional
+// movement model so controls feel identical regardless of choice.
+export type AvatarKind = "kid" | "car" | "rocket";
 
 type GameState = {
   screen: Screen;
@@ -40,7 +41,7 @@ const VOICE_KEY = "letra:voiceSlug";
 function loadAvatar(): AvatarKind {
   try {
     const raw = localStorage.getItem(AVATAR_KEY);
-    if (raw === "kid" || raw === "car") return raw;
+    if (raw === "kid" || raw === "car" || raw === "rocket") return raw;
   } catch {
     // localStorage may be disabled — default to the kid.
   }

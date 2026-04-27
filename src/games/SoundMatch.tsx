@@ -11,8 +11,10 @@ import { pickClearSpawn } from "../engine/world";
 import { ALPHABET } from "../audio/types";
 import { useGameStore } from "../state/store";
 
-function moveVerb(avatar: "kid" | "car"): string {
-  return avatar === "car" ? "drive" : "walk";
+function moveVerb(avatar: "kid" | "car" | "rocket"): string {
+  if (avatar === "car") return "drive";
+  if (avatar === "rocket") return "fly";
+  return "walk";
 }
 
 // Sound-match: voice plays a letter sound, kid walks to the matching letter.

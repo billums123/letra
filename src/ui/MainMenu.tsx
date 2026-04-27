@@ -520,10 +520,11 @@ function voiceTriggerStyle(open: boolean): React.CSSProperties {
   };
 }
 
-type AvatarOption = { kind: "kid" | "car"; label: string; emoji: string; color: string };
+type AvatarOption = { kind: "kid" | "car" | "rocket"; label: string; emoji: string; color: string };
 const AVATAR_OPTIONS: AvatarOption[] = [
   { kind: "kid", label: "Kid", emoji: "🧒", color: "#ff8c4a" },
   { kind: "car", label: "Car", emoji: "🚗", color: "#ff5555" },
+  { kind: "rocket", label: "Rocket", emoji: "🚀", color: "#7e9bff" },
 ];
 
 // Two cartoony cards floating along the bottom-left of the menu so kids
@@ -539,8 +540,8 @@ function AvatarPicker({
   setAvatar,
   compact,
 }: {
-  avatar: "kid" | "car";
-  setAvatar: (a: "kid" | "car") => void;
+  avatar: "kid" | "car" | "rocket";
+  setAvatar: (a: "kid" | "car" | "rocket") => void;
   compact: boolean;
 }) {
   return (

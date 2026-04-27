@@ -263,6 +263,92 @@ function makeMotor(): Motor {
 
 export const motor = makeMotor();
 
+// ─── Rocket thrust loop ───────────────────────────────────────────────
+// Continuous filtered-noise "shhhhh" with a low rumble layered under
+// it. Same start/stop/setActivity contract as motor so the avatar's
+// update loop drives it the same way. Idle is a quiet ambient hiss;
+// full activity adds rumble and brightens the noise.
+type Thrust = {
+  start: () => void;
+  stop: () => void;
+  setActivity: (a: number) => void;
+};
+
+function makeThrust(): Thrust {
+  let nodes: {
+    noise: AudioBufferSourceNode;
+    rumble: OscillatorNode;
+    noiseFilter: BiquadFilterNode;
+    noiseGain: GainNode;
+    rumbleGain: GainNode;
+    master: GainNode;
+  } | null = null;
+  return {
+    start() {
+      if (nodes) return;
+      const c = getCtx();
+      if (!c) return;
+      // Loop the cached noise buffer indefinitely for the hiss base.
+      const noise = c.createBufferSource();
+      noise.buffer = getNoiseBuffer(c);
+      noise.loop = true;
+      const noiseFilter = c.createBiquadFilter();
+      noiseFilter.type = "bandpass";
+      noiseFilter.frequency.value = 1100;
+      noiseFilter.Q.value = 0.6;
+      const noiseGain = c.createGain();
+      noiseGain.gain.value = 0.04;
+      noise.connect(noiseFilter).connect(noiseGain);
+
+      // Sub-rumble underneath — the same pattern as the car motor but
+      // tuned a little higher so the rocket doesn't sound like a
+      // truck idling.
+      const rumble = c.createOscillator();
+      rumble.type = "sine";
+      rumble.frequency.value = 60;
+      const rumbleGain = c.createGain();
+      rumbleGain.gain.value = 0.012;
+      rumble.connect(rumbleGain);
+
+      const master = c.createGain();
+      master.gain.value = 0.4;
+      noiseGain.connect(master);
+      rumbleGain.connect(master);
+      master.connect(c.destination);
+
+      noise.start();
+      rumble.start();
+      nodes = { noise, rumble, noiseFilter, noiseGain, rumbleGain, master };
+    },
+    stop() {
+      if (!nodes) return;
+      const { noise, rumble, master } = nodes;
+      const c = getCtx();
+      if (!c) return;
+      master.gain.cancelScheduledValues(c.currentTime);
+      master.gain.setValueAtTime(master.gain.value, c.currentTime);
+      master.gain.linearRampToValueAtTime(0.0001, c.currentTime + 0.1);
+      noise.stop(c.currentTime + 0.12);
+      rumble.stop(c.currentTime + 0.12);
+      nodes = null;
+    },
+    setActivity(a: number) {
+      if (!nodes) return;
+      const c = getCtx();
+      if (!c) return;
+      const clamped = Math.max(0, Math.min(1, a));
+      const now = c.currentTime;
+      // Idle: quiet ambient hiss. Full: brighter, louder thrust with
+      // more rumble underneath.
+      nodes.master.gain.setTargetAtTime(0.4 + clamped * 0.45, now, 0.12);
+      nodes.noiseFilter.frequency.setTargetAtTime(1100 + clamped * 1400, now, 0.12);
+      nodes.rumble.frequency.setTargetAtTime(60 + clamped * 28, now, 0.12);
+    },
+  };
+}
+
+export const thrust = makeThrust();
+
 // ─── Cartoony car flourishes ─────────────────────────────────────────────
 // Sit on top of the steady motor loop so the car feels playful instead of
 // monotone. Single cue: a quick double-blip "putt-putt" sprinkled at

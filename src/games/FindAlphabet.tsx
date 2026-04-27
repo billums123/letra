@@ -49,11 +49,15 @@ type LetterEntry = {
 // Avatar-aware prompt id and verb. Walking is the default; if the kid is
 // driving the car we swap to the "drive" wording so the audio matches what
 // they're actually doing on screen.
-function alphabetPromptId(avatar: "kid" | "car"): string {
-  return avatar === "car" ? "prompt-find-alphabet-drive" : "prompt-find-alphabet";
+function alphabetPromptId(avatar: "kid" | "car" | "rocket"): string {
+  if (avatar === "car") return "prompt-find-alphabet-drive";
+  if (avatar === "rocket") return "prompt-find-alphabet-fly";
+  return "prompt-find-alphabet";
 }
-function moveVerb(avatar: "kid" | "car"): string {
-  return avatar === "car" ? "Drive" : "Walk";
+function moveVerb(avatar: "kid" | "car" | "rocket"): string {
+  if (avatar === "car") return "Drive";
+  if (avatar === "rocket") return "Fly";
+  return "Walk";
 }
 
 export function FindAlphabetGame() {

@@ -248,6 +248,7 @@ export function buildEntries(): AudioEntry[] {
   // npm run audio:generate-all to back-fill across every voice.
   entries.push({ id: "prompt-find-alphabet", text: "Let's find the whole alphabet! Walk to each letter, in order, from A all the way to Zee!" });
   entries.push({ id: "prompt-find-alphabet-drive", text: "Let's drive to find the whole alphabet! Drive to each letter, in order, from A all the way to Zee!" });
+  entries.push({ id: "prompt-find-alphabet-fly", text: "Let's blast off and find the whole alphabet! Fly to each letter, in order, from A all the way to Zee!" });
   entries.push({ id: "prompt-sound-match", text: "Listen carefully. I will say a sound, and you find the letter that makes it!" });
   entries.push({ id: "prompt-sound-match-replay", text: "Listen again." });
 

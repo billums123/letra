@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import type { AvatarKind } from "../state/store";
-import { motor, playKidStep, playCarPutt } from "../audio/sfx";
+import { motor, playKidStep, playCarPutt, thrust } from "../audio/sfx";
 
 export type PlayerHandles = {
   group: THREE.Group;
@@ -17,7 +17,9 @@ const TURN_LERP = 0.18;
 // Top-level factory the engine calls. Adds avatar variants without
 // each game/screen needing to know about the underlying meshes.
 export function buildAvatar(kind: AvatarKind): PlayerHandles {
-  return kind === "car" ? buildCar() : buildKid();
+  if (kind === "car") return buildCar();
+  if (kind === "rocket") return buildRocket();
+  return buildKid();
 }
 
 // Backwards-compatible alias — older callers just want the original kid.
@@ -293,6 +295,189 @@ function buildCar(): PlayerHandles {
     },
     dispose() {
       motor.stop();
+    },
+  };
+}
+
+// Rocket avatar — hovers ~1.5 units above the ground, tilts in the
+// direction of travel, and trails a flickering flame from its nozzle.
+// Movement uses the same omnidirectional model as the car/kid; the
+// only differences are the floating Y, the lean-into-direction
+// rotation, and the flame trail.
+function buildRocket(): PlayerHandles {
+  const group = new THREE.Group();
+  group.name = "Player";
+  // The rocket as a whole hovers at this baseline Y plus a small bob.
+  const HOVER_Y = 1.5;
+
+  // Pivot subgroup so we can lean the rocket forward without moving
+  // its hover position. Children of `body` are positioned in rocket-
+  // local space; `body` itself rotates.
+  const body = new THREE.Group();
+  group.add(body);
+
+  // Main fuselage — a tall rounded cylinder.
+  const fuselage = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.4, 0.5, 1.2, 16),
+    new THREE.MeshStandardMaterial({ color: 0xf5f5f7, roughness: 0.55, metalness: 0.1 })
+  );
+  fuselage.position.y = 0;
+  fuselage.castShadow = true;
+  body.add(fuselage);
+
+  // Red accent stripe near the top.
+  const stripe = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.405, 0.405, 0.18, 16),
+    new THREE.MeshStandardMaterial({ color: 0xff5e5e, roughness: 0.5 })
+  );
+  stripe.position.y = 0.32;
+  body.add(stripe);
+
+  // Nose cone.
+  const nose = new THREE.Mesh(
+    new THREE.ConeGeometry(0.4, 0.7, 16),
+    new THREE.MeshStandardMaterial({ color: 0xff5e5e, roughness: 0.45 })
+  );
+  nose.position.y = 0.95;
+  nose.castShadow = true;
+  body.add(nose);
+
+  // Round window with a friendly cyan tint and a tiny shine.
+  const windowFrame = new THREE.Mesh(
+    new THREE.SphereGeometry(0.18, 16, 12),
+    new THREE.MeshStandardMaterial({ color: 0x3a2a14, roughness: 0.6 })
+  );
+  windowFrame.position.set(0, 0.18, 0.42);
+  windowFrame.scale.z = 0.4;
+  body.add(windowFrame);
+  const windowGlass = new THREE.Mesh(
+    new THREE.SphereGeometry(0.14, 16, 12),
+    new THREE.MeshStandardMaterial({
+      color: 0x9ee3ff,
+      roughness: 0.2,
+      metalness: 0.2,
+      emissive: 0x4ab0e8,
+      emissiveIntensity: 0.2,
+    })
+  );
+  windowGlass.position.set(0, 0.18, 0.46);
+  windowGlass.scale.z = 0.4;
+  body.add(windowGlass);
+  const windowShine = new THREE.Mesh(
+    new THREE.SphereGeometry(0.04, 8, 8),
+    new THREE.MeshBasicMaterial({ color: 0xffffff })
+  );
+  windowShine.position.set(-0.05, 0.23, 0.5);
+  windowShine.scale.z = 0.4;
+  body.add(windowShine);
+
+  // Four fins around the base.
+  const finMat = new THREE.MeshStandardMaterial({ color: 0xff5e5e, roughness: 0.5 });
+  const finShape = new THREE.Shape();
+  finShape.moveTo(0, 0);
+  finShape.lineTo(0.45, -0.1);
+  finShape.lineTo(0.45, -0.3);
+  finShape.lineTo(0, -0.4);
+  finShape.lineTo(0, 0);
+  const finGeo = new THREE.ExtrudeGeometry(finShape, { depth: 0.04, bevelEnabled: false });
+  for (let i = 0; i < 4; i++) {
+    const fin = new THREE.Mesh(finGeo, finMat);
+    fin.position.y = -0.5;
+    fin.rotation.y = (i / 4) * Math.PI * 2;
+    // Push the fin out from centre along its facing axis.
+    fin.position.x = Math.cos(fin.rotation.y) * 0.42;
+    fin.position.z = Math.sin(fin.rotation.y) * 0.42;
+    fin.castShadow = true;
+    body.add(fin);
+  }
+
+  // Flame — a stretched cone hanging from the nozzle. Pulses + flickers
+  // each frame in the update loop. Uses additive blending so it glows
+  // against the dark stripe of the body.
+  const flameMat = new THREE.MeshBasicMaterial({
+    color: 0xff8c2a,
+    transparent: true,
+    opacity: 0.95,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+  });
+  const flame = new THREE.Mesh(new THREE.ConeGeometry(0.32, 0.7, 14), flameMat);
+  flame.position.y = -0.95;
+  flame.rotation.x = Math.PI; // point downward
+  body.add(flame);
+  // Inner brighter core for extra glow.
+  const flameCoreMat = new THREE.MeshBasicMaterial({
+    color: 0xffe066,
+    transparent: true,
+    opacity: 0.9,
+    blending: THREE.AdditiveBlending,
+    depthWrite: false,
+  });
+  const flameCore = new THREE.Mesh(new THREE.ConeGeometry(0.18, 0.45, 12), flameCoreMat);
+  flameCore.position.y = -0.85;
+  flameCore.rotation.x = Math.PI;
+  body.add(flameCore);
+
+  // State for the per-frame update loop.
+  let facing = 0;
+  let bob = 0;
+  let leanX = 0;
+  let leanZ = 0;
+  // Hover offset so the spawn position (y=0) is interpreted as ground.
+  group.position.y = HOVER_Y;
+
+  thrust.start();
+
+  return {
+    group,
+    update(dt, input) {
+      const mag = Math.hypot(input.x, input.y);
+      const isMoving = mag > 0.05;
+      if (isMoving) {
+        const speed = SPEED * dt;
+        group.position.x += input.x * speed;
+        group.position.z += input.y * speed;
+        const targetYaw = Math.atan2(input.x, input.y);
+        let delta = targetYaw - facing;
+        while (delta > Math.PI) delta -= Math.PI * 2;
+        while (delta < -Math.PI) delta += Math.PI * 2;
+        facing += delta * (TURN_LERP + 0.05);
+        bob += dt * 16;
+      } else {
+        bob += dt * 5;
+      }
+      // Hover bob — gentle vertical oscillation.
+      const bobAmt = isMoving ? 0.18 : 0.1;
+      group.position.y = HOVER_Y + Math.sin(bob) * bobAmt;
+      // Yaw the whole group so the nose points along the velocity.
+      group.rotation.y = facing;
+      // Lean the body forward in the direction of travel. We compute
+      // body-local lean: forward vector is +Z in body space because
+      // the group is yawed to face that direction.
+      const targetLeanX = isMoving ? 0.45 * mag : 0; // forward pitch
+      leanX += (targetLeanX - leanX) * 0.12;
+      // A subtle side-lean adds character — shift the lean axis based
+      // on how much the rocket is turning. Approximated via a delta.
+      const targetLeanZ = 0;
+      leanZ += (targetLeanZ - leanZ) * 0.12;
+      body.rotation.x = leanX;
+      body.rotation.z = leanZ;
+      // Flame flicker — randomized scale + opacity each frame.
+      const intensity = 0.6 + mag * 0.6;
+      const flick = 0.85 + Math.random() * 0.3;
+      flame.scale.set(flick, intensity * flick, flick);
+      flameCore.scale.set(flick * 0.8, intensity * 0.85 * flick, flick * 0.8);
+      (flame.material as THREE.MeshBasicMaterial).opacity = 0.6 + mag * 0.4;
+      (flameCore.material as THREE.MeshBasicMaterial).opacity = 0.7 + mag * 0.3;
+      // Thrust loop tracks input magnitude — quiet hiss while idle,
+      // brighter and louder under full input.
+      thrust.setActivity(mag);
+    },
+    position() {
+      return group.position;
+    },
+    dispose() {
+      thrust.stop();
     },
   };
 }
