@@ -10,6 +10,18 @@ export const MENU_TRACK: Track = {
   url: "/audio/music/menu-theme.mp3",
 };
 
+// Plays during the alphabet-finished dance party. Pinned to 120 BPM
+// in the generation prompt so the letter choreography in
+// FindAlphabet can drive each move on the beat.
+export const CELEBRATION_TRACK: Track = {
+  id: "celebration",
+  name: "Letter Party",
+  url: "/audio/music/celebration.mp3",
+};
+// The dance choreography assumes this BPM. Keep in sync with the
+// celebration prompt's "EXACTLY 120 BPM" hint in generate-music.ts.
+export const CELEBRATION_BPM = 120;
+
 export const GAME_TRACKS: Track[] = [
   { id: "sunny-walk", name: "Sunny Walk", url: "/audio/music/sunny-walk.mp3" },
   { id: "letter-hop", name: "Letter Hop", url: "/audio/music/letter-hop.mp3" },

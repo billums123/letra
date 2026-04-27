@@ -34,6 +34,10 @@ type Track = {
   // doesn't always cooperate but matched head/tail energy is the
   // best we can ask for from generative music.
   prompt: string;
+  // Override the default 30s clip length. Used by the dance-finale
+  // track which is one full minute and pinned to a known BPM so the
+  // letter choreography can lock to the beat.
+  lengthMs?: number;
 };
 
 // Loop-friendly framing reused across every prompt — keeps the
@@ -108,6 +112,28 @@ const TRACKS: Track[] = [
       "rabbit hopping around. D major. " +
       LOOP_FRAMING,
   },
+  {
+    // Plays after the kid finds the whole alphabet. The dance party
+    // finale animates every letter on this track's beat — see
+    // src/games/FindAlphabet.tsx. We pin BPM hard in the prompt so the
+    // visual choreography (which assumes exactly 120 BPM) lines up,
+    // and ask for a full minute so it carries the celebration without
+    // an early loop point.
+    id: "celebration",
+    name: "Letter Party",
+    lengthMs: 60000,
+    prompt:
+      "Joyful explosive children's birthday-party celebration music " +
+      "at EXACTLY 120 BPM, rock-steady tempo from sample one to the " +
+      "very end. Every quarter-note beat lands on a clear strong kick " +
+      "drum so the rhythm is unmistakable. Big bouncy danceable " +
+      "groove. Bright brass stabs, plucky synth lead melody, party " +
+      "horns, hand claps on 2 and 4, marimba arpeggios, shimmery " +
+      "bells. Major key, jubilant, confetti-in-the-air mood, the " +
+      "kind of song you put on the moment a kid finishes their first " +
+      "big achievement. Crystal clear danceable pulse throughout. " +
+      LOOP_FRAMING,
+  },
 ];
 
 async function exists(p: string) {
@@ -128,7 +154,7 @@ async function generateOne(track: Track) {
   const url = "https://api.elevenlabs.io/v1/music?output_format=mp3_44100_128";
   const body = {
     prompt: track.prompt,
-    music_length_ms: 30000,
+    music_length_ms: track.lengthMs ?? 30000,
     model_id: "music_v1",
     force_instrumental: true,
   };
@@ -175,7 +201,7 @@ async function main() {
       continue;
     }
     try {
-      console.log(`… ${t.id} — composing 30s…`);
+      console.log(`… ${t.id} — composing ${(t.lengthMs ?? 30000) / 1000}s…`);
       await generateOne(t);
       console.log(`✓ ${t.id}`);
       made++;
