@@ -278,6 +278,133 @@ export function playCarPutt() {
   tone(180, 0.09, 0.06, 0.06, "triangle");
 }
 
+// ─── Firework SFX ────────────────────────────────────────────────────────
+// Filtered-noise renders of a real firework launch + burst. Tonal
+// synth (oscillators + scale notes) sounds like a chime no matter
+// what; firework noise needs to be aperiodic, so we drive everything
+// off white-noise sources passed through bandpass / lowpass / highpass
+// filters with carefully shaped envelopes. Sounds far closer to a
+// real rocket pop than anything we could build from oscillators.
+
+// Cached white-noise AudioBuffer — generated once per AudioContext.
+let noiseBuffer: AudioBuffer | null = null;
+function getNoiseBuffer(c: AudioContext): AudioBuffer {
+  if (noiseBuffer && noiseBuffer.sampleRate === c.sampleRate) return noiseBuffer;
+  // Two seconds is enough to source any individual SFX without looping.
+  const length = c.sampleRate * 2;
+  const buf = c.createBuffer(1, length, c.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let i = 0; i < length; i++) data[i] = Math.random() * 2 - 1;
+  noiseBuffer = buf;
+  return buf;
+}
+
+function makeNoiseSource(c: AudioContext): AudioBufferSourceNode {
+  const src = c.createBufferSource();
+  src.buffer = getNoiseBuffer(c);
+  // Random offset so consecutive plays don't have the same noise pattern.
+  const offset = Math.random() * (src.buffer!.duration * 0.5);
+  src.start(0, offset);
+  return src;
+}
+
+// "Whoosh" of a rocket leaving the ground. Sharp tssss with a rising
+// pitch sweep on the highpass filter so it reads as motion upward.
+export function playFireworkLaunch() {
+  const c = getCtx();
+  if (!c) return;
+  const t0 = c.currentTime;
+  const dur = 0.55;
+  const src = c.createBufferSource();
+  src.buffer = getNoiseBuffer(c);
+  src.start(t0, Math.random() * 1);
+  src.stop(t0 + dur + 0.05);
+  // Sweeping highpass gives the rocket its rising hiss.
+  const hp = c.createBiquadFilter();
+  hp.type = "highpass";
+  hp.Q.value = 1.2;
+  hp.frequency.setValueAtTime(900, t0);
+  hp.frequency.exponentialRampToValueAtTime(3600, t0 + dur);
+  // A bandpass on top sharpens the whistle so it doesn't read as just
+  // wind noise.
+  const bp = c.createBiquadFilter();
+  bp.type = "bandpass";
+  bp.Q.value = 4;
+  bp.frequency.setValueAtTime(1400, t0);
+  bp.frequency.exponentialRampToValueAtTime(4200, t0 + dur);
+  // Volume envelope — quick attack, exponential tail.
+  const g = c.createGain();
+  g.gain.setValueAtTime(0.0001, t0);
+  g.gain.exponentialRampToValueAtTime(0.18, t0 + 0.04);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  src.connect(hp).connect(bp).connect(g).connect(c.destination);
+}
+
+// Big "boom + crackle" of a firework exploding — three layers stacked:
+//   1. A low-frequency thump (the body of the boom)
+//   2. A mid-frequency snap (the bright "pop")
+//   3. A scatter of tiny high-frequency cracks over ~1.2s (the
+//      glittery sparkle tail)
+export function playFireworkBurst() {
+  const c = getCtx();
+  if (!c) return;
+  const t0 = c.currentTime;
+
+  // Layer 1 — low thump
+  {
+    const src = c.createBufferSource();
+    src.buffer = getNoiseBuffer(c);
+    src.start(t0, Math.random() * 0.5);
+    src.stop(t0 + 0.55);
+    const lp = c.createBiquadFilter();
+    lp.type = "lowpass";
+    lp.frequency.setValueAtTime(180, t0);
+    lp.frequency.exponentialRampToValueAtTime(60, t0 + 0.4);
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(0.45, t0 + 0.008);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.5);
+    src.connect(lp).connect(g).connect(c.destination);
+  }
+
+  // Layer 2 — mid snap
+  {
+    const src = c.createBufferSource();
+    src.buffer = getNoiseBuffer(c);
+    src.start(t0, Math.random() * 0.5);
+    src.stop(t0 + 0.3);
+    const bp = c.createBiquadFilter();
+    bp.type = "bandpass";
+    bp.frequency.value = 700;
+    bp.Q.value = 0.9;
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(0.32, t0 + 0.005);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.28);
+    src.connect(bp).connect(g).connect(c.destination);
+  }
+
+  // Layer 3 — sparkle crackle. ~22 micro-pops randomly distributed
+  // across the next 1.2s, each a tiny highpass-filtered noise blip.
+  for (let i = 0; i < 22; i++) {
+    const at = t0 + 0.04 + Math.random() * 1.15;
+    const dur = 0.04 + Math.random() * 0.06;
+    const src = c.createBufferSource();
+    src.buffer = getNoiseBuffer(c);
+    src.start(at, Math.random() * 1.5);
+    src.stop(at + dur + 0.02);
+    const hp = c.createBiquadFilter();
+    hp.type = "highpass";
+    hp.frequency.value = 2200 + Math.random() * 2400;
+    hp.Q.value = 1.1;
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.0001, at);
+    g.gain.exponentialRampToValueAtTime(0.08 + Math.random() * 0.06, at + 0.005);
+    g.gain.exponentialRampToValueAtTime(0.0001, at + dur);
+    src.connect(hp).connect(g).connect(c.destination);
+  }
+}
+
 // Bigger flourish for end-of-word / end-of-round. Octave jump at the end.
 export function playWoo() {
   tone(N.G4, 0, 0.16);

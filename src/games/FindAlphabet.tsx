@@ -317,7 +317,7 @@ export function FindAlphabetGame() {
             }
           },
         });
-        playChime();
+        // No chime — makeFirework handles its own launch + burst SFX.
       }
     }
   };

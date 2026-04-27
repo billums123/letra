@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import { playFireworkLaunch, playFireworkBurst } from "../audio/sfx";
 
 // Tiny burst of confetti shapes when a letter is collected. Cheap, additive,
 // disposed automatically when the burst finishes.
@@ -104,6 +105,11 @@ export function makeFirework(position: THREE.Vector3, count = 32): Burst {
   let flashLife = 0;
   const flashMax = 0.32;
 
+  // Audible launch the moment the rocket spawns. The matching burst
+  // fires inside explode() — we want both sounds inseparable from the
+  // visual so callers don't have to plumb audio themselves.
+  playFireworkLaunch();
+
   // Rocket palette — pick a strong primary colour that the explosion
   // bits will inherit. Multiple firework instances therefore land on
   // different but coherent palettes.
@@ -180,6 +186,7 @@ export function makeFirework(position: THREE.Vector3, count = 32): Burst {
   function explode() {
     exploded = true;
     flashLife = 0;
+    playFireworkBurst();
     // Tear down the rocket meshes — keep them around any longer and
     // they'd hang in mid-air.
     group.remove(rocket);
