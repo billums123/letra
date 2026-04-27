@@ -134,12 +134,25 @@ function buildProps(ctx: BiomeContext): void {
       (surfaceNoise(x, z, 0.18) - 0.5) * 0.06
     );
   };
+  // Edge falloff that fades surface noise out as we approach the
+  // world boundary, so the boundary ring reads as flat against the
+  // skirt. craterPlans already avoid the edge via their findOpenSpot
+  // bounds, so we don't need to falloff the dip itself.
+  const edgeFalloff = (x: number, z: number): number =>
+    THREE.MathUtils.clamp(1 - (Math.hypot(x, z) - (worldRadius - 6)) / 8, 0, 1);
 
-  // The engine reads this each frame and offsets the avatar's Y by
-  // its return value. craterDip dominates (negative); the surface
-  // noise rides on top so kids feel small rolling bumps as they
-  // drive across the regolith.
-  setTerrainHeight((x, z) => craterDip(x, z) + surfaceHeight(x, z));
+  // Single source of truth for "what's the ground Y at (x, z)?".
+  // Every prop that sits on the surface — ground vertices, rocks,
+  // rim debris, dust patches, pebbles, the flag, the engine's
+  // terrain follow — samples this so nothing ends up floating
+  // above a crater or sinking into a dip.
+  const sampleGround = (x: number, z: number): number => {
+    return craterDip(x, z) + surfaceHeight(x, z) * edgeFalloff(x, z);
+  };
+
+  // Engine reads this each frame to offset the avatar's Y so the
+  // rocket / car visibly dips into craters as they drive over them.
+  setTerrainHeight(sampleGround);
 
   // ── Ground ────────────────────────────────────────────────────────
   // Tessellated disc — RingGeometry with many radial + angular
@@ -158,13 +171,10 @@ function buildProps(ctx: BiomeContext): void {
   for (let i = 0; i < positions.count; i++) {
     const x = positions.getX(i);
     const z = positions.getZ(i);
-    // Crater dip + small surface roll combined. Surface roll is
-    // muted near the world edge so the boundary still reads flat
-    // against the skirt.
-    const edgeFalloff = THREE.MathUtils.clamp(1 - (Math.hypot(x, z) - (worldRadius - 6)) / 8, 0, 1);
-    const noiseY = surfaceHeight(x, z) * edgeFalloff;
+    // Same sampler the engine + every prop on the surface uses, so
+    // ground geometry and prop placements line up exactly.
     const dipY = craterDip(x, z);
-    positions.setY(i, dipY + noiseY);
+    positions.setY(i, sampleGround(x, z));
 
     // Vertex colour:
     //   - depth tint: lerp toward shadowDust as we go below ground
@@ -225,7 +235,7 @@ function buildProps(ctx: BiomeContext): void {
     patch.rotation.x = -Math.PI / 2;
     // Float just above the surface noise at this spot so the patch
     // hugs the ground instead of intersecting it.
-    patch.position.set(dx, surfaceHeight(dx, dz) + 0.01, dz);
+    patch.position.set(dx, sampleGround(dx, dz) + 0.01, dz);
     patch.receiveShadow = true;
     group.add(patch);
   }
@@ -248,11 +258,7 @@ function buildProps(ctx: BiomeContext): void {
         roughness: 1,
       })
     );
-    pebble.position.set(
-      dx,
-      craterDip(dx, dz) + surfaceHeight(dx, dz) + size * 0.5,
-      dz
-    );
+    pebble.position.set(dx, sampleGround(dx, dz) + size * 0.5, dz);
     pebble.rotation.set(pebbleRand() * Math.PI, pebbleRand() * Math.PI, pebbleRand() * Math.PI);
     pebble.castShadow = true;
     pebble.receiveShadow = true;
@@ -281,7 +287,7 @@ function buildProps(ctx: BiomeContext): void {
     const z = Math.sin(a) * rDist;
     const size = 1.3 + boundaryRand() * 0.9;
     const rock = makeMoonRock(size);
-    rock.position.set(x, 0, z);
+    rock.position.set(x, sampleGround(x, z), z);
     rock.rotation.y = a + boundaryRand() * 0.6;
     group.add(rock);
     obstacles.push({ x, z, radius: size * 0.85 });
@@ -306,7 +312,7 @@ function buildProps(ctx: BiomeContext): void {
   // own (x, z) so chunks sit ON the dipped rim, not floating above it.
   const debrisRand = mulberry32(freshSeed());
   for (const c of craterPlans) {
-    const rimDebris = makeCraterRimDebris(c, debrisRand, (x, z) => craterDip(x, z) + surfaceHeight(x, z));
+    const rimDebris = makeCraterRimDebris(c, debrisRand, sampleGround);
     group.add(rimDebris);
   }
 
@@ -318,7 +324,7 @@ function buildProps(ctx: BiomeContext): void {
     const spot = findOpenSpot(rockRand, worldRadius - 6, radius, obstacles, { minRadius: 6 });
     if (!spot) continue;
     const r = makeMoonRock(size);
-    r.position.set(spot.x, 0, spot.z);
+    r.position.set(spot.x, sampleGround(spot.x, spot.z), spot.z);
     r.rotation.y = rockRand() * Math.PI * 2;
     group.add(r);
     obstacles.push({ x: spot.x, z: spot.z, radius });
@@ -330,7 +336,7 @@ function buildProps(ctx: BiomeContext): void {
   // airless backdrop.
   const flag = makeFlag();
   const flagPos = { x: -10, z: -14 };
-  flag.group.position.set(flagPos.x, 0, flagPos.z);
+  flag.group.position.set(flagPos.x, sampleGround(flagPos.x, flagPos.z), flagPos.z);
   group.add(flag.group);
   obstacles.push({ x: flagPos.x, z: flagPos.z, radius: 0.5 });
   tick.push(flag.tick);
@@ -353,7 +359,7 @@ function buildProps(ctx: BiomeContext): void {
     });
     if (!spot) continue;
     const hue = alienRand();
-    const alien = makeAlien(hue, spot.x, spot.z, getPlayerPosition);
+    const alien = makeAlien(hue, spot.x, spot.z, getPlayerPosition, sampleGround);
     group.add(alien.group);
     tick.push(alien.tick);
   }
@@ -459,10 +465,11 @@ function makeAlien(
   hue: number,
   homeX: number,
   homeZ: number,
-  getPlayerPosition: () => THREE.Vector3 | null
+  getPlayerPosition: () => THREE.Vector3 | null,
+  sampleGround: (x: number, z: number) => number
 ): { group: THREE.Group; tick: (dt: number, t: number) => void } {
   const group = new THREE.Group();
-  group.position.set(homeX, 0, homeZ);
+  group.position.set(homeX, sampleGround(homeX, homeZ), homeZ);
 
   // Soft contact shadow under the alien — flat dark disc that anchors
   // it to the ground. Lives in the outer group (not the bobbing
@@ -731,6 +738,12 @@ function makeAlien(
           group.rotation.y = facing;
         }
       }
+
+      // ── Terrain follow ────────────────────────────────────────
+      // The outer group's Y tracks the deformed regolith so the
+      // alien's feet rest on whatever surface they're standing on
+      // (including dipping into a crater while wandering).
+      group.position.y = sampleGround(group.position.x, group.position.z);
 
       // ── Body bob ──────────────────────────────────────────────
       // While walking, bob a little faster + bigger to imply
