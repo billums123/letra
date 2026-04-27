@@ -59,6 +59,18 @@ export default defineConfig({
             },
           },
           {
+            // Background-music MP3s. They're loaded via fetch() +
+            // decodeAudioData (so request.destination is "" rather than
+            // "audio") — match by URL prefix instead.
+            urlPattern: /\/audio\/music\/.*\.mp3$/,
+            handler: "CacheFirst",
+            options: {
+              cacheName: "letra-music",
+              expiration: { maxEntries: 20, maxAgeSeconds: 60 * 60 * 24 * 30 },
+              cacheableResponse: { statuses: [0, 200] },
+            },
+          },
+          {
             // voices.json + per-voice manifest.json — small, can refresh.
             urlPattern: /\/audio\/(voices|.*\/manifest)\.json$/,
             handler: "StaleWhileRevalidate",

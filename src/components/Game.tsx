@@ -5,7 +5,7 @@ import { VirtualJoystick } from "../input/VirtualJoystick";
 import { MainMenu } from "../ui/MainMenu";
 import { audio } from "../audio/Player";
 import { music } from "../audio/music";
-import { MENU_SONG, pickGameSong } from "../audio/songs";
+import { MENU_TRACK, pickGameTrack } from "../audio/songs";
 import { SpellWordGame } from "../games/SpellWord";
 import { FindAlphabetGame } from "../games/FindAlphabet";
 import { SoundMatchGame } from "../games/SoundMatch";
@@ -53,23 +53,22 @@ export function Game() {
   }, [dev, screen, goToMenu]);
 
   // Background music. Menu screen plays the dedicated theme; game screens
-  // play whichever in-game song was rolled for this session. Dev tools
-  // (letter-test, letter-editor) get silence so the synth doesn't fight
-  // with whatever the dev is debugging.
+  // play whichever in-game track was rolled for this session. Dev tools
+  // (letter-test, letter-editor) get silence so music doesn't fight with
+  // whatever the dev is debugging.
   useEffect(() => {
     if (screen === "menu") {
-      music.play(MENU_SONG, 0.14);
+      void music.play(MENU_TRACK, 0.18);
     } else if (screen === "letter-test" || screen === "letter-editor") {
       music.stop();
     } else {
-      // In-game — pick (or recall) the per-session song.
-      music.play(pickGameSong(), 0.12);
+      void music.play(pickGameTrack(), 0.16);
     }
   }, [screen]);
 
   // AudioContext starts in suspended state on every page load until the
   // user actually clicks/touches something. The screen-change effect
-  // above runs at mount but the synth produces silence until a gesture
+  // above runs at mount but the player produces silence until a gesture
   // unblocks it. Re-fire the music start on the first pointerdown so
   // the menu theme actually plays as soon as the kid taps anywhere.
   useEffect(() => {
@@ -77,11 +76,9 @@ export function Game() {
     const prime = () => {
       if (primed) return;
       primed = true;
-      // Re-run the screen-driven choice so we end up with the right
-      // song for the current screen at the moment of unblock.
       const s = useGameStore.getState().screen;
-      if (s === "menu") music.play(MENU_SONG, 0.14);
-      else if (s !== "letter-test" && s !== "letter-editor") music.play(pickGameSong(), 0.12);
+      if (s === "menu") void music.play(MENU_TRACK, 0.18);
+      else if (s !== "letter-test" && s !== "letter-editor") void music.play(pickGameTrack(), 0.16);
     };
     window.addEventListener("pointerdown", prime, { once: true });
     window.addEventListener("touchstart", prime, { once: true });

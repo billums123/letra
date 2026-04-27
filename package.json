@@ -12,7 +12,10 @@
     "audio:generate": "node --import tsx scripts/generate-audio.ts",
     "audio:generate-all": "node --import tsx scripts/generate-audio.ts --generate-all",
     "audio:archive": "node --import tsx scripts/generate-audio.ts --archive",
-    "audio:list": "node --import tsx scripts/generate-audio.ts --list"
+    "audio:list": "node --import tsx scripts/generate-audio.ts --list",
+    "music:generate": "node --import tsx scripts/generate-music.ts",
+    "music:generate-force": "node --import tsx scripts/generate-music.ts --force",
+    "music:list": "node --import tsx scripts/generate-music.ts --list"
   },
   "dependencies": {
     "nipplejs": "^0.10.2",
