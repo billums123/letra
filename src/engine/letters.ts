@@ -56,6 +56,94 @@ export function colorFor(letter: string): THREE.Color {
 
 const tmpBox = new THREE.Box3();
 
+// Helvetiker's uppercase "I" is a plain vertical bar that's
+// indistinguishable from a lowercase "l". We swap in a 3-piece serif
+// glyph (stem + top + bottom horizontal bars) so kids reading the
+// alphabet can't mistake it for an "l". Both build paths (procedural
+// and override-driven) call this so the override authors can position
+// features against the same shape they see in-game.
+type LetterShape = {
+  // Object the caller adds to its inner group. Already centred so
+  // baseline sits at y=0 and horizontal centre at x=0.
+  object: THREE.Object3D;
+  width: number;
+  height: number;
+  dispose: () => void;
+};
+
+function makeLetterShape(font: Font, display: string, mat: THREE.Material): LetterShape {
+  if (display === "I") return makeSerifI(mat);
+
+  const geo = new TextGeometry(display, {
+    font,
+    size: 1.6,
+    depth: 0.55,
+    curveSegments: 6,
+    bevelEnabled: true,
+    bevelThickness: 0.07,
+    bevelSize: 0.05,
+    bevelSegments: 3,
+  });
+  geo.computeBoundingBox();
+  const bb = geo.boundingBox!;
+  const cx = (bb.min.x + bb.max.x) / 2;
+  geo.translate(-cx, -bb.min.y, 0);
+  geo.computeBoundingBox();
+  const size = new THREE.Vector3();
+  geo.boundingBox!.getSize(size);
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  return {
+    object: mesh,
+    width: size.x,
+    height: size.y,
+    dispose: () => geo.dispose(),
+  };
+}
+
+function makeSerifI(mat: THREE.Material): LetterShape {
+  // Proportions tuned to read like a Roman serif uppercase I at the same
+  // visual height as TextGeometry-rendered glyphs in this font (≈1.6).
+  const STEM_W = 0.32;
+  const STEM_H = 1.4;
+  const SERIF_W = 0.85;
+  const SERIF_H = 0.16;
+  const DEPTH = 0.55;
+  const totalH = STEM_H + SERIF_H * 2;
+  const totalW = SERIF_W;
+
+  const group = new THREE.Group();
+  const stemGeo = new THREE.BoxGeometry(STEM_W, STEM_H, DEPTH);
+  const stem = new THREE.Mesh(stemGeo, mat);
+  stem.position.y = SERIF_H + STEM_H / 2;
+  stem.castShadow = true;
+  stem.receiveShadow = true;
+  group.add(stem);
+
+  const serifGeo = new THREE.BoxGeometry(SERIF_W, SERIF_H, DEPTH);
+  const topSerif = new THREE.Mesh(serifGeo, mat);
+  topSerif.position.y = totalH - SERIF_H / 2;
+  topSerif.castShadow = true;
+  topSerif.receiveShadow = true;
+  group.add(topSerif);
+  const botSerif = new THREE.Mesh(serifGeo, mat);
+  botSerif.position.y = SERIF_H / 2;
+  botSerif.castShadow = true;
+  botSerif.receiveShadow = true;
+  group.add(botSerif);
+
+  return {
+    object: group,
+    width: totalW,
+    height: totalH,
+    dispose: () => {
+      stemGeo.dispose();
+      serifGeo.dispose();
+    },
+  };
+}
+
 export type LetterCharacter = {
   group: THREE.Group;
   letter: string;
@@ -109,33 +197,10 @@ export function buildLetterCharacter(font: Font, opts: LetterOptions): LetterCha
     emissive: color.clone().multiplyScalar(0.08),
   });
 
-  const geo = new TextGeometry(display, {
-    font,
-    size: 1.6,
-    depth: 0.55,
-    curveSegments: 6,
-    bevelEnabled: true,
-    bevelThickness: 0.07,
-    bevelSize: 0.05,
-    bevelSegments: 3,
-  });
-  geo.computeBoundingBox();
-  // Center horizontally and put feet on the ground.
-  const bb = geo.boundingBox!;
-  const cx = (bb.min.x + bb.max.x) / 2;
-  geo.translate(-cx, -bb.min.y, 0);
-  // Recompute for our consumer logic
-  geo.computeBoundingBox();
-
-  const letterMesh = new THREE.Mesh(geo, letterMat);
-  letterMesh.castShadow = true;
-  letterMesh.receiveShadow = true;
-  inner.add(letterMesh);
-
-  const size = new THREE.Vector3();
-  geo.boundingBox!.getSize(size);
-  const width = size.x;
-  const height = size.y;
+  const shape = makeLetterShape(font, display, letterMat);
+  inner.add(shape.object);
+  const width = shape.width;
+  const height = shape.height;
   // Glyph half-width — used to keep every feature inside the letter
   // silhouette. We don't enforce an artificial floor here (that pushed
   // features off narrow letters like I and L). Instead, eye/cheek/foot
@@ -315,7 +380,7 @@ export function buildLetterCharacter(font: Font, opts: LetterOptions): LetterCha
 
   // Cleanup helper attached to group userData for caller convenience
   group.userData.dispose = () => {
-    geo.dispose();
+    shape.dispose();
     letterMat.dispose();
     eyeWhite.dispose();
     eyePupil.dispose();
@@ -372,25 +437,8 @@ function buildFromOverride(
     metalness: 0.05,
     emissive: color.clone().multiplyScalar(0.08),
   });
-  const geo = new TextGeometry(display, {
-    font,
-    size: 1.6,
-    depth: 0.55,
-    curveSegments: 6,
-    bevelEnabled: true,
-    bevelThickness: 0.07,
-    bevelSize: 0.05,
-    bevelSegments: 3,
-  });
-  geo.computeBoundingBox();
-  const bb = geo.boundingBox!;
-  const cx = (bb.min.x + bb.max.x) / 2;
-  geo.translate(-cx, -bb.min.y, 0);
-  geo.computeBoundingBox();
-  const letterMesh = new THREE.Mesh(geo, letterMat);
-  letterMesh.castShadow = true;
-  letterMesh.receiveShadow = true;
-  inner.add(letterMesh);
+  const shape = makeLetterShape(font, display, letterMat);
+  inner.add(shape.object);
 
   const setRot = (obj: THREE.Object3D, r: { x: number; y: number; z: number }) =>
     obj.rotation.set(r.x, r.y, r.z);
@@ -516,10 +564,8 @@ function buildFromOverride(
 
   // Soft glow disc on the ground. Uses the glyph's actual width so it
   // hugs the letter even when the user shrunk other features.
-  const size = new THREE.Vector3();
-  geo.boundingBox!.getSize(size);
   const glow = new THREE.Mesh(
-    new THREE.CircleGeometry(Math.max(size.x * 0.7, 0.9), 24),
+    new THREE.CircleGeometry(Math.max(shape.width * 0.7, 0.9), 24),
     new THREE.MeshBasicMaterial({
       color,
       transparent: true,
@@ -597,7 +643,7 @@ function buildFromOverride(
   };
 
   group.userData.dispose = () => {
-    geo.dispose();
+    shape.dispose();
     letterMat.dispose();
     armGeo.dispose();
     limbMat.dispose();
