@@ -46,36 +46,35 @@ class MusicPlayer {
     const buffer = await this.loadBuffer(c, track.url);
     if (!buffer) return;
     if (this.loadingUrl !== track.url) return;
-    this.stop();
+
+    // Sequence the transition entirely on the audio clock so the old
+    // track is fully silent before the new one starts. Two tracks
+    // never overlap. A 60ms fade-out keeps the cut from clicking, and
+    // the new track starts ~20ms after that with a brief fade-in.
+    const now = c.currentTime;
+    const FADE = 0.06;
+    let startAt = now + 0.02;
+    if (this.active) {
+      this.fadeOutAndStop(this.active, FADE);
+      startAt = now + FADE + 0.02;
+      this.active = null;
+    }
+
     const master = c.createGain();
     master.gain.value = 0.0001;
     master.connect(c.destination);
-    master.gain.exponentialRampToValueAtTime(Math.max(volume, 0.0002), c.currentTime + 0.5);
+    master.gain.linearRampToValueAtTime(volume, startAt + 0.04);
     const source = c.createBufferSource();
     source.buffer = buffer;
     source.loop = true;
     source.connect(master);
-    source.start(c.currentTime + 0.05);
+    source.start(startAt);
     this.active = { track, source, masterGain: master };
   }
 
   stop(): void {
     if (this.active) {
-      const c = getMusicCtx();
-      if (c) {
-        const g = this.active.masterGain.gain;
-        g.cancelScheduledValues(c.currentTime);
-        g.setValueAtTime(g.value, c.currentTime);
-        g.exponentialRampToValueAtTime(0.0001, c.currentTime + 0.4);
-        const src = this.active.source;
-        const node = this.active.masterGain;
-        // Stop the buffer source after the fade so we don't click off,
-        // then disconnect to free the graph.
-        setTimeout(() => {
-          try { src.stop(); } catch { /* may already be stopped */ }
-          node.disconnect();
-        }, 600);
-      }
+      this.fadeOutAndStop(this.active, 0.06);
       this.active = null;
     }
     this.loadingUrl = null;
@@ -87,7 +86,21 @@ class MusicPlayer {
     const g = this.active.masterGain.gain;
     g.cancelScheduledValues(c.currentTime);
     g.setValueAtTime(g.value, c.currentTime);
-    g.exponentialRampToValueAtTime(Math.max(volume, 0.0002), c.currentTime + 0.4);
+    g.linearRampToValueAtTime(Math.max(volume, 0.0001), c.currentTime + 0.2);
+  }
+
+  private fadeOutAndStop(active: ActiveTrack, fadeSec: number): void {
+    const c = getMusicCtx();
+    if (!c) return;
+    const now = c.currentTime;
+    const g = active.masterGain.gain;
+    g.cancelScheduledValues(now);
+    g.setValueAtTime(g.value, now);
+    g.linearRampToValueAtTime(0.0001, now + fadeSec);
+    try { active.source.stop(now + fadeSec + 0.02); } catch { /* may already be stopped */ }
+    const node = active.masterGain;
+    // Disconnect after the source has stopped so the graph stays clean.
+    setTimeout(() => node.disconnect(), Math.ceil((fadeSec + 0.1) * 1000));
   }
 
   private async loadBuffer(c: AudioContext, url: string): Promise<AudioBuffer | null> {

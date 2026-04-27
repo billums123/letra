@@ -74,9 +74,9 @@ export function MainMenu() {
   const setAvatar = useGameStore((s) => s.setAvatar);
   const [showStickers, setShowStickers] = useState(false);
 
-  // Welcome line on first paint.
+  // Stop any leftover voice clip if we land on the menu mid-utterance,
+  // but don't auto-play a welcome line — the menu music carries the vibe.
   useEffect(() => {
-    audio.play(audio.menu("welcome"));
     return () => audio.stop();
   }, []);
 
