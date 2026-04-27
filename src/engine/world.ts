@@ -1,6 +1,7 @@
 import * as THREE from "three";
 
-// Deterministic pseudo-random — same world every load.
+// Deterministic pseudo-random — fed a different seed each session so the
+// world layout shuffles on every reload.
 function mulberry32(seed: number) {
   return () => {
     seed |= 0;
@@ -12,23 +13,67 @@ function mulberry32(seed: number) {
   };
 }
 
+// Random uint seed for a new mulberry32 instance. Each prop pool gets
+// its own seed so changing the count of one (e.g. trees) doesn't ripple
+// into the placement of another (e.g. mushrooms).
+function freshSeed(): number {
+  return (Math.random() * 0xffffffff) | 0;
+}
+
 const WORLD_RADIUS = 60;
 
 // An obstacle the player and letters should avoid. We model every world
 // prop as a vertical cylinder (good enough for the round-ish shapes we
 // have: hills, trees, mushrooms). Only objects within the play zone end
 // up in this list — the distant skirt and ground itself are excluded
-// because nothing collides with them.
-export type Obstacle = { x: number; z: number; radius: number };
+// because nothing collides with them. onBump fires on the rising edge
+// of a player collision so the prop can react (e.g. a tree shaking).
+export type Obstacle = {
+  x: number;
+  z: number;
+  radius: number;
+  onBump?: (intensity: number) => void;
+};
 
 export type WorldHandles = {
   group: THREE.Group;
   worldRadius: number;
   obstacles: Obstacle[];
-  // Per-frame animations (drifting butterflies, water shimmer, etc.).
-  // The Engine wires each of these into its actor list.
+  // Per-frame animations (drifting butterflies, water shimmer, tree
+  // shake decay, etc.). The Engine wires each of these into its actor
+  // list.
   tick: Array<(dt: number, t: number) => void>;
 };
+
+// Tries up to maxAttempts random spots inside scatterRadius (ring with
+// optional minRadius hole) until one is clear of every prop already in
+// `obstacles` and `taken`. Returns null if nothing fits — caller can
+// just skip that prop. Stops the world from generating overlapping
+// trees, mushrooms, boulders, etc.
+function findOpenSpot(
+  rand: () => number,
+  scatterRadius: number,
+  selfRadius: number,
+  obstacles: Obstacle[],
+  options: { minRadius?: number; pad?: number; maxAttempts?: number } = {}
+): { x: number; z: number } | null {
+  const { minRadius = 0, pad = 0.4, maxAttempts = 40 } = options;
+  for (let i = 0; i < maxAttempts; i++) {
+    const x = (rand() - 0.5) * scatterRadius * 2;
+    const z = (rand() - 0.5) * scatterRadius * 2;
+    const d = Math.hypot(x, z);
+    if (d > scatterRadius || d < minRadius) continue;
+    let clear = true;
+    for (const o of obstacles) {
+      if (Math.hypot(x - o.x, z - o.z) < o.radius + selfRadius + pad) {
+        clear = false;
+        break;
+      }
+    }
+    if (clear) return { x, z };
+  }
+  return null;
+}
 
 export function buildWorld(): WorldHandles {
   const group = new THREE.Group();
@@ -56,30 +101,29 @@ export function buildWorld(): WorldHandles {
   group.add(skirt);
 
   // ── Boundary ring ──────────────────────────────────────────────────────
-  // Ring of chubby boulders just inside WORLD_RADIUS. Doubles as the
-  // visual "edge of the world" cue so kids can see where the play zone
-  // ends, plus collision (Engine still has a hard clamp regardless of
-  // any gaps between rocks). Spaced tight enough that you can see them
-  // from anywhere on the map.
+  // 26 chunky boulders just inside WORLD_RADIUS. The angle of each rock
+  // is fixed (every 360/26 degrees) so the boundary always reads as a
+  // complete circle, but the size, hue, and small wobble are randomized
+  // per session so the boundary doesn't look identical each load.
   const boundaryCount = 26;
+  const boundaryRand = mulberry32(freshSeed());
   for (let i = 0; i < boundaryCount; i++) {
     const a = (i / boundaryCount) * Math.PI * 2;
-    const wobble = Math.sin(i * 1.7) * 0.6;
+    const wobble = (boundaryRand() - 0.5) * 1.2;
     const rDist = WORLD_RADIUS - 1.2 + wobble;
     const x = Math.cos(a) * rDist;
     const z = Math.sin(a) * rDist;
-    const size = 1.2 + ((i * 31) % 100) / 130; // 1.2..1.97, deterministic
-    const rock = makeBoulder(size, (i * 53) % 360);
+    const size = 1.2 + boundaryRand() * 0.8;
+    const rock = makeBoulder(size, boundaryRand() * 360);
     rock.position.set(x, 0, z);
-    rock.rotation.y = a;
+    rock.rotation.y = a + boundaryRand() * 0.6;
     group.add(rock);
     obstacles.push({ x, z, radius: size * 0.85 });
   }
 
   // ── Pond ────────────────────────────────────────────────────────────────
-  // A small lily-pad pond off-centre. Adds a landmark kids can drive to
-  // and around. Marked as a fat obstacle so the buggy doesn't slide
-  // across the surface.
+  // Off-centre lily pond with a fountain. Always lives at a fixed
+  // anchor so the kid can use it as a landmark.
   const pond = makePond();
   const pondPos = { x: 14, z: -16 };
   pond.group.position.set(pondPos.x, 0, pondPos.z);
@@ -87,9 +131,9 @@ export function buildWorld(): WorldHandles {
   obstacles.push({ x: pondPos.x, z: pondPos.z, radius: pond.radius });
   tick.push(pond.tick);
 
-  // Hills — soft spheres in the distance. Pushed out of the play zone so the
-  // kid never walks "into" one.
-  const hillRand = mulberry32(11);
+  // Hills — soft spheres in the distance. Sit beyond the boundary ring
+  // (>40 units from origin) so they're scenery only, no collision needed.
+  const hillRand = mulberry32(freshSeed());
   for (let i = 0; i < 18; i++) {
     const r = 8 + hillRand() * 14;
     const x = (hillRand() - 0.5) * 130;
@@ -104,82 +148,71 @@ export function buildWorld(): WorldHandles {
     hill.castShadow = false;
     hill.receiveShadow = true;
     group.add(hill);
-    // Hills sit beyond the boundary ring, no collision needed (the
-    // boundary clamp keeps the player away).
   }
 
-  // Trees — packed inside the boundary ring (radius < WORLD_RADIUS - 4)
-  // so they never visually clip the boulder ring or the skirt beyond.
-  const treeRand = mulberry32(7);
+  // Trees — packed inside the boundary ring. Each one wraps its foliage
+  // in a pivoting sub-group so a player bump can shake just the leaves
+  // without uprooting the trunk.
+  const treeRand = mulberry32(freshSeed());
   for (let i = 0; i < 26; i++) {
-    const x = (treeRand() - 0.5) * 90;
-    const z = (treeRand() - 0.5) * 90;
-    if (Math.hypot(x, z) < 8) continue;
-    if (Math.hypot(x, z) > WORLD_RADIUS - 4) continue;
-    if (Math.hypot(x - pondPos.x, z - pondPos.z) < pond.radius + 2) continue;
     const scale = 0.9 + treeRand() * 0.7;
+    const radius = 1.4 * scale;
+    const spot = findOpenSpot(treeRand, WORLD_RADIUS - 4, radius, obstacles, { minRadius: 8 });
+    if (!spot) continue;
     const hue = 100 + treeRand() * 40;
     const tree = makeTree(hue, scale);
-    tree.position.set(x, 0, z);
-    group.add(tree);
-    obstacles.push({ x, z, radius: 1.4 * scale });
+    tree.group.position.set(spot.x, 0, spot.z);
+    tree.group.rotation.y = treeRand() * Math.PI * 2;
+    group.add(tree.group);
+    obstacles.push({ x: spot.x, z: spot.z, radius, onBump: tree.shake });
+    tick.push(tree.update);
   }
 
   // Mushrooms
-  const mushRand = mulberry32(23);
+  const mushRand = mulberry32(freshSeed());
   for (let i = 0; i < 22; i++) {
-    const x = (mushRand() - 0.5) * 90;
-    const z = (mushRand() - 0.5) * 90;
-    if (Math.hypot(x, z) < 6) continue;
-    if (Math.hypot(x, z) > WORLD_RADIUS - 4) continue;
-    if (Math.hypot(x - pondPos.x, z - pondPos.z) < pond.radius + 1.5) continue;
+    const radius = 0.7;
+    const spot = findOpenSpot(mushRand, WORLD_RADIUS - 4, radius, obstacles, { minRadius: 6 });
+    if (!spot) continue;
     const hue = mushRand() * 360;
     const m = makeMushroom(hue);
-    m.position.set(x, 0, z);
+    m.position.set(spot.x, 0, spot.z);
+    m.rotation.y = mushRand() * Math.PI * 2;
     group.add(m);
-    obstacles.push({ x, z, radius: 0.7 });
+    obstacles.push({ x: spot.x, z: spot.z, radius });
   }
 
-  // Boulders — chunky scattered rocks for visual variety + collision so
-  // the kid has stuff to drive around.
-  const boulderRand = mulberry32(89);
+  // Boulders — chunky scattered rocks for visual variety + collision.
+  const boulderRand = mulberry32(freshSeed());
   for (let i = 0; i < 8; i++) {
-    const x = (boulderRand() - 0.5) * 80;
-    const z = (boulderRand() - 0.5) * 80;
-    if (Math.hypot(x, z) < 6) continue;
-    if (Math.hypot(x, z) > WORLD_RADIUS - 6) continue;
-    if (Math.hypot(x - pondPos.x, z - pondPos.z) < pond.radius + 2) continue;
     const size = 0.9 + boulderRand() * 0.7;
+    const radius = size * 0.8;
+    const spot = findOpenSpot(boulderRand, WORLD_RADIUS - 6, radius, obstacles, { minRadius: 6 });
+    if (!spot) continue;
     const hue = (boulderRand() * 360) | 0;
     const b = makeBoulder(size, hue);
-    b.position.set(x, 0, z);
+    b.position.set(spot.x, 0, spot.z);
     b.rotation.y = boulderRand() * Math.PI * 2;
     group.add(b);
-    obstacles.push({ x, z, radius: size * 0.8 });
+    obstacles.push({ x: spot.x, z: spot.z, radius });
   }
 
   // Flowers — purely decorative (no collision). Kids can drive over
-  // them. Painted as flat coloured discs with a tiny stem so they read
-  // from the camera angle without spamming geometry.
-  const flowerRand = mulberry32(131);
+  // them. We still avoid stacking them on top of trees / boulders so
+  // they don't visually merge into props.
+  const flowerRand = mulberry32(freshSeed());
   for (let i = 0; i < 60; i++) {
-    const x = (flowerRand() - 0.5) * 95;
-    const z = (flowerRand() - 0.5) * 95;
-    if (Math.hypot(x, z) > WORLD_RADIUS - 3) continue;
-    if (Math.hypot(x - pondPos.x, z - pondPos.z) < pond.radius + 1) continue;
-    // Flowers cluster nicely if they cling near trees / mushrooms, but
-    // a clear spawn check is overkill for decoration — accept the
-    // occasional overlap.
+    const spot = findOpenSpot(flowerRand, WORLD_RADIUS - 3, 0.3, obstacles, { minRadius: 0, pad: 0.1, maxAttempts: 12 });
+    if (!spot) continue;
     const hue = flowerRand() * 360;
     const f = makeFlower(hue);
-    f.position.set(x, 0, z);
+    f.position.set(spot.x, 0, spot.z);
     f.rotation.y = flowerRand() * Math.PI * 2;
     group.add(f);
   }
 
-  // Butterflies — drift in lazy arcs above the play zone. Adds a sense
-  // of life so the world feels lived-in, not a static diorama.
-  const butterflyRand = mulberry32(211);
+  // Butterflies — drift in lazy arcs above the play zone.
+  const butterflyRand = mulberry32(freshSeed());
   for (let i = 0; i < 5; i++) {
     const orbitR = 4 + butterflyRand() * 14;
     const cx = (butterflyRand() - 0.5) * 30;
@@ -196,7 +229,6 @@ export function buildWorld(): WorldHandles {
       b.group.position.z = cz + Math.sin(ang) * orbitR;
       b.group.position.y = baseY + Math.sin(t * 2 + phase) * 0.4;
       b.group.rotation.y = ang + Math.PI / 2;
-      // Wing flap — fast cosine flutter on both wings, mirrored.
       const flap = Math.sin(t * 18 + phase) * 0.55;
       b.wingL.rotation.y = -flap;
       b.wingR.rotation.y = flap;
@@ -204,7 +236,7 @@ export function buildWorld(): WorldHandles {
   }
 
   // Clouds
-  const cloudRand = mulberry32(53);
+  const cloudRand = mulberry32(freshSeed());
   for (let i = 0; i < 11; i++) {
     const x = (cloudRand() - 0.5) * 200;
     const z = (cloudRand() - 0.5) * 200;
@@ -231,9 +263,14 @@ export function pickClearSpawn(
   rng: () => number
 ): { x: number; z: number } {
   const { minRadius, maxRadius } = bounds;
+  // Cap maxRadius so we don't try to spawn letters past the world edge —
+  // the player can't reach them there anyway. Keeps a half-letter buffer
+  // inside the boundary boulders.
+  const cappedMax = Math.min(maxRadius, WORLD_RADIUS - selfRadius - 2);
+  const cappedMin = Math.min(minRadius, cappedMax - 0.1);
   for (let attempt = 0; attempt < 60; attempt++) {
     const angle = rng() * Math.PI * 2;
-    const dist = minRadius + rng() * (maxRadius - minRadius);
+    const dist = cappedMin + rng() * (cappedMax - cappedMin);
     const x = Math.cos(angle) * dist;
     const z = Math.sin(angle) * dist;
     let clear = true;
@@ -256,14 +293,18 @@ export function pickClearSpawn(
   // Last-resort: place on the inner ring along an angle that hasn't been used.
   const fallbackAngle = rng() * Math.PI * 2;
   return {
-    x: Math.cos(fallbackAngle) * minRadius,
-    z: Math.sin(fallbackAngle) * minRadius,
+    x: Math.cos(fallbackAngle) * cappedMin,
+    z: Math.sin(fallbackAngle) * cappedMin,
   };
 }
 
+// Returns a tree as { group, shake, update } so the world can wire its
+// shake-on-bump animation into the engine's actor loop. Foliage lives in
+// its own pivoting sub-group so the trunk stays planted while the leaves
+// wobble.
 function makeTree(hue: number, scale: number) {
-  const tree = new THREE.Group();
-  tree.scale.setScalar(scale);
+  const g = new THREE.Group();
+  g.scale.setScalar(scale);
   const trunk = new THREE.Mesh(
     new THREE.CylinderGeometry(0.22, 0.32, 1.4, 8),
     new THREE.MeshStandardMaterial({ color: 0x7a4a22, roughness: 1 })
@@ -271,17 +312,53 @@ function makeTree(hue: number, scale: number) {
   trunk.position.y = 0.7;
   trunk.castShadow = true;
   trunk.receiveShadow = true;
-  tree.add(trunk);
+  g.add(trunk);
+
+  const foliage = new THREE.Group();
+  // Pivot at the top of the trunk so the wobble pivots from there.
+  foliage.position.y = 1.4;
+  g.add(foliage);
 
   const leafColor = new THREE.Color(`hsl(${hue}, 60%, 45%)`);
   const leafMat = new THREE.MeshStandardMaterial({ color: leafColor, roughness: 0.9 });
   for (let i = 0; i < 3; i++) {
     const c = new THREE.Mesh(new THREE.ConeGeometry(1.2 - i * 0.3, 1.6 - i * 0.4, 8), leafMat);
-    c.position.y = 2.0 + i * 0.8;
+    // Original tree-space y was 2.0 + i*0.8; subtract the foliage pivot
+    // (1.4) so the leaves end up at the same world heights.
+    c.position.y = 0.6 + i * 0.8;
     c.castShadow = true;
-    tree.add(c);
+    foliage.add(c);
   }
-  return tree;
+
+  // Shake state — driven by the per-frame `update`, kicked by `shake`.
+  let shakeT = 0; // 0..1, decays linearly over ~0.45s
+  let amp = 0;
+  return {
+    group: g,
+    shake: (intensity: number = 1) => {
+      // Re-engage on every bump so a kid that's actively pressing into
+      // a tree sees continuous shaking, but cap so we don't accumulate.
+      shakeT = 1;
+      amp = Math.max(amp, Math.min(0.28, 0.18 * intensity + 0.08));
+    },
+    update: (dt: number, t: number) => {
+      if (shakeT <= 0) {
+        if (foliage.rotation.x !== 0 || foliage.rotation.z !== 0) {
+          foliage.rotation.x = 0;
+          foliage.rotation.z = 0;
+        }
+        return;
+      }
+      shakeT = Math.max(0, shakeT - dt * 2.2);
+      // Two-axis sinusoidal wobble; phase mismatch makes the wobble feel
+      // organic instead of metronomic.
+      const wobbleZ = Math.sin(t * 28) * amp * shakeT;
+      const wobbleX = Math.cos(t * 23) * amp * 0.55 * shakeT;
+      foliage.rotation.z = wobbleZ;
+      foliage.rotation.x = wobbleX;
+      if (shakeT === 0) amp = 0;
+    },
+  };
 }
 
 function makeMushroom(hue: number) {
@@ -333,13 +410,9 @@ function makeCloud() {
   return c;
 }
 
-// Chunky decorative boulder. The hue argument lets the boundary ring
-// pull from a wider palette so the rocks don't look identical going
-// around the perimeter — colours sit in a narrow grey-tan band.
+// Chunky decorative boulder.
 function makeBoulder(size: number, hue: number) {
   const g = new THREE.Group();
-  // Slight desaturation keeps boulders feeling like rocks even when
-  // pulled toward a colourful hue.
   const baseColor = new THREE.Color(`hsl(${hue}, 18%, 56%)`);
   const mat = new THREE.MeshStandardMaterial({ color: baseColor, roughness: 1 });
   const main = new THREE.Mesh(new THREE.DodecahedronGeometry(size, 0), mat);
@@ -347,7 +420,6 @@ function makeBoulder(size: number, hue: number) {
   main.castShadow = true;
   main.receiveShadow = true;
   g.add(main);
-  // Tiny secondary rock for silhouette interest.
   const small = new THREE.Mesh(new THREE.DodecahedronGeometry(size * 0.45, 0), mat);
   small.position.set(size * 0.7, size * 0.25, size * 0.2);
   small.rotation.set(0.3, 0.6, 0.1);
@@ -356,12 +428,15 @@ function makeBoulder(size: number, hue: number) {
   return g;
 }
 
-// Lily-pond. Layered discs (mud rim, water, lily pads) plus a tiny
-// shimmer animation on the water for life.
+// Lily pond with a fountain at the centre. The water surface scales in
+// and out gently, ripples expand from the fountain, and lily pads bob,
+// rotate, and drift around their anchor so the pond reads as alive
+// instead of a frozen blue disc.
 function makePond() {
   const group = new THREE.Group();
   const radius = 3.4;
-  // Dirt/grass rim — slightly larger and slightly raised.
+
+  // Mud rim
   const rim = new THREE.Mesh(
     new THREE.CylinderGeometry(radius + 0.4, radius + 0.6, 0.18, 32),
     new THREE.MeshStandardMaterial({ color: 0x6a4a28, roughness: 1 })
@@ -369,8 +444,8 @@ function makePond() {
   rim.position.y = 0.05;
   rim.receiveShadow = true;
   group.add(rim);
-  // Water — slightly inset, raised just above the ground so it reads
-  // even from above.
+
+  // Water — a thin disc raised slightly above the ground.
   const waterMat = new THREE.MeshStandardMaterial({
     color: 0x5cb6e6,
     roughness: 0.4,
@@ -385,45 +460,205 @@ function makePond() {
   water.position.y = 0.12;
   water.receiveShadow = true;
   group.add(water);
-  // Lily pads — flat rounded squares dotted around the surface.
+
+  // Concentric ripples emanating from the fountain. We allocate a small
+  // pool of ring meshes and recycle them by resetting their phase on
+  // overflow — cheaper than spawning new geometry every cycle.
+  const RIPPLE_COUNT = 3;
+  const ripples: { mesh: THREE.Mesh; phase: number; mat: THREE.MeshBasicMaterial }[] = [];
+  const rippleGeo = new THREE.RingGeometry(0.35, 0.5, 32);
+  for (let i = 0; i < RIPPLE_COUNT; i++) {
+    const mat = new THREE.MeshBasicMaterial({
+      color: 0xffffff,
+      transparent: true,
+      opacity: 0.45,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    });
+    const r = new THREE.Mesh(rippleGeo, mat);
+    r.rotation.x = -Math.PI / 2;
+    // Sit fractionally above the water surface so they aren't z-fighting.
+    r.position.y = 0.21;
+    group.add(r);
+    ripples.push({ mesh: r, phase: i / RIPPLE_COUNT, mat });
+  }
+
+  // Lily pads — Pac-Man-shaped wedges (CylinderGeometry with thetaLength
+  // less than 2π leaves a notch in the side, the way real lily pads
+  // have a slit from rim to centre). Each pad gets its own slow rotation
+  // and drift around its anchor.
+  type Pad = {
+    mesh: THREE.Mesh;
+    bud?: THREE.Mesh;
+    cx: number;
+    cz: number;
+    bobPhase: number;
+    rotSpeed: number;
+    driftR: number;
+    driftSpeed: number;
+    driftPhase: number;
+  };
+  const pads: Pad[] = [];
   const padMat = new THREE.MeshStandardMaterial({ color: 0x6cbf3a, roughness: 0.8 });
+  const padShineMat = new THREE.MeshStandardMaterial({ color: 0x8fd86b, roughness: 0.7, emissive: 0x224811, emissiveIntensity: 0.1 });
   const flowerMat = new THREE.MeshStandardMaterial({ color: 0xffe9f1, roughness: 0.7 });
-  const pads: THREE.Mesh[] = [];
   for (let i = 0; i < 4; i++) {
+    const padR = 0.5 + (i % 2) * 0.08;
     const a = (i / 4) * Math.PI * 2 + 0.3;
-    const r = radius * 0.55;
-    const pad = new THREE.Mesh(
-      new THREE.CylinderGeometry(0.45, 0.45, 0.05, 12),
-      padMat
-    );
-    pad.position.set(Math.cos(a) * r, 0.21, Math.sin(a) * r);
+    const dist = radius * 0.55;
+    // CylinderGeometry signature includes thetaStart + thetaLength on
+    // the side panel; leave a 0.5 rad notch for the lily-pad slit.
+    const padGeo = new THREE.CylinderGeometry(padR, padR, 0.06, 18, 1, false, 0, Math.PI * 2 - 0.5);
+    // Slightly two-tone shading: top is brighter than the underside.
+    const pad = new THREE.Mesh(padGeo, i % 2 === 0 ? padMat : padShineMat);
+    const cx = Math.cos(a) * dist;
+    const cz = Math.sin(a) * dist;
+    pad.position.set(cx, 0.21, cz);
+    // Rotate so the slit faces a randomized direction.
+    pad.rotation.y = a + Math.PI;
     pad.receiveShadow = true;
     group.add(pad);
-    pads.push(pad);
-    // Half the pads carry a tiny flower bud.
+    let bud: THREE.Mesh | undefined;
     if (i % 2 === 0) {
-      const bud = new THREE.Mesh(new THREE.SphereGeometry(0.12, 10, 8), flowerMat);
-      bud.position.copy(pad.position);
-      bud.position.y = 0.32;
+      bud = new THREE.Mesh(new THREE.SphereGeometry(0.13, 10, 8), flowerMat);
+      bud.position.set(cx, 0.34, cz);
       group.add(bud);
     }
+    pads.push({
+      mesh: pad,
+      bud,
+      cx,
+      cz,
+      bobPhase: i * 0.7,
+      rotSpeed: 0.12 + i * 0.03,
+      driftR: 0.06 + (i % 2) * 0.05,
+      driftSpeed: 0.4 + i * 0.1,
+      driftPhase: i * 1.1,
+    });
   }
+
+  // Fountain — stone base with a thin water column and arcing droplets.
+  const fountain = new THREE.Group();
+  fountain.position.y = 0.18; // sit on the water surface
+  group.add(fountain);
+
+  const stoneMat = new THREE.MeshStandardMaterial({ color: 0x8a8076, roughness: 1 });
+  const base = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.55, 0.7, 0.5, 14),
+    stoneMat
+  );
+  base.position.y = 0.25;
+  base.castShadow = true;
+  fountain.add(base);
+  const bowl = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.78, 0.55, 0.18, 18),
+    new THREE.MeshStandardMaterial({ color: 0x9c9285, roughness: 0.9 })
+  );
+  bowl.position.y = 0.6;
+  fountain.add(bowl);
+  // Inner bowl water — a small inset disc so the fountain reads as
+  // collecting water in the bowl before spilling over.
+  const innerWater = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.5, 0.5, 0.05, 18),
+    waterMat
+  );
+  innerWater.position.y = 0.7;
+  fountain.add(innerWater);
+
+  // Spout — a thin emissive water column rising from the bowl. Scales
+  // gently so it pulses like a real fountain.
+  const spoutMat = new THREE.MeshStandardMaterial({
+    color: 0xb8e8ff,
+    transparent: true,
+    opacity: 0.7,
+    emissive: 0x4ab0e8,
+    emissiveIntensity: 0.4,
+    roughness: 0.4,
+  });
+  const spout = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.06, 0.1, 0.55, 10),
+    spoutMat
+  );
+  spout.position.y = 1.0;
+  fountain.add(spout);
+
+  // Droplets — small spheres that arc out from the top of the spout.
+  // We re-use a fixed pool, animating each one along a continuous
+  // parabolic cycle. y = peak * 4 * cycle * (1 - cycle) gives a clean
+  // up-and-back arch from cycle ∈ [0, 1].
+  const DROPLET_COUNT = 14;
+  type Droplet = { mesh: THREE.Mesh; phase: number; angle: number; reach: number; peak: number; speed: number };
+  const droplets: Droplet[] = [];
+  const dropMat = new THREE.MeshStandardMaterial({
+    color: 0xc8eeff,
+    emissive: 0x4ab0e8,
+    emissiveIntensity: 0.35,
+    roughness: 0.5,
+  });
+  for (let i = 0; i < DROPLET_COUNT; i++) {
+    const d = new THREE.Mesh(new THREE.SphereGeometry(0.07, 8, 8), dropMat);
+    fountain.add(d);
+    droplets.push({
+      mesh: d,
+      phase: i / DROPLET_COUNT,
+      angle: (i / DROPLET_COUNT) * Math.PI * 2,
+      reach: 0.55 + (i % 3) * 0.15,
+      peak: 0.7 + (i % 4) * 0.18,
+      speed: 0.55 + (i % 5) * 0.05,
+    });
+  }
+
   return {
     group,
     radius,
     tick: (_dt: number, t: number) => {
-      // Gentle breathing on the lily pads — sells the water feeling.
-      for (let i = 0; i < pads.length; i++) {
-        pads[i].position.y = 0.21 + Math.sin(t * 1.2 + i) * 0.02;
+      // Lily pads — bob + slow rotation + small drift around anchor.
+      for (const p of pads) {
+        const bob = Math.sin(t * 1.4 + p.bobPhase) * 0.02;
+        const dx = Math.cos(t * p.driftSpeed + p.driftPhase) * p.driftR;
+        const dz = Math.sin(t * p.driftSpeed + p.driftPhase) * p.driftR;
+        p.mesh.position.x = p.cx + dx;
+        p.mesh.position.z = p.cz + dz;
+        p.mesh.position.y = 0.21 + bob;
+        p.mesh.rotation.y += p.rotSpeed * 0.016;
+        if (p.bud) {
+          p.bud.position.x = p.cx + dx;
+          p.bud.position.z = p.cz + dz;
+          p.bud.position.y = 0.34 + bob;
+        }
       }
-      // Subtle hue shift on the water so it doesn't feel flat.
+      // Subtle water surface shimmer — emissive breathing + tiny scale
+      // wobble so the disc edge laps in and out.
       waterMat.emissiveIntensity = 0.15 + Math.sin(t * 0.7) * 0.05;
+      water.scale.x = 1 + Math.sin(t * 0.9) * 0.012;
+      water.scale.z = 1 + Math.cos(t * 0.9) * 0.012;
+      // Ripples — each ring expands outward from the fountain centre,
+      // fading as it grows.
+      for (const r of ripples) {
+        const cycle = (t * 0.45 + r.phase) % 1;
+        const scale = 0.4 + cycle * (radius / 0.5) * 0.95;
+        r.mesh.scale.set(scale, scale, scale);
+        r.mat.opacity = (1 - cycle) * 0.45;
+      }
+      // Spout pulses gently to feel alive.
+      spout.scale.y = 1 + Math.sin(t * 4) * 0.06;
+      // Droplets — continuous arc cycle. Scale toward zero at the end
+      // so they "land" cleanly instead of popping out of view.
+      for (const d of droplets) {
+        const cycle = ((t * d.speed) + d.phase) % 1;
+        const dist = d.reach * cycle;
+        const height = 1.25 + d.peak * 4 * cycle * (1 - cycle);
+        d.mesh.position.x = Math.cos(d.angle) * dist;
+        d.mesh.position.z = Math.sin(d.angle) * dist;
+        d.mesh.position.y = height;
+        const fade = cycle < 0.85 ? 1 : 1 - (cycle - 0.85) / 0.15;
+        d.mesh.scale.setScalar(0.7 + 0.5 * fade);
+      }
     },
   };
 }
 
-// Cute upright flower — stem + 5 petal-spheres + yellow centre. Cheap
-// enough that we can scatter dozens without breaking the frame budget.
+// Cute upright flower — stem + 5 petal-spheres + yellow centre.
 function makeFlower(hue: number) {
   const g = new THREE.Group();
   const stem = new THREE.Mesh(
@@ -449,8 +684,7 @@ function makeFlower(hue: number) {
   return g;
 }
 
-// Butterfly — body + two flapping wings. Built so the caller can grab
-// the wing groups for animation.
+// Butterfly — body + two flapping wings.
 function makeButterfly(hue: number) {
   const group = new THREE.Group();
   const body = new THREE.Mesh(
@@ -464,8 +698,6 @@ function makeButterfly(hue: number) {
     roughness: 0.7,
     side: THREE.DoubleSide,
   });
-  // Each wing pivots from the body. Build as a thin flat oval mesh so
-  // we can rotate it on Y to flap.
   const wingGeo = new THREE.SphereGeometry(0.22, 10, 8);
   wingGeo.scale(1, 0.05, 0.85);
   const wingL = new THREE.Group();

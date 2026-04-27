@@ -36,6 +36,11 @@ export class Engine {
   // The function decides whether anything happens; engine just calls it.
   tickHook?: (dt: number, t: number, playerPos: THREE.Vector3) => void;
 
+  // Tracks which obstacles the player was overlapping last frame, so we
+  // can fire the obstacle's onBump callback once on the rising edge of
+  // a collision instead of every frame the player is wedged against it.
+  private prevOverlap = new Set<Obstacle>();
+
   // Actors with their own per-frame update (letter characters, particles, etc.).
   private actors = new Set<{ update: (dt: number, t: number) => void }>();
   addActor(actor: { update: (dt: number, t: number) => void }) {
@@ -131,19 +136,30 @@ export class Engine {
       // Push player out of any obstacle they overlap with. We resolve in a
       // single pass per frame: for each overlap, slide along the contact
       // normal so the player stops at the obstacle edge instead of sticking
-      // or jittering.
+      // or jittering. New overlaps (rising edge) fire the obstacle's
+      // onBump callback so e.g. trees can shake when bumped.
       const pp = this.player.group.position;
+      const overlap = new Set<Obstacle>();
       for (const o of this.obstacles) {
         const dx = pp.x - o.x;
         const dz = pp.z - o.z;
         const dist = Math.hypot(dx, dz);
         const minDist = o.radius + PLAYER_RADIUS;
         if (dist < minDist && dist > 0.0001) {
+          overlap.add(o);
           const push = (minDist - dist) / dist;
           pp.x += dx * push;
           pp.z += dz * push;
+          if (!this.prevOverlap.has(o)) {
+            // Intensity scales with how deeply the player drove into the
+            // obstacle — light grazes shouldn't shake a tree as hard as
+            // a full-speed collision.
+            const overlap01 = (minDist - dist) / minDist;
+            o.onBump?.(Math.min(1, overlap01 * 6));
+          }
         }
       }
+      this.prevOverlap = overlap;
       // Hard world boundary — independent of the visible boundary props
       // so a kid can never sneak through a gap and drive off the map.
       // Clamp the player back inside a circle of radius (worldRadius -

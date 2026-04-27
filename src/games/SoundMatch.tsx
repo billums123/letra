@@ -68,7 +68,11 @@ export function SoundMatchGame() {
     const maxR = minR + 6;
     const taken: { x: number; z: number; radius: number }[] = [];
     const rng = (() => {
-      let s = (roundIndex * 9871 + 17) | 0;
+      // Re-roll each round so the choices land in a different
+      // arrangement every time, while still being deterministic
+      // within the round (so a single render's worth of placements
+      // stays consistent if the function were called twice).
+      let s = ((roundIndex * 9871 + 17) ^ ((Math.random() * 0xffffffff) | 0)) | 0;
       return () => {
         s = (s + 0x9e3779b9) | 0;
         let t = s;

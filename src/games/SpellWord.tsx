@@ -67,7 +67,9 @@ function SpellWordRound({
     const font = await loadFont();
     const taken: { x: number; z: number; radius: number }[] = [];
     const rng = (() => {
-      let s = (word.word.charCodeAt(0) * 31 + word.word.length) | 0;
+      // Mix the word into a fresh per-mount random seed so the same
+      // word can land in different layouts across plays.
+      let s = ((word.word.charCodeAt(0) * 31 + word.word.length) ^ ((Math.random() * 0xffffffff) | 0)) | 0;
       return () => {
         s = (s + 0x9e3779b9) | 0;
         let t = s;

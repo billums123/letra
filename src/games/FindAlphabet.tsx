@@ -59,9 +59,11 @@ export function FindAlphabetGame() {
     const taken: { x: number; z: number; radius: number }[] = [];
     let spiralI = 0;
     const rng = (() => {
-      // Mostly-random per session, but biased to walk the spiral so adjacent
-      // letters in the alphabet land near each other.
-      let s = 1234567 | 0;
+      // Fresh seed each time the game mounts so the alphabet lands in
+      // a different layout every session — pickClearSpawn still keeps
+      // every letter clear of obstacles and other letters, so nothing
+      // ends up morphed into a tree or another glyph.
+      let s = (Math.random() * 0xffffffff) | 0;
       return () => {
         s = (s + 0x9e3779b9) | 0;
         let t = s;
