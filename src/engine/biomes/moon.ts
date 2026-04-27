@@ -153,6 +153,29 @@ function buildProps(ctx: BiomeContext): void {
   obstacles.push({ x: flagPos.x, z: flagPos.z, radius: 0.5 });
   tick.push(flag.tick);
 
+  // ── Alien NPCs ───────────────────────────────────────────────────
+  // Friendly cartoon aliens scattered through the play zone. No
+  // collision (the kid can drive right through them) so the finale's
+  // letter-bumping mechanic doesn't get confused by an alien acting
+  // as an obstacle. Each one bobs / waggles antennae / blinks on
+  // its own randomized phase.
+  const alienRand = mulberry32(freshSeed());
+  const ALIEN_COUNT = 5;
+  for (let i = 0; i < ALIEN_COUNT; i++) {
+    const spot = findOpenSpot(alienRand, worldRadius - 5, 0.6, obstacles, {
+      minRadius: 5,
+      pad: 0.8,
+      maxAttempts: 16,
+    });
+    if (!spot) continue;
+    const hue = alienRand();
+    const alien = makeAlien(hue);
+    alien.group.position.set(spot.x, 0, spot.z);
+    alien.group.rotation.y = alienRand() * Math.PI * 2;
+    group.add(alien.group);
+    tick.push(alien.tick);
+  }
+
   // ── Floating asteroids ──────────────────────────────────────────
   // Three or four lazy asteroids drifting overhead. Replaces the
   // meadow's butterflies — same shape of code (orbit + rotate).
@@ -201,28 +224,252 @@ function makeMoonRock(size: number): THREE.Object3D {
   return g;
 }
 
-// Decorative ground crater — flat dark inner disc, raised stone rim.
-// Built as a low torus + an inset disc so the kid can drive across
-// without bumping geometry.
+// Decorative ground crater — looks like a real impact site rather
+// than a torus + disc. Profile: a tapered bowl wall sloping inward
+// to a recessed floor, an irregular debris rim built from a ring of
+// jittered dodecahedron chunks, and a darker shadow ring near the
+// floor for depth. Drivable (no collision); the floor sits below
+// y=0 and the rim is short enough that the kid can roll over it.
 function makeCrater(radius: number): THREE.Object3D {
   const g = new THREE.Group();
-  const rim = new THREE.Mesh(
-    new THREE.TorusGeometry(radius, radius * 0.18, 6, 18),
-    new THREE.MeshStandardMaterial({ color: 0x6c7280, roughness: 1 })
+  // Per-instance colour jitter so adjacent craters don't look like
+  // copy-pastes — the eye picks up subtle hue/lightness shifts even
+  // at low resolution.
+  const baseShade = 0.42 + Math.random() * 0.08;
+  const wallMat = new THREE.MeshStandardMaterial({
+    color: new THREE.Color().setHSL(0.62, 0.04, baseShade),
+    roughness: 1,
+  });
+  const floorMat = new THREE.MeshStandardMaterial({
+    color: new THREE.Color().setHSL(0.62, 0.04, baseShade - 0.18),
+    roughness: 1,
+  });
+  const rimMat = new THREE.MeshStandardMaterial({
+    color: new THREE.Color().setHSL(0.62, 0.06, baseShade + 0.08),
+    roughness: 1,
+  });
+
+  // ── Bowl wall — open-top tapered cylinder. Slightly larger top
+  // radius than bottom so the wall slopes inward toward the floor.
+  const wallDepth = Math.min(0.55, radius * 0.35);
+  const wall = new THREE.Mesh(
+    new THREE.CylinderGeometry(
+      radius,           // top radius (ground level)
+      radius * 0.55,    // bottom radius (floor)
+      wallDepth,
+      32,
+      1,
+      true              // open-ended — we add a separate floor disc
+    ),
+    wallMat
   );
-  rim.rotation.x = -Math.PI / 2;
-  rim.position.y = 0.04;
-  rim.receiveShadow = true;
-  g.add(rim);
+  wall.position.y = -wallDepth * 0.5 + 0.02;
+  wall.receiveShadow = true;
+  g.add(wall);
+
+  // ── Floor — recessed disc, slightly darker.
   const floor = new THREE.Mesh(
-    new THREE.CircleGeometry(radius * 0.92, 24),
-    new THREE.MeshStandardMaterial({ color: 0x4b515c, roughness: 1 })
+    new THREE.CircleGeometry(radius * 0.55, 24),
+    floorMat
   );
   floor.rotation.x = -Math.PI / 2;
-  floor.position.y = 0.02;
+  floor.position.y = -wallDepth + 0.02;
   floor.receiveShadow = true;
   g.add(floor);
+
+  // ── Inner shadow ring — thin darker disc near the bottom of the
+  // wall to imply ambient occlusion under the lip.
+  const shadow = new THREE.Mesh(
+    new THREE.RingGeometry(radius * 0.55, radius * 0.85, 32),
+    new THREE.MeshBasicMaterial({
+      color: 0x000000,
+      transparent: true,
+      opacity: 0.22,
+      side: THREE.DoubleSide,
+      depthWrite: false,
+    })
+  );
+  shadow.rotation.x = -Math.PI / 2;
+  shadow.position.y = -wallDepth + 0.025;
+  g.add(shadow);
+
+  // ── Debris rim — irregular ring of small chunks around the lip.
+  // Each chunk is a tiny dodecahedron with random rotation + size
+  // so the rim reads as scattered impact debris rather than a
+  // perfect torus.
+  const debrisCount = 18 + Math.floor(radius * 4);
+  for (let i = 0; i < debrisCount; i++) {
+    const a = (i / debrisCount) * Math.PI * 2 + (Math.random() - 0.5) * 0.18;
+    const dist = radius + (Math.random() - 0.5) * radius * 0.18;
+    const size = 0.12 + Math.random() * 0.18;
+    const chunk = new THREE.Mesh(
+      new THREE.DodecahedronGeometry(size, 0),
+      rimMat
+    );
+    chunk.position.set(
+      Math.cos(a) * dist,
+      size * 0.55,
+      Math.sin(a) * dist
+    );
+    chunk.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
+    chunk.castShadow = true;
+    chunk.receiveShadow = true;
+    g.add(chunk);
+  }
+
   return g;
+}
+
+// Friendly cartoon alien — squishy egg body, two big googly eyes on
+// stalks, a pair of waving antennae, and a small mouth. Renders in
+// a saturated hue so they pop against the gray regolith. No
+// collision — the kid can drive right through them, which keeps the
+// finale's letter-bumping mechanic clean. Returns a tick callback
+// for idle bobbing + slow eye-stalk sway.
+function makeAlien(hue: number): { group: THREE.Group; tick: (dt: number, t: number) => void } {
+  const group = new THREE.Group();
+
+  // ── Body — squat egg, slightly flattened bottom so it doesn't
+  // look like it's about to roll away.
+  const bodyColor = new THREE.Color().setHSL(hue, 0.7, 0.55);
+  const bodyMat = new THREE.MeshStandardMaterial({
+    color: bodyColor,
+    roughness: 0.55,
+    emissive: bodyColor.clone().multiplyScalar(0.15),
+    emissiveIntensity: 0.4,
+  });
+  const body = new THREE.Mesh(new THREE.SphereGeometry(0.55, 18, 14), bodyMat);
+  body.scale.set(1, 1.15, 1);
+  body.position.y = 0.6;
+  body.castShadow = true;
+  body.receiveShadow = true;
+  group.add(body);
+
+  // Belly — slightly lighter inset on the front so the alien has a
+  // tummy that catches light differently from the back.
+  const bellyMat = new THREE.MeshStandardMaterial({
+    color: bodyColor.clone().lerp(new THREE.Color(0xffffff), 0.35),
+    roughness: 0.7,
+  });
+  const belly = new THREE.Mesh(new THREE.SphereGeometry(0.32, 14, 10), bellyMat);
+  belly.position.set(0, 0.5, 0.32);
+  group.add(belly);
+
+  // ── Eye stalks — two short cylinders rising from the top of the
+  // head with big sphere eyes on the ends. Stalks pivot at the
+  // base so we can wave them in the tick.
+  const stalkMat = new THREE.MeshStandardMaterial({ color: bodyColor.clone().multiplyScalar(0.7), roughness: 0.6 });
+  const eyeWhiteMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.4 });
+  const pupilMat = new THREE.MeshStandardMaterial({ color: 0x1c1422, roughness: 0.3 });
+  const shineMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+
+  const stalkPivots: THREE.Group[] = [];
+  for (const side of [-1, 1] as const) {
+    const pivot = new THREE.Group();
+    pivot.position.set(side * 0.18, 1.05, 0.02);
+    group.add(pivot);
+    stalkPivots.push(pivot);
+
+    const stalk = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.05, 0.32, 8), stalkMat);
+    stalk.position.y = 0.16;
+    stalk.castShadow = true;
+    pivot.add(stalk);
+
+    const eyeball = new THREE.Mesh(new THREE.SphereGeometry(0.16, 14, 12), eyeWhiteMat);
+    eyeball.position.y = 0.42;
+    eyeball.castShadow = true;
+    pivot.add(eyeball);
+
+    const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.075, 10, 10), pupilMat);
+    pupil.position.set(0, 0.42, 0.11);
+    pivot.add(pupil);
+
+    const shine = new THREE.Mesh(new THREE.SphereGeometry(0.025, 6, 6), shineMat);
+    shine.position.set(-0.04, 0.46, 0.15);
+    pivot.add(shine);
+  }
+
+  // ── Antennae — thin curved wires with little sphere tips that
+  // glow. Two antennae, mirrored.
+  const antennaMat = new THREE.MeshStandardMaterial({ color: 0x2a2230, roughness: 0.5 });
+  const antennaTipMat = new THREE.MeshStandardMaterial({
+    color: bodyColor.clone().lerp(new THREE.Color(0xffffff), 0.55),
+    emissive: bodyColor,
+    emissiveIntensity: 0.6,
+    roughness: 0.4,
+  });
+  const antennaPivots: THREE.Group[] = [];
+  for (const side of [-1, 1] as const) {
+    const pivot = new THREE.Group();
+    pivot.position.set(side * 0.26, 1.1, -0.05);
+    pivot.rotation.z = -side * 0.3;
+    group.add(pivot);
+    antennaPivots.push(pivot);
+    const wire = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.025, 0.35, 6), antennaMat);
+    wire.position.y = 0.18;
+    pivot.add(wire);
+    const tip = new THREE.Mesh(new THREE.SphereGeometry(0.07, 10, 10), antennaTipMat);
+    tip.position.y = 0.4;
+    pivot.add(tip);
+  }
+
+  // ── Mouth — small dark crescent so the alien reads as friendly.
+  const mouth = new THREE.Mesh(
+    new THREE.TorusGeometry(0.07, 0.018, 6, 12, Math.PI),
+    new THREE.MeshStandardMaterial({ color: 0x2a1a30, roughness: 0.7 })
+  );
+  mouth.rotation.x = Math.PI / 2;
+  mouth.rotation.z = Math.PI; // flip so the curve smiles
+  mouth.position.set(0, 0.78, 0.5);
+  group.add(mouth);
+
+  // ── Tiny feet — two flat ovals so the alien doesn't look like
+  // it's floating.
+  const footMat = new THREE.MeshStandardMaterial({ color: bodyColor.clone().multiplyScalar(0.6), roughness: 0.7 });
+  for (const side of [-1, 1] as const) {
+    const foot = new THREE.Mesh(new THREE.SphereGeometry(0.13, 12, 8), footMat);
+    foot.scale.set(1, 0.4, 1.2);
+    foot.position.set(side * 0.22, 0.06, 0.02);
+    foot.castShadow = true;
+    group.add(foot);
+  }
+
+  // Per-instance phase / speed so a cluster of aliens doesn't bob in
+  // unison and read as mechanical.
+  const phase = Math.random() * Math.PI * 2;
+  const bobSpeed = 1.2 + Math.random() * 0.6;
+  const swaySpeed = 0.7 + Math.random() * 0.5;
+  const blinkOffset = Math.random() * 8;
+  const eyeballs: THREE.Mesh[] = [];
+  group.traverse((obj) => {
+    // Capture eyeballs after the fact so we can scale them on blink.
+    const m = obj as THREE.Mesh;
+    if (m.isMesh && m.material === eyeWhiteMat) eyeballs.push(m);
+  });
+
+  return {
+    group,
+    tick: (_dt, t) => {
+      // Gentle full-body bob.
+      group.position.y = Math.abs(Math.sin(t * bobSpeed + phase)) * 0.08;
+      // Eye stalks sway side-to-side, slightly out of phase with each other.
+      for (let i = 0; i < stalkPivots.length; i++) {
+        stalkPivots[i].rotation.z = Math.sin(t * swaySpeed + phase + i * 0.6) * 0.18;
+        stalkPivots[i].rotation.x = Math.cos(t * swaySpeed * 0.8 + phase) * 0.08;
+      }
+      // Antennae waggle, more amplitude than the eye stalks.
+      for (let i = 0; i < antennaPivots.length; i++) {
+        const sign = i === 0 ? -1 : 1;
+        antennaPivots[i].rotation.z = sign * 0.3 + Math.sin(t * 1.6 + phase + i) * 0.22;
+      }
+      // Periodic blink — every 3-5s, scale eyeball Y briefly to 0.
+      const blinkPhase = (t + blinkOffset) % 4.2;
+      const blink = blinkPhase < 0.16 ? Math.cos(blinkPhase / 0.16 * Math.PI) * 0.5 + 0.5 : 1;
+      for (const e of eyeballs) {
+        e.scale.y = blink;
+      }
+    },
+  };
 }
 
 // Big tilted Earth far in the sky. Two-sphere construction so the
