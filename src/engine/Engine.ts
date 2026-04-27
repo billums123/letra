@@ -80,8 +80,10 @@ export class Engine {
     const biome = getBiome(biomeId);
     this.disposeBiome = biome.applyScene(this.scene);
 
-    // World + player
-    const world = buildWorld(biome);
+    // World + player. The biome's tick callbacks may want to read the
+    // player position (e.g. moon aliens that wave when bumped) — pass
+    // a getter so they can null-check during teardown.
+    const world = buildWorld(biome, () => this.player?.group.position ?? null);
     this.scene.add(world.group);
     this.obstacles = world.obstacles;
     this.worldRadius = world.worldRadius;

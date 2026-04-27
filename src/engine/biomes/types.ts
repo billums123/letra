@@ -20,6 +20,11 @@ export type BiomeContext = {
   // Per-call PRNG so each session shuffles. Biomes can seed their own
   // sub-rngs from this if they want to layer prop pools.
   random: () => number;
+  // Live read of the player's world position. Returns null until the
+  // engine finishes wiring the avatar (very early frames) or after
+  // teardown. Biomes should null-check before reading. Used by props
+  // that react to the player — e.g. moon aliens waving when bumped.
+  getPlayerPosition: () => THREE.Vector3 | null;
 };
 
 export type Biome = {

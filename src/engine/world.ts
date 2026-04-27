@@ -80,7 +80,10 @@ export function findOpenSpot(
 // (ground, scenery, sky-furniture); buildWorld is the dispatcher that
 // hands the biome a context to populate. Engine adds the resulting
 // group to the scene and wires the tick callbacks into its actor loop.
-export function buildWorld(biome: Biome): WorldHandles {
+export function buildWorld(
+  biome: Biome,
+  getPlayerPosition: () => THREE.Vector3 | null = () => null
+): WorldHandles {
   const group = new THREE.Group();
   group.name = `World:${biome.id}`;
   const obstacles: Obstacle[] = [];
@@ -91,6 +94,7 @@ export function buildWorld(biome: Biome): WorldHandles {
     tick,
     worldRadius: WORLD_RADIUS,
     random: Math.random,
+    getPlayerPosition,
   };
   biome.buildProps(ctx);
   return { group, worldRadius: WORLD_RADIUS, obstacles, tick };

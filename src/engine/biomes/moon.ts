@@ -58,17 +58,70 @@ export const moonBiome: Biome = {
 };
 
 function buildProps(ctx: BiomeContext): void {
-  const { group, obstacles, tick, worldRadius } = ctx;
+  const { group, obstacles, tick, worldRadius, getPlayerPosition } = ctx;
+
+  // ── Crater plan ──────────────────────────────────────────────────
+  // Pick all crater positions BEFORE we build the ground, because the
+  // ground mesh's vertices need to dip down into each crater. This
+  // turns the craters into real terrain depressions instead of bowls
+  // sitting on top of flat ground.
+  type CraterPlan = { x: number; z: number; radius: number; depth: number };
+  const craterPlans: CraterPlan[] = [];
+  const craterRand = mulberry32(freshSeed());
+  for (let i = 0; i < 22; i++) {
+    const radius = 1.4 + craterRand() * 2.2;
+    // Outer falloff is 1.6× the visible radius — that's where the
+    // ground vertex displacement starts. We pad by that when picking
+    // a clear spot so two adjacent craters' falloffs don't overlap.
+    const spot = findOpenSpot(craterRand, worldRadius - 4, radius * 1.6, obstacles, {
+      minRadius: 4,
+      pad: 0.4,
+      maxAttempts: 14,
+    });
+    if (!spot) continue;
+    // Varying depths — some shallow, some deep impacts. Smaller
+    // craters can't go as deep without their walls becoming weirdly
+    // steep, so depth tracks radius.
+    const depth = 0.35 + craterRand() * 0.5 + radius * 0.18;
+    craterPlans.push({ x: spot.x, z: spot.z, radius, depth });
+  }
 
   // ── Ground ────────────────────────────────────────────────────────
-  // Pale dusty regolith with a dark outer skirt for depth.
+  // Tessellated disc — RingGeometry with many radial + angular
+  // subdivisions so we have enough vertices to displace into crater
+  // bowls. Inner hole is sub-pixel small (the kid spawns at origin
+  // and stands above it; nothing visibly touches the centre).
+  const groundGeo = new THREE.RingGeometry(0.05, worldRadius + 30, 96, 40);
+  groundGeo.rotateX(-Math.PI / 2);
+  // Walk every vertex and push it down by the deepest crater that
+  // affects it. smoothstep falloff keeps the lip soft so it reads as
+  // an erosion crater rather than a hard cookie-cutter hole.
+  const positions = groundGeo.attributes.position;
+  for (let i = 0; i < positions.count; i++) {
+    const x = positions.getX(i);
+    const z = positions.getZ(i);
+    let lowest = 0;
+    for (const c of craterPlans) {
+      const outerR = c.radius * 1.6;
+      const d = Math.hypot(x - c.x, z - c.z);
+      if (d >= outerR) continue;
+      const t = 1 - d / outerR; // 1 at centre, 0 at outer edge
+      // smoothstep s-curve: gentle at the edges, steep in the middle.
+      const k = t * t * (3 - 2 * t);
+      const y = -c.depth * k;
+      if (y < lowest) lowest = y;
+    }
+    positions.setY(i, lowest);
+  }
+  positions.needsUpdate = true;
+  groundGeo.computeVertexNormals();
   const ground = new THREE.Mesh(
-    new THREE.CircleGeometry(worldRadius + 30, 64),
-    new THREE.MeshStandardMaterial({ color: 0x9aa0aa, roughness: 1 })
+    groundGeo,
+    new THREE.MeshStandardMaterial({ color: 0x9aa0aa, roughness: 1, flatShading: false })
   );
-  ground.rotation.x = -Math.PI / 2;
   ground.receiveShadow = true;
   group.add(ground);
+
   const skirt = new THREE.Mesh(
     new THREE.RingGeometry(worldRadius + 30, worldRadius + 80, 48),
     new THREE.MeshStandardMaterial({ color: 0x4d525c, roughness: 1, side: THREE.DoubleSide })
@@ -109,23 +162,16 @@ function buildProps(ctx: BiomeContext): void {
   // play zone. Rendered as a Points cloud so it's cheap.
   group.add(makeStarfield());
 
-  // ── Craters ──────────────────────────────────────────────────────
-  // Decorative ground craters scattered across the play zone. Not
-  // collidable (the kid drives over them) but visually punctuates
-  // the surface with relief.
-  const craterRand = mulberry32(freshSeed());
-  for (let i = 0; i < 22; i++) {
-    const radius = 1.4 + craterRand() * 1.6;
-    const spot = findOpenSpot(craterRand, worldRadius - 4, 0.3, obstacles, {
-      minRadius: 4,
-      pad: 0.6,
-      maxAttempts: 14,
-    });
-    if (!spot) continue;
-    const c = makeCrater(radius);
-    c.position.set(spot.x, 0, spot.z);
-    c.rotation.y = craterRand() * Math.PI * 2;
-    group.add(c);
+  // ── Crater rim debris ────────────────────────────────────────────
+  // The craters are now real depressions in the ground (handled
+  // above). All we need on top is a scattered ring of impact debris
+  // around each rim — the dipping ground does the rest of the work.
+  const debrisRand = mulberry32(freshSeed());
+  for (const c of craterPlans) {
+    const rimDebris = makeCraterRimDebris(c.radius, debrisRand);
+    rimDebris.position.set(c.x, 0, c.z);
+    rimDebris.rotation.y = debrisRand() * Math.PI * 2;
+    group.add(rimDebris);
   }
 
   // ── Moon rocks scattered through the play zone ───────────────────
@@ -154,24 +200,24 @@ function buildProps(ctx: BiomeContext): void {
   tick.push(flag.tick);
 
   // ── Alien NPCs ───────────────────────────────────────────────────
-  // Friendly cartoon aliens scattered through the play zone. No
-  // collision (the kid can drive right through them) so the finale's
-  // letter-bumping mechanic doesn't get confused by an alien acting
-  // as an obstacle. Each one bobs / waggles antennae / blinks on
-  // its own randomized phase.
+  // Friendly cartoon aliens scattered through the play zone. They
+  // wander around their starting position at a stroll, and wave when
+  // the player drives close. No collision pushed so the kid can
+  // drive right through; the wave is the gameplay reaction.
   const alienRand = mulberry32(freshSeed());
-  const ALIEN_COUNT = 5;
+  const ALIEN_COUNT = 6;
   for (let i = 0; i < ALIEN_COUNT; i++) {
-    const spot = findOpenSpot(alienRand, worldRadius - 5, 0.6, obstacles, {
-      minRadius: 5,
+    // We pad spawn spots by 4 so a wandering alien (which roams up
+    // to ~3 units from home) can't drift into a tree or another
+    // prop and look weird.
+    const spot = findOpenSpot(alienRand, worldRadius - 6, 4, obstacles, {
+      minRadius: 6,
       pad: 0.8,
       maxAttempts: 16,
     });
     if (!spot) continue;
     const hue = alienRand();
-    const alien = makeAlien(hue);
-    alien.group.position.set(spot.x, 0, spot.z);
-    alien.group.rotation.y = alienRand() * Math.PI * 2;
+    const alien = makeAlien(hue, spot.x, spot.z, getPlayerPosition);
     group.add(alien.group);
     tick.push(alien.tick);
   }
@@ -224,84 +270,22 @@ function makeMoonRock(size: number): THREE.Object3D {
   return g;
 }
 
-// Decorative ground crater — looks like a real impact site rather
-// than a torus + disc. Profile: a tapered bowl wall sloping inward
-// to a recessed floor, an irregular debris rim built from a ring of
-// jittered dodecahedron chunks, and a darker shadow ring near the
-// floor for depth. Drivable (no collision); the floor sits below
-// y=0 and the rim is short enough that the kid can roll over it.
-function makeCrater(radius: number): THREE.Object3D {
+// Just the rim debris around a crater. The crater itself is now a
+// real depression in the ground geometry (see buildProps), so all
+// this does is scatter dodecahedron chunks around the rim's outer
+// edge to read as ejected impact debris.
+function makeCraterRimDebris(radius: number, rand: () => number): THREE.Object3D {
   const g = new THREE.Group();
-  // Per-instance colour jitter so adjacent craters don't look like
-  // copy-pastes — the eye picks up subtle hue/lightness shifts even
-  // at low resolution.
-  const baseShade = 0.42 + Math.random() * 0.08;
-  const wallMat = new THREE.MeshStandardMaterial({
-    color: new THREE.Color().setHSL(0.62, 0.04, baseShade),
-    roughness: 1,
-  });
-  const floorMat = new THREE.MeshStandardMaterial({
-    color: new THREE.Color().setHSL(0.62, 0.04, baseShade - 0.18),
-    roughness: 1,
-  });
+  const baseShade = 0.42 + rand() * 0.08;
   const rimMat = new THREE.MeshStandardMaterial({
     color: new THREE.Color().setHSL(0.62, 0.06, baseShade + 0.08),
     roughness: 1,
   });
-
-  // ── Bowl wall — open-top tapered cylinder. Slightly larger top
-  // radius than bottom so the wall slopes inward toward the floor.
-  const wallDepth = Math.min(0.55, radius * 0.35);
-  const wall = new THREE.Mesh(
-    new THREE.CylinderGeometry(
-      radius,           // top radius (ground level)
-      radius * 0.55,    // bottom radius (floor)
-      wallDepth,
-      32,
-      1,
-      true              // open-ended — we add a separate floor disc
-    ),
-    wallMat
-  );
-  wall.position.y = -wallDepth * 0.5 + 0.02;
-  wall.receiveShadow = true;
-  g.add(wall);
-
-  // ── Floor — recessed disc, slightly darker.
-  const floor = new THREE.Mesh(
-    new THREE.CircleGeometry(radius * 0.55, 24),
-    floorMat
-  );
-  floor.rotation.x = -Math.PI / 2;
-  floor.position.y = -wallDepth + 0.02;
-  floor.receiveShadow = true;
-  g.add(floor);
-
-  // ── Inner shadow ring — thin darker disc near the bottom of the
-  // wall to imply ambient occlusion under the lip.
-  const shadow = new THREE.Mesh(
-    new THREE.RingGeometry(radius * 0.55, radius * 0.85, 32),
-    new THREE.MeshBasicMaterial({
-      color: 0x000000,
-      transparent: true,
-      opacity: 0.22,
-      side: THREE.DoubleSide,
-      depthWrite: false,
-    })
-  );
-  shadow.rotation.x = -Math.PI / 2;
-  shadow.position.y = -wallDepth + 0.025;
-  g.add(shadow);
-
-  // ── Debris rim — irregular ring of small chunks around the lip.
-  // Each chunk is a tiny dodecahedron with random rotation + size
-  // so the rim reads as scattered impact debris rather than a
-  // perfect torus.
   const debrisCount = 18 + Math.floor(radius * 4);
   for (let i = 0; i < debrisCount; i++) {
-    const a = (i / debrisCount) * Math.PI * 2 + (Math.random() - 0.5) * 0.18;
-    const dist = radius + (Math.random() - 0.5) * radius * 0.18;
-    const size = 0.12 + Math.random() * 0.18;
+    const a = (i / debrisCount) * Math.PI * 2 + (rand() - 0.5) * 0.18;
+    const dist = radius + (rand() - 0.5) * radius * 0.22;
+    const size = 0.12 + rand() * 0.22;
     const chunk = new THREE.Mesh(
       new THREE.DodecahedronGeometry(size, 0),
       rimMat
@@ -311,162 +295,314 @@ function makeCrater(radius: number): THREE.Object3D {
       size * 0.55,
       Math.sin(a) * dist
     );
-    chunk.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
+    chunk.rotation.set(rand() * Math.PI, rand() * Math.PI, rand() * Math.PI);
     chunk.castShadow = true;
     chunk.receiveShadow = true;
     g.add(chunk);
   }
-
   return g;
 }
 
-// Friendly cartoon alien — squishy egg body, two big googly eyes on
-// stalks, a pair of waving antennae, and a small mouth. Renders in
-// a saturated hue so they pop against the gray regolith. No
-// collision — the kid can drive right through them, which keeps the
-// finale's letter-bumping mechanic clean. Returns a tick callback
-// for idle bobbing + slow eye-stalk sway.
-function makeAlien(hue: number): { group: THREE.Group; tick: (dt: number, t: number) => void } {
+// Friendly cartoon alien — chunky round body with an oversized head,
+// two big googly eyes on stalks, glowing antenna tips, two stubby
+// arms with little sphere hands, cheek blushes, and a wide smile.
+// Built so the alien reads as cute even at small on-screen sizes.
+//
+// Each alien wanders the surface within ~4 units of its starting
+// home position, picking a new random target every few seconds.
+// When the player drives close, the alien stops walking and waves
+// one arm for a few seconds, then resumes its wander. No collision
+// (no obstacle pushed) so the kid can drive right through; the wave
+// is the gameplay reaction.
+function makeAlien(
+  hue: number,
+  homeX: number,
+  homeZ: number,
+  getPlayerPosition: () => THREE.Vector3 | null
+): { group: THREE.Group; tick: (dt: number, t: number) => void } {
   const group = new THREE.Group();
+  group.position.set(homeX, 0, homeZ);
 
-  // ── Body — squat egg, slightly flattened bottom so it doesn't
-  // look like it's about to roll away.
-  const bodyColor = new THREE.Color().setHSL(hue, 0.7, 0.55);
+  // ── Body — small egg, slightly squashed bottom.
+  const bodyColor = new THREE.Color().setHSL(hue, 0.78, 0.6);
   const bodyMat = new THREE.MeshStandardMaterial({
     color: bodyColor,
-    roughness: 0.55,
-    emissive: bodyColor.clone().multiplyScalar(0.15),
-    emissiveIntensity: 0.4,
+    roughness: 0.5,
+    emissive: bodyColor.clone().multiplyScalar(0.2),
+    emissiveIntensity: 0.45,
   });
-  const body = new THREE.Mesh(new THREE.SphereGeometry(0.55, 18, 14), bodyMat);
-  body.scale.set(1, 1.15, 1);
-  body.position.y = 0.6;
+  const body = new THREE.Mesh(new THREE.SphereGeometry(0.5, 18, 14), bodyMat);
+  body.scale.set(1, 1.08, 1);
+  body.position.y = 0.5;
   body.castShadow = true;
   body.receiveShadow = true;
   group.add(body);
 
-  // Belly — slightly lighter inset on the front so the alien has a
-  // tummy that catches light differently from the back.
+  // Lighter belly inset so the front catches light.
   const bellyMat = new THREE.MeshStandardMaterial({
-    color: bodyColor.clone().lerp(new THREE.Color(0xffffff), 0.35),
+    color: bodyColor.clone().lerp(new THREE.Color(0xffffff), 0.42),
     roughness: 0.7,
   });
-  const belly = new THREE.Mesh(new THREE.SphereGeometry(0.32, 14, 10), bellyMat);
-  belly.position.set(0, 0.5, 0.32);
+  const belly = new THREE.Mesh(new THREE.SphereGeometry(0.3, 14, 10), bellyMat);
+  belly.position.set(0, 0.42, 0.3);
   group.add(belly);
 
-  // ── Eye stalks — two short cylinders rising from the top of the
-  // head with big sphere eyes on the ends. Stalks pivot at the
-  // base so we can wave them in the tick.
+  // ── Big head — sits on top of the body, larger than the body for
+  // an extra-cute "all eyes" silhouette.
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.42, 18, 14), bodyMat);
+  head.position.y = 1.05;
+  head.castShadow = true;
+  head.receiveShadow = true;
+  group.add(head);
+
+  // Cheek blushes — soft pink discs on each side of the head.
+  const blushMat = new THREE.MeshBasicMaterial({
+    color: 0xff9bb8,
+    transparent: true,
+    opacity: 0.65,
+    depthWrite: false,
+  });
+  for (const side of [-1, 1] as const) {
+    const blush = new THREE.Mesh(new THREE.CircleGeometry(0.09, 14), blushMat);
+    blush.position.set(side * 0.25, 0.95, 0.32);
+    blush.lookAt(side * 0.25, 0.95, 1);
+    group.add(blush);
+  }
+
+  // ── Eye stalks — short cylinders rising from the head with big
+  // sphere eyes on the ends.
   const stalkMat = new THREE.MeshStandardMaterial({ color: bodyColor.clone().multiplyScalar(0.7), roughness: 0.6 });
-  const eyeWhiteMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.4 });
+  const eyeWhiteMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.35 });
   const pupilMat = new THREE.MeshStandardMaterial({ color: 0x1c1422, roughness: 0.3 });
   const shineMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
 
   const stalkPivots: THREE.Group[] = [];
   for (const side of [-1, 1] as const) {
     const pivot = new THREE.Group();
-    pivot.position.set(side * 0.18, 1.05, 0.02);
+    pivot.position.set(side * 0.16, 1.32, 0.06);
     group.add(pivot);
     stalkPivots.push(pivot);
 
-    const stalk = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.05, 0.32, 8), stalkMat);
-    stalk.position.y = 0.16;
+    const stalk = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.05, 0.18, 8), stalkMat);
+    stalk.position.y = 0.09;
     stalk.castShadow = true;
     pivot.add(stalk);
 
-    const eyeball = new THREE.Mesh(new THREE.SphereGeometry(0.16, 14, 12), eyeWhiteMat);
-    eyeball.position.y = 0.42;
+    const eyeball = new THREE.Mesh(new THREE.SphereGeometry(0.18, 14, 12), eyeWhiteMat);
+    eyeball.position.y = 0.3;
     eyeball.castShadow = true;
     pivot.add(eyeball);
 
-    const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.075, 10, 10), pupilMat);
-    pupil.position.set(0, 0.42, 0.11);
+    const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.09, 10, 10), pupilMat);
+    pupil.position.set(0, 0.3, 0.115);
     pivot.add(pupil);
 
-    const shine = new THREE.Mesh(new THREE.SphereGeometry(0.025, 6, 6), shineMat);
-    shine.position.set(-0.04, 0.46, 0.15);
+    const shine = new THREE.Mesh(new THREE.SphereGeometry(0.03, 6, 6), shineMat);
+    shine.position.set(-0.05, 0.34, 0.16);
     pivot.add(shine);
   }
 
-  // ── Antennae — thin curved wires with little sphere tips that
-  // glow. Two antennae, mirrored.
+  // ── Antennae with glowing tips.
   const antennaMat = new THREE.MeshStandardMaterial({ color: 0x2a2230, roughness: 0.5 });
   const antennaTipMat = new THREE.MeshStandardMaterial({
     color: bodyColor.clone().lerp(new THREE.Color(0xffffff), 0.55),
     emissive: bodyColor,
-    emissiveIntensity: 0.6,
+    emissiveIntensity: 0.7,
     roughness: 0.4,
   });
   const antennaPivots: THREE.Group[] = [];
   for (const side of [-1, 1] as const) {
     const pivot = new THREE.Group();
-    pivot.position.set(side * 0.26, 1.1, -0.05);
+    pivot.position.set(side * 0.24, 1.4, -0.08);
     pivot.rotation.z = -side * 0.3;
     group.add(pivot);
     antennaPivots.push(pivot);
-    const wire = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.025, 0.35, 6), antennaMat);
-    wire.position.y = 0.18;
+    const wire = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.025, 0.32, 6), antennaMat);
+    wire.position.y = 0.16;
     pivot.add(wire);
     const tip = new THREE.Mesh(new THREE.SphereGeometry(0.07, 10, 10), antennaTipMat);
-    tip.position.y = 0.4;
+    tip.position.y = 0.36;
     pivot.add(tip);
   }
 
-  // ── Mouth — small dark crescent so the alien reads as friendly.
+  // ── Wide smile.
   const mouth = new THREE.Mesh(
-    new THREE.TorusGeometry(0.07, 0.018, 6, 12, Math.PI),
+    new THREE.TorusGeometry(0.1, 0.022, 6, 14, Math.PI),
     new THREE.MeshStandardMaterial({ color: 0x2a1a30, roughness: 0.7 })
   );
   mouth.rotation.x = Math.PI / 2;
   mouth.rotation.z = Math.PI; // flip so the curve smiles
-  mouth.position.set(0, 0.78, 0.5);
+  mouth.position.set(0, 0.92, 0.4);
   group.add(mouth);
 
-  // ── Tiny feet — two flat ovals so the alien doesn't look like
-  // it's floating.
+  // ── Arms — short cylinder with a sphere hand at each end. Pivot
+  // at shoulder so we can swing them when walking and raise + wave
+  // one when the player gets close.
+  const armMat = new THREE.MeshStandardMaterial({ color: bodyColor.clone().multiplyScalar(0.85), roughness: 0.6 });
+  const handMat = new THREE.MeshStandardMaterial({ color: bodyColor.clone().lerp(new THREE.Color(0xffffff), 0.2), roughness: 0.55 });
+  const armPivots: THREE.Group[] = [];
+  const armRest = [
+    { x: -0.45, y: 0.7, z: 0, restRot: 0.25 },
+    { x: 0.45, y: 0.7, z: 0, restRot: -0.25 },
+  ];
+  for (const a of armRest) {
+    const pivot = new THREE.Group();
+    pivot.position.set(a.x, a.y, a.z);
+    pivot.rotation.z = a.restRot;
+    group.add(pivot);
+    armPivots.push(pivot);
+    const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.06, 0.32, 8), armMat);
+    arm.position.y = -0.16;
+    arm.castShadow = true;
+    pivot.add(arm);
+    const hand = new THREE.Mesh(new THREE.SphereGeometry(0.11, 12, 10), handMat);
+    hand.position.y = -0.34;
+    hand.castShadow = true;
+    pivot.add(hand);
+  }
+
+  // ── Stubby feet.
   const footMat = new THREE.MeshStandardMaterial({ color: bodyColor.clone().multiplyScalar(0.6), roughness: 0.7 });
   for (const side of [-1, 1] as const) {
     const foot = new THREE.Mesh(new THREE.SphereGeometry(0.13, 12, 8), footMat);
     foot.scale.set(1, 0.4, 1.2);
-    foot.position.set(side * 0.22, 0.06, 0.02);
+    foot.position.set(side * 0.2, 0.06, 0.02);
     foot.castShadow = true;
     group.add(foot);
   }
 
-  // Per-instance phase / speed so a cluster of aliens doesn't bob in
-  // unison and read as mechanical.
+  // ── Per-instance state ──────────────────────────────────────────
+  // Each alien picks a target within ~3 units of home and walks to
+  // it; on arrival, idles briefly then picks a new target. Anchored
+  // to home so they don't drift across the world over time.
+  const home = new THREE.Vector3(homeX, 0, homeZ);
+  let target = pickWanderTarget(home);
+  let nextRetargetAt = 0; // populated on first tick with a randomized initial value
+  let facing = group.rotation.y;
+  let walking = true;
+  // Wave state — when the player gets close, we lock into "waving"
+  // mode for waveDuration seconds, then enter a cooldown so a kid
+  // pressed against the alien doesn't restart the wave every frame.
+  let waveT = 0;
+  let waveCooldown = 0;
+  const waveDuration = 2.0;
+  const waveCooldownAfter = 4.5;
+  const detectRadius = 1.8;
+
   const phase = Math.random() * Math.PI * 2;
-  const bobSpeed = 1.2 + Math.random() * 0.6;
+  const bobSpeed = 1.4 + Math.random() * 0.6;
   const swaySpeed = 0.7 + Math.random() * 0.5;
   const blinkOffset = Math.random() * 8;
   const eyeballs: THREE.Mesh[] = [];
   group.traverse((obj) => {
-    // Capture eyeballs after the fact so we can scale them on blink.
     const m = obj as THREE.Mesh;
     if (m.isMesh && m.material === eyeWhiteMat) eyeballs.push(m);
   });
 
+  function pickWanderTarget(home: THREE.Vector3): THREE.Vector3 {
+    const a = Math.random() * Math.PI * 2;
+    const r = 1 + Math.random() * 3;
+    return new THREE.Vector3(home.x + Math.cos(a) * r, 0, home.z + Math.sin(a) * r);
+  }
+
   return {
     group,
-    tick: (_dt, t) => {
-      // Gentle full-body bob.
-      group.position.y = Math.abs(Math.sin(t * bobSpeed + phase)) * 0.08;
-      // Eye stalks sway side-to-side, slightly out of phase with each other.
+    tick: (dt, t) => {
+      if (nextRetargetAt === 0) nextRetargetAt = t + 1.2 + Math.random() * 1.5;
+
+      // ── Wave detection ────────────────────────────────────────
+      const player = getPlayerPosition();
+      if (waveT === 0 && waveCooldown <= 0 && player) {
+        const dx = player.x - group.position.x;
+        const dz = player.z - group.position.z;
+        if (dx * dx + dz * dz < detectRadius * detectRadius) {
+          waveT = waveDuration;
+          walking = false;
+          // Face the player while waving.
+          const targetYaw = Math.atan2(dx, dz);
+          facing = targetYaw;
+          group.rotation.y = facing;
+        }
+      }
+
+      // ── Walking ───────────────────────────────────────────────
+      if (walking) {
+        const dx = target.x - group.position.x;
+        const dz = target.z - group.position.z;
+        const distToTarget = Math.hypot(dx, dz);
+        if (distToTarget < 0.25 || t > nextRetargetAt) {
+          target = pickWanderTarget(home);
+          nextRetargetAt = t + 2 + Math.random() * 3;
+        } else {
+          const speed = 0.85;
+          group.position.x += (dx / distToTarget) * speed * dt;
+          group.position.z += (dz / distToTarget) * speed * dt;
+          // Lerp facing toward direction of travel.
+          const targetYaw = Math.atan2(dx, dz);
+          let delta = targetYaw - facing;
+          while (delta > Math.PI) delta -= Math.PI * 2;
+          while (delta < -Math.PI) delta += Math.PI * 2;
+          facing += delta * 0.12;
+          group.rotation.y = facing;
+        }
+      }
+
+      // ── Body bob ──────────────────────────────────────────────
+      // While walking, bob a little faster + bigger to imply
+      // bouncy steps; while waving, slow gentle bob in place.
+      const bobAmt = walking ? 0.11 : 0.06;
+      group.position.y = Math.abs(Math.sin(t * bobSpeed + phase)) * bobAmt;
+
+      // ── Eye stalk sway ────────────────────────────────────────
       for (let i = 0; i < stalkPivots.length; i++) {
         stalkPivots[i].rotation.z = Math.sin(t * swaySpeed + phase + i * 0.6) * 0.18;
         stalkPivots[i].rotation.x = Math.cos(t * swaySpeed * 0.8 + phase) * 0.08;
       }
-      // Antennae waggle, more amplitude than the eye stalks.
+      // Antennae waggle.
       for (let i = 0; i < antennaPivots.length; i++) {
         const sign = i === 0 ? -1 : 1;
         antennaPivots[i].rotation.z = sign * 0.3 + Math.sin(t * 1.6 + phase + i) * 0.22;
       }
-      // Periodic blink — every 3-5s, scale eyeball Y briefly to 0.
+      // Periodic blink.
       const blinkPhase = (t + blinkOffset) % 4.2;
       const blink = blinkPhase < 0.16 ? Math.cos(blinkPhase / 0.16 * Math.PI) * 0.5 + 0.5 : 1;
-      for (const e of eyeballs) {
-        e.scale.y = blink;
+      for (const e of eyeballs) e.scale.y = blink;
+
+      // ── Arm animation ─────────────────────────────────────────
+      // Walking: arms swing back and forth with the gait.
+      // Waving: right arm raises overhead and oscillates side-to-side
+      // for the duration; left arm stays at rest.
+      if (waveT > 0) {
+        // Wave progress 0..1 (0 at start, 1 at end).
+        const k = 1 - waveT / waveDuration;
+        // Ease the raise so it lifts smoothly into wave position
+        // and lowers smoothly at the end.
+        const raise = Math.sin(Math.min(1, k * 4) * Math.PI / 2); // ease-in
+        const release = k > 0.85 ? (k - 0.85) / 0.15 : 0;
+        const r = raise * (1 - release);
+        // Right arm — lift up and oscillate Z rotation.
+        armPivots[1].rotation.z = -0.25 - r * 1.9;
+        armPivots[1].rotation.x = -r * 0.3;
+        armPivots[1].rotation.y = Math.sin(k * Math.PI * 8) * 0.55 * r;
+        // Left arm — gently swing in the rest pose.
+        armPivots[0].rotation.z = 0.25 + Math.sin(t * 2) * 0.06;
+        armPivots[0].rotation.x = 0;
+        armPivots[0].rotation.y = 0;
+        waveT = Math.max(0, waveT - dt);
+        if (waveT === 0) {
+          walking = true;
+          waveCooldown = waveCooldownAfter;
+        }
+      } else {
+        // Walking arm swing — both arms oscillate, mirrored.
+        const swing = walking ? Math.sin(t * 4 + phase) * 0.35 : 0;
+        armPivots[0].rotation.z = 0.25 + swing;
+        armPivots[0].rotation.x = swing * 0.4;
+        armPivots[0].rotation.y = 0;
+        armPivots[1].rotation.z = -0.25 - swing;
+        armPivots[1].rotation.x = -swing * 0.4;
+        armPivots[1].rotation.y = 0;
+        waveCooldown = Math.max(0, waveCooldown - dt);
       }
     },
   };
