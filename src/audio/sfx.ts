@@ -274,6 +274,32 @@ function makeMotor(): Motor {
 
 export const motor = makeMotor();
 
+// ─── Cartoony car flourishes ─────────────────────────────────────────────
+// Sit on top of the steady motor loop so the car feels playful instead of
+// monotone. Two cues:
+//   • playCarVroom — short rising sweep, fired on idle→moving transitions
+//   • playCarPutt  — quick double-blip, fired at random while driving
+// Volumes are deliberately tiny — they should add personality, not fight
+// with letter audio playing in the same moment.
+
+export function playCarVroom() {
+  const c = getCtx();
+  if (!c) return;
+  // Two-octave rising sweep with a low fundamental — reads as "starting
+  // up" without sounding mechanical or scary.
+  glide(120, 320, 0, 0.32, 0.10, "triangle");
+  glide(240, 540, 0.04, 0.28, 0.06, "sine");
+}
+
+export function playCarPutt() {
+  const c = getCtx();
+  if (!c) return;
+  // Two short low pops a 3rd apart — cartoony "putt-putt" feel. Short
+  // duration + soft gain = the sound of a friendly engine, not a real one.
+  tone(150, 0, 0.06, 0.06, "triangle");
+  tone(180, 0.09, 0.06, 0.06, "triangle");
+}
+
 // Bigger flourish for end-of-word / end-of-round. Octave jump at the end.
 export function playWoo() {
   tone(N.G4, 0, 0.16);

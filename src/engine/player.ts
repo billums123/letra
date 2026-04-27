@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import type { AvatarKind } from "../state/store";
-import { motor, playKidStep } from "../audio/sfx";
+import { motor, playKidStep, playCarVroom, playCarPutt } from "../audio/sfx";
 
 export type PlayerHandles = {
   group: THREE.Group;
@@ -237,6 +237,10 @@ function buildCar(): PlayerHandles {
   let facing = 0;
   let bob = 0;
   let wheelSpin = 0;
+  let wasMoving = false;
+  // Schedule the next cartoony "putt-putt" at a random interval so the
+  // engine flourishes don't feel metronomic. Re-rolled after each pop.
+  let nextPuttAt = performance.now() + 1500 + Math.random() * 2500;
 
   // Kick the motor loop the moment the car spawns so the kid hears an
   // idle purr while parked. setActivity() in update() animates between
@@ -277,6 +281,19 @@ function buildCar(): PlayerHandles {
       for (const w of wheels) w.rotation.x = wheelSpin;
       // Engine pitch + volume tracks input magnitude.
       motor.setActivity(mag);
+      // Cartoony flourishes ride on top of the motor loop. Vroom marks
+      // the transition off idle; putt-putts sprinkle through the drive
+      // at random intervals so the engine feels alive without ever
+      // being predictable.
+      if (isMoving && !wasMoving) {
+        playCarVroom();
+        nextPuttAt = performance.now() + 1500 + Math.random() * 2500;
+      }
+      if (isMoving && performance.now() >= nextPuttAt) {
+        playCarPutt();
+        nextPuttAt = performance.now() + 2000 + Math.random() * 2500;
+      }
+      wasMoving = isMoving;
     },
     position() {
       return group.position;
