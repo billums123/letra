@@ -27,25 +27,36 @@ const LIST_ONLY = ARGS.includes("--list");
 type Track = {
   id: string;
   name: string;
-  // Sent verbatim to ElevenLabs. Keep mood + instrumentation explicit
-  // and lean on "consistent throughout / no fade in or out / no intro
-  // or outro" so the model leaves the head and tail at the same energy
-  // — the crossfade in the runtime player covers any small mismatch.
+  // Sent verbatim to ElevenLabs. The wording leans hard on
+  // "perfect seamless loop / last note flows directly into first note /
+  // identical energy at start and end" so the runtime can use native
+  // AudioBufferSourceNode loop=true without crossfading. The model
+  // doesn't always cooperate but matched head/tail energy is the
+  // best we can ask for from generative music.
   prompt: string;
 };
+
+// Loop-friendly framing reused across every prompt — keeps the
+// instructions consistent and easy to update in one place.
+const LOOP_FRAMING =
+  "This is a perfect seamless loop. The audio MUST end on the exact " +
+  "same beat, chord, and energy that it begins on, so the very last " +
+  "note flows directly into the very first note with no gap, no fade, " +
+  "and no audible transition when the file plays back-to-back. " +
+  "Absolutely NO intro buildup, NO outro ritardando, NO fade in, NO " +
+  "fade out. Tempo is rock-steady from sample 1 to the final sample. " +
+  "The opening downbeat and the final downbeat are interchangeable. " +
+  "Instrumental only, no vocals.";
 
 const TRACKS: Track[] = [
   {
     id: "menu-theme",
     name: "Letra Theme",
     prompt:
-      "Cheerful instrumental children's theme song in a bright major key. " +
-      "Friendly bouncing melody played on toy piano and soft synth bells, " +
-      "warm bass, light hand claps and shaker. Welcoming, playful, " +
-      "inviting energy that loops endlessly under a kids' learning game " +
-      "menu. Consistent tempo and energy throughout. No vocals. " +
-      "No intro or outro, no fade in or fade out — same intensity at " +
-      "the beginning, middle, and end so the clip can loop seamlessly.",
+      "Cheerful welcoming children's menu theme in a bright major key. " +
+      "Friendly bouncing melody played on toy piano and soft synth bells " +
+      "over warm bass and light shaker. Inviting, playful, sunny. " +
+      LOOP_FRAMING,
   },
   {
     id: "sunny-walk",
@@ -54,10 +65,8 @@ const TRACKS: Track[] = [
       "Upbeat instrumental children's gameplay music with a sunny " +
       "walking-tempo groove around 118 BPM. Plucky ukulele or marimba " +
       "melody in C major, warm bass, soft drum kit with a steady backbeat. " +
-      "Playful, encouraging, consistently energetic from start to finish. " +
-      "No vocals. No intro or outro, no fade in or fade out — the head " +
-      "and tail of the clip should be at the same energy so it loops " +
-      "seamlessly.",
+      "Playful and encouraging. " +
+      LOOP_FRAMING,
   },
   {
     id: "letter-hop",
@@ -66,9 +75,8 @@ const TRACKS: Track[] = [
       "Bouncy syncopated instrumental children's music around 130 BPM. " +
       "Hopping toy-piano melody, soft synth pads, plucky bass, light " +
       "drums with playful kick patterns. Whimsical and jumpy, like " +
-      "characters skipping along. Consistent energy throughout. No " +
-      "vocals. No intro or outro, no fade in or fade out — same " +
-      "intensity at the start and end so the clip loops seamlessly.",
+      "characters skipping along. " +
+      LOOP_FRAMING,
   },
   {
     id: "adventure",
@@ -78,9 +86,27 @@ const TRACKS: Track[] = [
       "108 BPM. Sweeping pizzicato strings or marimba melody in G major, " +
       "warm pad chords, gentle drums. Encouraging and a touch epic, " +
       "appropriate for a pre-K kid exploring a friendly 3D world. " +
-      "Consistent energy from start to finish. No vocals. No intro or " +
-      "outro, no fade in or fade out — same intensity at the start and " +
-      "end so the clip loops seamlessly.",
+      LOOP_FRAMING,
+  },
+  {
+    id: "sky-park",
+    name: "Sky Park",
+    prompt:
+      "Dreamy floating children's instrumental around 96 BPM. Soft " +
+      "marimba arpeggios in F major, airy synth pad, gentle bass, " +
+      "shimmery bell accents. Calm, curious, like wandering through a " +
+      "cloud playground on a sunny afternoon. " +
+      LOOP_FRAMING,
+  },
+  {
+    id: "bouncy-castle",
+    name: "Bouncy Castle",
+    prompt:
+      "Silly playful children's instrumental around 122 BPM. Boingy " +
+      "synth-bass leads, plucky ukulele, kazoo-like melody, soft toms " +
+      "and tambourine. Goofy, light, mischievous — like a cartoon " +
+      "rabbit hopping around. D major. " +
+      LOOP_FRAMING,
   },
 ];
 

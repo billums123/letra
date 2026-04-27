@@ -14,6 +14,8 @@ export const GAME_TRACKS: Track[] = [
   { id: "sunny-walk", name: "Sunny Walk", url: "/audio/music/sunny-walk.mp3" },
   { id: "letter-hop", name: "Letter Hop", url: "/audio/music/letter-hop.mp3" },
   { id: "adventure", name: "Adventure", url: "/audio/music/adventure.mp3" },
+  { id: "sky-park", name: "Sky Park", url: "/audio/music/sky-park.mp3" },
+  { id: "bouncy-castle", name: "Bouncy Castle", url: "/audio/music/bouncy-castle.mp3" },
 ];
 
 // Pick one game track per session. Stored in sessionStorage so navigating
