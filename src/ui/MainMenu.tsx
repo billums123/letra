@@ -25,6 +25,8 @@ type GameCardProps = {
 
 function GameCard({ emoji, iconUrl, title, subtitle, color, voiceClipId, onSelect, ariaLabel, compact }: GameCardProps & { compact: boolean }) {
   const lastSpoken = useRef(0);
+  const [hover, setHover] = useState(false);
+  const [pressed, setPressed] = useState(false);
   const speak = () => {
     // Throttle speak so a kid bouncing the cursor doesn't trigger a stutter.
     const now = performance.now();
@@ -32,37 +34,78 @@ function GameCard({ emoji, iconUrl, title, subtitle, color, voiceClipId, onSelec
     lastSpoken.current = now;
     audio.play(voiceClipId);
   };
-  const iconSize = compact ? 96 : 128;
+  const iconSize = compact ? 120 : 156;
+  // Compose the card transform from press / hover state. Pressed wins
+  // (drops the card 4px) but hover gives a small lift + tilt that
+  // reads as "this is alive, you can tap me".
+  const transform = pressed
+    ? "translateY(4px) rotate(0deg)"
+    : hover
+      ? "translateY(-4px) rotate(-1deg) scale(1.02)"
+      : "translateY(0) rotate(0deg) scale(1)";
+  // Soft inner highlight at the top of the card adds a touch of depth
+  // without changing the overall colour. We layer it on top of the
+  // solid card colour with a vertical gradient.
+  const cardBg = `linear-gradient(180deg, rgba(255,255,255,0.35) 0%, rgba(255,255,255,0) 38%), ${color}`;
   return (
     <button
       type="button"
-      onMouseEnter={speak}
-      onFocus={speak}
-      onTouchStart={speak}
+      onMouseEnter={() => { setHover(true); speak(); }}
+      onMouseLeave={() => { setHover(false); setPressed(false); }}
+      onFocus={() => { setHover(true); speak(); }}
+      onBlur={() => setHover(false)}
+      onTouchStart={() => { setPressed(true); speak(); }}
+      onTouchEnd={() => setPressed(false)}
+      onMouseDown={() => setPressed(true)}
+      onMouseUp={() => setPressed(false)}
       onClick={onSelect}
       aria-label={ariaLabel}
       style={{
         appearance: "none",
         border: compact ? "5px solid white" : "6px solid white",
-        background: color,
-        borderRadius: compact ? 22 : 28,
-        padding: compact ? "16px 14px" : "32px 28px",
+        background: cardBg,
+        borderRadius: compact ? 24 : 30,
+        padding: compact ? "16px 14px 18px" : "28px 24px 24px",
         margin: 0,
         minWidth: 0,
-        minHeight: compact ? 0 : 280,
+        // Fixed minimum so all cards stay the same height even if a
+        // longer title wraps to two lines.
+        minHeight: compact ? 240 : 300,
         cursor: "pointer",
-        boxShadow: "0 10px 0 rgba(0,0,0,0.18), 0 14px 24px rgba(0,0,0,0.18)",
+        boxShadow: pressed
+          ? "0 4px 0 rgba(0,0,0,0.18), 0 6px 12px rgba(0,0,0,0.15)"
+          : hover
+            ? "0 14px 0 rgba(0,0,0,0.18), 0 22px 32px rgba(0,0,0,0.22)"
+            : "0 10px 0 rgba(0,0,0,0.18), 0 14px 24px rgba(0,0,0,0.18)",
         color: "#3a2a14",
         font: "inherit",
         textAlign: "center",
-        transition: "transform 0.12s ease, box-shadow 0.12s ease",
+        transform,
+        transition: "transform 0.18s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.18s ease",
         outlineOffset: 4,
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "flex-start",
+        // Don't allow the icon to bleed visually into the next card —
+        // a quick crop matches the rounded card edge.
+        overflow: "hidden",
+        position: "relative",
       }}
-      onMouseDown={(e) => (e.currentTarget.style.transform = "translateY(4px)")}
-      onMouseUp={(e) => (e.currentTarget.style.transform = "")}
-      onMouseLeave={(e) => (e.currentTarget.style.transform = "")}
     >
-      <div style={{ height: iconSize, marginBottom: compact ? 4 : 8, display: "flex", alignItems: "center", justifyContent: "center" }} aria-hidden>
+      <div
+        style={{
+          width: "100%",
+          height: iconSize,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          // Slight lift for the icon during hover so it pops off the card.
+          transform: hover ? "translateY(-3px) scale(1.04)" : "none",
+          transition: "transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1)",
+        }}
+        aria-hidden
+      >
         {iconUrl ? (
           <img
             src={iconUrl}
@@ -71,16 +114,49 @@ function GameCard({ emoji, iconUrl, title, subtitle, color, voiceClipId, onSelec
               width: iconSize,
               height: iconSize,
               objectFit: "contain",
-              filter: "drop-shadow(0 6px 0 rgba(0,0,0,0.18))",
+              filter: "drop-shadow(0 8px 0 rgba(0,0,0,0.14)) drop-shadow(0 4px 10px rgba(0,0,0,0.18))",
             }}
             draggable={false}
           />
         ) : (
-          <div style={{ fontSize: compact ? 72 : 96, lineHeight: 1 }}>{emoji}</div>
+          <div style={{ fontSize: compact ? 88 : 108, lineHeight: 1 }}>{emoji}</div>
         )}
       </div>
-      <div style={{ fontSize: compact ? 22 : 30, fontWeight: 900, letterSpacing: 0.5 }}>{title}</div>
-      <div style={{ fontSize: compact ? 14 : 18, fontWeight: 700, opacity: 0.85, marginTop: 4 }}>{subtitle}</div>
+      <div
+        style={{
+          // Title + subtitle share a flex column that balances the card
+          // bottom regardless of title length.
+          marginTop: compact ? 6 : 10,
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          gap: 4,
+        }}
+      >
+        <div
+          style={{
+            // clamp() keeps the title from blowing the card width when
+            // it wraps (Find the Alphabet → 2 lines on narrow phones)
+            // while still reading large on desktop.
+            fontSize: compact ? "clamp(18px, 5vw, 22px)" : 26,
+            fontWeight: 900,
+            letterSpacing: 0.4,
+            lineHeight: 1.1,
+            textShadow: "0 2px 0 rgba(255,255,255,0.4)",
+          }}
+        >
+          {title}
+        </div>
+        <div
+          style={{
+            fontSize: compact ? 13 : 16,
+            fontWeight: 700,
+            opacity: 0.78,
+          }}
+        >
+          {subtitle}
+        </div>
+      </div>
     </button>
   );
 }

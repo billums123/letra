@@ -41,8 +41,14 @@ const STYLE_FRAMING =
   "exact style of cute chubby cartoon letter characters with big " +
   "expressive eyes, tiny noodle arms, simple smiley mouths, and " +
   "soft rounded edges. Saturated friendly colours. Soft global " +
-  "illumination, subtle floor-contact shadow only. Centered subject, " +
-  "no text, no captions, no logos. Crisp clean PNG with a fully " +
+  "illumination, subtle floor-contact shadow only. " +
+  // Tight framing keeps the icon legible when displayed small (96px " +
+  // tile on phones). Anything more padded reads as a tiny subject " +
+  // floating in a square of empty space.
+  "The subject is centered and FILLS the frame edge-to-edge — at " +
+  "least 90% of the canvas occupied, almost no empty padding around " +
+  "the character, no border or vignette. Square 1:1 composition. " +
+  "No text, no captions, no logos. Crisp clean PNG with a fully " +
   "TRANSPARENT background — no solid fill, no card, no frame. " +
   "Designed for ages 3-6.";
 
