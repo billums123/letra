@@ -11,6 +11,10 @@ import { pickClearSpawn } from "../engine/world";
 import { ALPHABET } from "../audio/types";
 import { useGameStore } from "../state/store";
 
+function moveVerb(avatar: "kid" | "car"): string {
+  return avatar === "car" ? "drive" : "walk";
+}
+
 // Sound-match: voice plays a letter sound, kid walks to the matching letter.
 // Spawns a small set of choices (3 the first round, growing to 5) so a 3yo
 // doesn't have to scan a wall of glyphs.
@@ -34,6 +38,7 @@ type LetterEntry = {
 
 export function SoundMatchGame() {
   const collect = useGameStore((s) => s.collect);
+  const avatar = useGameStore((s) => s.avatar);
   const [round, setRound] = useState(0);
   const [completed, setCompleted] = useState(false);
   const [target, setTarget] = useState<string | null>(null);
@@ -208,7 +213,7 @@ export function SoundMatchGame() {
       <Scene onEngineReady={onEngineReady} />
       <HUD
         title={completed ? "Great work!" : `Round ${round + 1} of ${ROUNDS_PER_GAME}`}
-        prompt={completed ? "You matched them all!" : "Listen, then walk to the matching letter."}
+        prompt={completed ? "You matched them all!" : `Listen, then ${moveVerb(avatar)} to the matching letter.`}
         onReplayPrompt={onReplayPrompt}
       />
     </div>

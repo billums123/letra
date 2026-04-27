@@ -25,8 +25,19 @@ type LetterEntry = {
   character: ReturnType<typeof buildLetterCharacter>;
 };
 
+// Avatar-aware prompt id and verb. Walking is the default; if the kid is
+// driving the car we swap to the "drive" wording so the audio matches what
+// they're actually doing on screen.
+function alphabetPromptId(avatar: "kid" | "car"): string {
+  return avatar === "car" ? "prompt-find-alphabet-drive" : "prompt-find-alphabet";
+}
+function moveVerb(avatar: "kid" | "car"): string {
+  return avatar === "car" ? "Drive" : "Walk";
+}
+
 export function FindAlphabetGame() {
   const collect = useGameStore((s) => s.collect);
+  const avatar = useGameStore((s) => s.avatar);
   const [foundCount, setFoundCount] = useState(0);
   const [completed, setCompleted] = useState(false);
   const engineRef = useRef<Engine | null>(null);
@@ -99,7 +110,7 @@ export function FindAlphabetGame() {
       }
     };
 
-    setTimeout(() => audio.play(audio.prompt("find-alphabet")), 250);
+    setTimeout(() => audio.play(alphabetPromptId(avatar)), 250);
   };
 
   const collectLetter = (engine: Engine, entry: LetterEntry, playerPos: THREE.Vector3) => {
@@ -137,7 +148,7 @@ export function FindAlphabetGame() {
     else {
       const next = lettersRef.current[currentIndex.current];
       if (next) audio.play(audio.letterName(next.letter));
-      else audio.play(audio.prompt("find-alphabet"));
+      else audio.play(alphabetPromptId(avatar));
     }
   };
 
@@ -170,7 +181,7 @@ export function FindAlphabetGame() {
       <Scene onEngineReady={onEngineReady} />
       <HUD
         title={completed ? "Alphabet found!" : `Find: ${ALPHABET[foundCount] ?? "🎉"}`}
-        prompt={completed ? "You found the whole alphabet!" : "Walk to the next letter!"}
+        prompt={completed ? "You found the whole alphabet!" : `${moveVerb(avatar)} to the next letter!`}
         targets={targets}
         onReplayPrompt={onReplayPrompt}
       />

@@ -207,7 +207,11 @@ export function buildEntries(): AudioEntry[] {
   // Spell out "Zee" so the TTS uses the American letter name. The bare "Z"
   // glyph was getting read as "Zed" (British). The rest of the prompt sounds
   // friendly enough as plain text.
+  // Find-Alphabet has TWO walk/drive variants — game picks one based on
+  // the active avatar. Adding a new avatar later means a new clip id +
+  // npm run audio:generate-all to back-fill across every voice.
   entries.push({ id: "prompt-find-alphabet", text: "Let's find the whole alphabet! Walk to each letter, in order, from A all the way to Zee!" });
+  entries.push({ id: "prompt-find-alphabet-drive", text: "Let's drive to find the whole alphabet! Drive to each letter, in order, from A all the way to Zee!" });
   entries.push({ id: "prompt-sound-match", text: "Listen carefully. I will say a sound, and you find the letter that makes it!" });
   entries.push({ id: "prompt-sound-match-replay", text: "Listen again." });
 
