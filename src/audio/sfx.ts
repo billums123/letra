@@ -387,17 +387,71 @@ export function playFireworkLaunch() {
   }
 }
 
-// Aerial burst — a real KABOOM. Layer plan:
+// Pre-recorded burst clips (ElevenLabs). We rotate through them at
+// random so consecutive fireworks don't all sound identical. The
+// fetch + decode is lazy and async — the very first burst before the
+// buffers finish loading falls through to the procedural synth so
+// there's never silence.
+const BURST_CLIP_URLS = [
+  "/audio/sfx/firework-burst-1.mp3",
+  "/audio/sfx/firework-burst-2.ogg",
+  "/audio/sfx/firework-burst-3.ogg",
+];
+const burstBuffers: (AudioBuffer | null)[] = BURST_CLIP_URLS.map(() => null);
+let burstLoadStarted = false;
+function ensureBurstBuffers(c: AudioContext) {
+  if (burstLoadStarted) return;
+  burstLoadStarted = true;
+  for (let i = 0; i < BURST_CLIP_URLS.length; i++) {
+    void (async () => {
+      try {
+        const res = await fetch(BURST_CLIP_URLS[i]);
+        if (!res.ok) return;
+        const arr = await res.arrayBuffer();
+        burstBuffers[i] = await c.decodeAudioData(arr);
+      } catch {
+        /* swallow — procedural fallback already covers this case */
+      }
+    })();
+  }
+}
+
+// Aerial burst — uses the pre-recorded ElevenLabs clips when their
+// buffers have finished decoding; otherwise renders the procedural
+// KABOOM synth (sub-bass thump + lowpass body + mid attack + delay
+// tail + sparkle crackle) as a fallback.
+export function playFireworkBurst() {
+  const c = getCtx();
+  if (!c) return;
+  const dest = getFxBus(c);
+  ensureBurstBuffers(c);
+  const ready: AudioBuffer[] = [];
+  for (const b of burstBuffers) if (b) ready.push(b);
+  if (ready.length > 0) {
+    const buf = ready[(Math.random() * ready.length) | 0];
+    const src = c.createBufferSource();
+    src.buffer = buf;
+    // Slight pitch jitter (±2 semitones) keeps consecutive plays of
+    // the same clip from sounding mechanically identical.
+    src.playbackRate.value = 0.92 + Math.random() * 0.16;
+    const g = c.createGain();
+    g.gain.value = 0.85;
+    src.connect(g).connect(dest);
+    src.start();
+    return;
+  }
+  playProceduralBurst(c, dest);
+}
+
+// Procedural KABOOM synth. Used as the fallback when the recorded
+// buffers haven't finished decoding yet. Layer plan:
 //   1) Sub-bass sine drop (50→25 Hz) — the gut-punch "thump" you feel
 //   2) Heavily low-passed noise (180→70 Hz) — the body of the boom
 //   3) Mid-band (~350 Hz) noise smack — the bright "BOOM" attack
 //   4) Reverberant tail via feedback delay — open-sky echo
 //   5) Subtle sparkle crackle — fewer, quieter pops, only after the
 //      boom has had room to land
-export function playFireworkBurst() {
-  const c = getCtx();
-  if (!c) return;
-  const dest = getFxBus(c);
+function playProceduralBurst(c: AudioContext, dest: AudioNode) {
   const t0 = c.currentTime;
 
   // 1 — sub-bass body

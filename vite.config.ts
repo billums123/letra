@@ -71,6 +71,17 @@ export default defineConfig({
             },
           },
           {
+            // SFX clips (firework bursts etc). Same fetch() + decode
+            // path as music; covers both .mp3 and .ogg variants.
+            urlPattern: /\/audio\/sfx\/.*\.(mp3|ogg)$/,
+            handler: "CacheFirst",
+            options: {
+              cacheName: "letra-sfx",
+              expiration: { maxEntries: 30, maxAgeSeconds: 60 * 60 * 24 * 30 },
+              cacheableResponse: { statuses: [0, 200] },
+            },
+          },
+          {
             // voices.json + per-voice manifest.json — small, can refresh.
             urlPattern: /\/audio\/(voices|.*\/manifest)\.json$/,
             handler: "StaleWhileRevalidate",
