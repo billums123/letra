@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { buildAvatar, type PlayerHandles } from "./player";
 import type { AvatarKind } from "../state/store";
 import { buildWorld, type Obstacle } from "./world";
+import { getBiome } from "./biomes";
 import { readInput } from "../input/useInput";
 
 const PLAYER_RADIUS = 0.55;
@@ -50,7 +51,16 @@ export class Engine {
     this.actors.delete(actor);
   }
 
-  constructor(canvas: HTMLCanvasElement, events: EngineEvents = {}, avatar: AvatarKind = "kid") {
+  // Cleanup hook the active biome registers via applyScene — runs in
+  // dispose() so removing the engine takes the biome's lights with it.
+  private disposeBiome: (() => void) | null = null;
+
+  constructor(
+    canvas: HTMLCanvasElement,
+    events: EngineEvents = {},
+    avatar: AvatarKind = "kid",
+    biomeId: string = "meadow"
+  ) {
     this.events = events;
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -59,37 +69,19 @@ export class Engine {
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
 
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0xa8e2ff);
-    this.scene.fog = new THREE.Fog(0xa8e2ff, 60, 160);
 
     this.camera = new THREE.PerspectiveCamera(55, 1, 0.1, 500);
     this.camera.position.copy(this.cameraOffset);
     this.camera.lookAt(0, 1.2, 0);
 
-    // Lights
-    const hemi = new THREE.HemisphereLight(0xfff7d6, 0x86d36a, 0.6);
-    this.scene.add(hemi);
-
-    const sun = new THREE.DirectionalLight(0xffffff, 1.4);
-    sun.position.set(15, 25, 10);
-    sun.castShadow = true;
-    // Modest shadow map: kid-game scale doesn't need high-res shadows, and
-    // smaller maps keep the integrated GPU happy on Macs and mobile.
-    sun.shadow.mapSize.set(1024, 1024);
-    sun.shadow.camera.left = -25;
-    sun.shadow.camera.right = 25;
-    sun.shadow.camera.top = 25;
-    sun.shadow.camera.bottom = -25;
-    sun.shadow.camera.near = 1;
-    sun.shadow.camera.far = 70;
-    sun.shadow.bias = -0.0005;
-    this.scene.add(sun);
-
-    const ambient = new THREE.AmbientLight(0xffffff, 0.4);
-    this.scene.add(ambient);
+    // Biome owns sky / fog / lighting. applyScene returns a cleanup
+    // function the engine runs on dispose so swapping biomes between
+    // mounts doesn't leak lights.
+    const biome = getBiome(biomeId);
+    this.disposeBiome = biome.applyScene(this.scene);
 
     // World + player
-    const world = buildWorld();
+    const world = buildWorld(biome);
     this.scene.add(world.group);
     this.obstacles = world.obstacles;
     this.worldRadius = world.worldRadius;
@@ -208,6 +200,10 @@ export class Engine {
     // Avatars own continuous resources (e.g., the car's motor loop) —
     // give them a chance to tear down before we dispose meshes.
     this.player.dispose?.();
+    // Biomes own scene-level resources (lights, fog, background) —
+    // tear those down so consecutive mounts don't stack lights.
+    this.disposeBiome?.();
+    this.disposeBiome = null;
     this.scene.traverse((obj) => {
       const m = obj as THREE.Mesh;
       if (m.geometry) m.geometry.dispose();
