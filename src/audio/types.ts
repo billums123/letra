@@ -100,7 +100,20 @@ export const LETTER_NAME_TEXT: Record<string, string> = {
 // character — æ, ɪ, oʊ, etc.), wrap with the visible glyph as the ph fallback.
 export const LETTER_NAME_PHONEME: Record<string, string> = {
   A: "æ", // short-a as in "apple"
+  // The bare glyph for these letters got mispronounced by some voices —
+  // the multilingual model would slip into a non-English language for a
+  // beat before recovering, so we pin the standard American letter name
+  // in IPA and force the phoneme-aware flash_v2 model.
+  B: "biː",
+  C: "siː",
+  H: "eɪtʃ",
+  J: "dʒeɪ",
+  P: "piː",
+  T: "tiː",
+  U: "juː",
   V: "viː", // standard /viː/ — long-E vowel after the V
+  W: "ˈdʌbəljuː",
+  Y: "waɪ",
 };
 
 // Phonics-style letter SOUNDS. Used in the sound-match game and as the
