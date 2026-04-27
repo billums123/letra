@@ -4,6 +4,7 @@ import { audio } from "../audio/Player";
 import { StickerBook } from "./StickerBook";
 import { ALPHABET } from "../audio/types";
 import { isDev } from "../util/isDev";
+import { useIsCompact } from "../util/useIsCompact";
 
 // Picture-based main menu. Designed for ages 3-6: huge buttons, big icons,
 // audio narration on hover, no required reading. Pre-readers can navigate
@@ -22,7 +23,7 @@ type GameCardProps = {
   ariaLabel: string;
 };
 
-function GameCard({ emoji, iconUrl, title, subtitle, color, voiceClipId, onSelect, ariaLabel }: GameCardProps) {
+function GameCard({ emoji, iconUrl, title, subtitle, color, voiceClipId, onSelect, ariaLabel, compact }: GameCardProps & { compact: boolean }) {
   const lastSpoken = useRef(0);
   const speak = () => {
     // Throttle speak so a kid bouncing the cursor doesn't trigger a stutter.
@@ -31,6 +32,7 @@ function GameCard({ emoji, iconUrl, title, subtitle, color, voiceClipId, onSelec
     lastSpoken.current = now;
     audio.play(voiceClipId);
   };
+  const iconSize = compact ? 96 : 128;
   return (
     <button
       type="button"
@@ -41,15 +43,15 @@ function GameCard({ emoji, iconUrl, title, subtitle, color, voiceClipId, onSelec
       aria-label={ariaLabel}
       style={{
         appearance: "none",
-        border: "6px solid white",
+        border: compact ? "5px solid white" : "6px solid white",
         background: color,
-        borderRadius: 28,
-        padding: "32px 28px",
-        margin: 14,
-        minWidth: 240,
-        minHeight: 280,
+        borderRadius: compact ? 22 : 28,
+        padding: compact ? "16px 14px" : "32px 28px",
+        margin: 0,
+        minWidth: 0,
+        minHeight: compact ? 0 : 280,
         cursor: "pointer",
-        boxShadow: "0 12px 0 rgba(0,0,0,0.18), 0 18px 30px rgba(0,0,0,0.18)",
+        boxShadow: "0 10px 0 rgba(0,0,0,0.18), 0 14px 24px rgba(0,0,0,0.18)",
         color: "#3a2a14",
         font: "inherit",
         textAlign: "center",
@@ -60,28 +62,25 @@ function GameCard({ emoji, iconUrl, title, subtitle, color, voiceClipId, onSelec
       onMouseUp={(e) => (e.currentTarget.style.transform = "")}
       onMouseLeave={(e) => (e.currentTarget.style.transform = "")}
     >
-      <div style={{ height: 128, marginBottom: 8, display: "flex", alignItems: "center", justifyContent: "center" }} aria-hidden>
+      <div style={{ height: iconSize, marginBottom: compact ? 4 : 8, display: "flex", alignItems: "center", justifyContent: "center" }} aria-hidden>
         {iconUrl ? (
           <img
             src={iconUrl}
             alt=""
-            // Drop-shadow gives the icon some lift off the card; the
-            // PNGs are transparent so the card colour shows through
-            // around the character without a white box.
             style={{
-              width: 128,
-              height: 128,
+              width: iconSize,
+              height: iconSize,
               objectFit: "contain",
               filter: "drop-shadow(0 6px 0 rgba(0,0,0,0.18))",
             }}
             draggable={false}
           />
         ) : (
-          <div style={{ fontSize: 96, lineHeight: 1 }}>{emoji}</div>
+          <div style={{ fontSize: compact ? 72 : 96, lineHeight: 1 }}>{emoji}</div>
         )}
       </div>
-      <div style={{ fontSize: 30, fontWeight: 900, letterSpacing: 0.5 }}>{title}</div>
-      <div style={{ fontSize: 18, fontWeight: 700, opacity: 0.85, marginTop: 6 }}>{subtitle}</div>
+      <div style={{ fontSize: compact ? 22 : 30, fontWeight: 900, letterSpacing: 0.5 }}>{title}</div>
+      <div style={{ fontSize: compact ? 14 : 18, fontWeight: 700, opacity: 0.85, marginTop: 4 }}>{subtitle}</div>
     </button>
   );
 }
@@ -93,6 +92,7 @@ export function MainMenu() {
   const avatar = useGameStore((s) => s.avatar);
   const setAvatar = useGameStore((s) => s.setAvatar);
   const [showStickers, setShowStickers] = useState(false);
+  const compact = useIsCompact();
 
   // Stop any leftover voice clip if we land on the menu mid-utterance,
   // but don't auto-play a welcome line — the menu music carries the vibe.
@@ -107,33 +107,47 @@ export function MainMenu() {
         inset: 0,
         background:
           "radial-gradient(circle at 30% 20%, #ffe9a3 0%, #7ec8ff 60%, #5fa9f0 100%)",
-        display: "grid",
-        gridTemplateRows: "auto 1fr auto",
-        overflow: "hidden",
+        display: "flex",
+        flexDirection: "column",
+        // Let the menu scroll vertically when the viewport is shorter
+        // than its content (phones in portrait). Horizontal hidden so a
+        // stray card overflow can't introduce a sideways scroll bar.
+        overflowX: "hidden",
+        overflowY: "auto",
+        WebkitOverflowScrolling: "touch",
       }}
     >
-      <header style={{ padding: "28px 24px 0", textAlign: "center" }}>
+      <header style={{ padding: compact ? "16px 16px 0" : "28px 24px 0", textAlign: "center" }}>
         <h1
           style={{
             margin: 0,
-            fontSize: 84,
+            fontSize: compact ? 52 : 84,
             color: "#3a2a14",
             textShadow: "0 6px 0 rgba(255,255,255,0.6)",
             letterSpacing: 2,
+            // Reserve room on the right for the absolutely-positioned
+            // sticker badge so the title doesn't slide under it.
+            paddingRight: compact ? 64 : 0,
+            paddingLeft: compact ? (isDev() ? 64 : 0) : 0,
           }}
         >
           Letra
         </h1>
-        <p style={{ marginTop: 6, fontSize: 20, color: "#3a2a14", fontWeight: 800 }}>
+        <p style={{ marginTop: 4, fontSize: compact ? 16 : 20, color: "#3a2a14", fontWeight: 800 }}>
           Pick a game!
         </p>
       </header>
       <main
         style={{
-          display: "flex",
-          flexWrap: "wrap",
-          justifyContent: "center",
-          alignItems: "center",
+          display: "grid",
+          // auto-fit collapses to one column on phones and expands to
+          // 3 wide on a desktop without a separate breakpoint.
+          gridTemplateColumns: `repeat(auto-fit, minmax(${compact ? "240px" : "260px"}, 1fr))`,
+          gap: compact ? 12 : 18,
+          padding: compact ? "12px 14px" : "16px 24px",
+          maxWidth: 1100,
+          width: "100%",
+          margin: "0 auto",
         }}
       >
         <GameCard
@@ -145,6 +159,7 @@ export function MainMenu() {
           voiceClipId={audio.menu("spell")}
           onSelect={() => setScreen("spell-word")}
           ariaLabel="Spell the Word — find the letters that spell missing animals"
+          compact={compact}
         />
         <GameCard
           iconUrl="/icons/find-alphabet.png"
@@ -155,6 +170,7 @@ export function MainMenu() {
           voiceClipId={audio.menu("alphabet")}
           onSelect={() => setScreen("find-alphabet")}
           ariaLabel="Find the alphabet from A to Z"
+          compact={compact}
         />
         <GameCard
           iconUrl="/icons/match-sound.png"
@@ -165,45 +181,50 @@ export function MainMenu() {
           voiceClipId={audio.menu("sounds")}
           onSelect={() => setScreen("sound-match")}
           ariaLabel="Match the sound to the letter"
+          compact={compact}
         />
       </main>
 
-      <AvatarPicker avatar={avatar} setAvatar={setAvatar} />
+      <AvatarPicker avatar={avatar} setAvatar={setAvatar} compact={compact} />
       <footer
         style={{
-          padding: "12px 24px 16px",
+          padding: compact ? "10px 14px 18px" : "12px 24px 16px",
           color: "#3a2a14",
           fontSize: 14,
           opacity: 0.7,
           display: "flex",
-          justifyContent: "space-between",
+          flexWrap: "wrap",
+          justifyContent: compact ? "center" : "space-between",
           alignItems: "center",
           gap: 12,
+          // Preserve safe-area insets so the footer isn't hidden by the
+          // home-bar on iOS.
+          paddingBottom: `calc(${compact ? 18 : 16}px + env(safe-area-inset-bottom, 0px))`,
         }}
       >
-        <span>WASD / arrows / controller / touch joystick</span>
+        {!compact && <span>WASD / arrows / controller / touch joystick</span>}
         <VoicePicker audioMode={audioMode} />
       </footer>
 
       {/* Authoring tools — only mounted on localhost / dev builds, never
           shown to actual kid users. See src/util/isDev.ts. */}
       {isDev() && (
-        <div style={{ position: "absolute", top: 24, left: 24, display: "flex", gap: 8 }}>
+        <div style={{ position: "absolute", top: compact ? 12 : 24, left: compact ? 12 : 24, display: "flex", gap: 8 }}>
           <button
             type="button"
             onClick={() => setScreen("letter-test")}
             aria-label="Open the letter test page"
-            style={cornerBtn}
+            style={compact ? compactCornerBtn : cornerBtn}
           >
-            🔍 Letter test
+            {compact ? "🔍" : "🔍 Letter test"}
           </button>
           <button
             type="button"
             onClick={() => setScreen("letter-editor")}
             aria-label="Open the 3D letter editor"
-            style={cornerBtn}
+            style={compact ? compactCornerBtn : cornerBtn}
           >
-            ✏️ Editor
+            {compact ? "✏️" : "✏️ Editor"}
           </button>
         </div>
       )}
@@ -214,19 +235,19 @@ export function MainMenu() {
         aria-label={`Sticker book — ${collected.size} of ${ALPHABET.length} letters mastered`}
         style={{
           position: "absolute",
-          top: 24,
-          right: 24,
+          top: compact ? 12 : 24,
+          right: compact ? 12 : 24,
           appearance: "none",
-          border: "5px solid white",
+          border: compact ? "4px solid white" : "5px solid white",
           background: "#ff8aaa",
           color: "white",
           borderRadius: "50%",
-          width: 84,
-          height: 84,
-          fontSize: 36,
+          width: compact ? 56 : 84,
+          height: compact ? 56 : 84,
+          fontSize: compact ? 24 : 36,
           fontWeight: 900,
           cursor: "pointer",
-          boxShadow: "0 8px 0 rgba(0,0,0,0.18)",
+          boxShadow: "0 6px 0 rgba(0,0,0,0.18)",
           display: "grid",
           placeItems: "center",
         }}
@@ -235,13 +256,13 @@ export function MainMenu() {
         <span
           style={{
             position: "absolute",
-            bottom: -8,
-            right: -8,
+            bottom: -6,
+            right: -6,
             background: "#3a2a14",
             color: "white",
-            fontSize: 16,
+            fontSize: compact ? 12 : 16,
             borderRadius: 12,
-            padding: "2px 8px",
+            padding: compact ? "1px 6px" : "2px 8px",
             border: "3px solid white",
           }}
         >
@@ -258,12 +279,20 @@ export function MainMenu() {
 // than one voice has been generated. The select syncs to the store, which
 // triggers Game.tsx to swap the active voice in the AudioPlayer without
 // a full reload.
+// Custom voice picker. The native <select> on mobile pops up a tiny
+// system picker that doesn't match the app at all and is awkward to
+// hit with a thumb. This rolls its own popover: a chunky pill button
+// shows the current voice; tapping opens a vertical card of styled
+// voice chips. Closes on outside click or Escape.
 function VoicePicker({ audioMode }: { audioMode: "elevenlabs" | "speech" | "muted" }) {
   const voiceSlug = useGameStore((s) => s.voiceSlug);
   const setVoiceSlug = useGameStore((s) => s.setVoiceSlug);
-  // Subscribe to the AudioPlayer so the dropdown updates after init / setVoice.
+  // Subscribe to the AudioPlayer so the picker updates after init / setVoice.
   const [voices, setVoices] = useState(audio.voices);
   const [activeSlug, setActiveSlug] = useState<string | null>(audio.activeVoice?.slug ?? null);
+  const [open, setOpen] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+
   useEffect(() => {
     const refresh = () => {
       setVoices([...audio.voices]);
@@ -273,7 +302,26 @@ function VoicePicker({ audioMode }: { audioMode: "elevenlabs" | "speech" | "mute
     return audio.subscribe(refresh);
   }, []);
 
-  const showSelect = voices.length > 1;
+  // Dismiss on outside click + Escape so the popover behaves like every
+  // other dropdown a user has touched.
+  useEffect(() => {
+    if (!open) return;
+    const onDoc = (e: MouseEvent | TouchEvent) => {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    document.addEventListener("mousedown", onDoc);
+    document.addEventListener("touchstart", onDoc);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDoc);
+      document.removeEventListener("touchstart", onDoc);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  const canPick = voices.length > 1 && audioMode === "elevenlabs";
+  const currentSlug = voiceSlug ?? activeSlug ?? voices[0]?.slug ?? null;
   const currentName =
     audioMode === "muted"
       ? "Off"
@@ -281,32 +329,113 @@ function VoicePicker({ audioMode }: { audioMode: "elevenlabs" | "speech" | "mute
         ? "Browser"
         : audio.activeVoice?.name ?? "ElevenLabs";
 
+  // Single voice or non-ElevenLabs mode: render a static read-only pill.
+  if (!canPick) {
+    return (
+      <span style={voiceTriggerStyle(false)} aria-label={`Current voice: ${currentName}`}>
+        <span aria-hidden style={{ fontSize: 18 }}>🎤</span>
+        <span>{currentName}</span>
+      </span>
+    );
+  }
+
   return (
-    <span style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-      <span>Voice: {currentName}</span>
-      {showSelect && audioMode === "elevenlabs" && (
-        <select
-          value={voiceSlug ?? activeSlug ?? voices[0].slug}
-          onChange={(e) => setVoiceSlug(e.target.value)}
+    <div ref={rootRef} style={{ position: "relative", display: "inline-block" }}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        aria-label={`Voice: ${currentName}. Tap to change.`}
+        style={voiceTriggerStyle(open)}
+      >
+        <span aria-hidden style={{ fontSize: 18 }}>🎤</span>
+        <span>{currentName}</span>
+        <span aria-hidden style={{ fontSize: 12, opacity: 0.7, transform: open ? "rotate(180deg)" : "none", transition: "transform 0.12s ease" }}>▼</span>
+      </button>
+      {open && (
+        <div
+          role="listbox"
           aria-label="Choose voice"
           style={{
-            padding: "4px 6px",
-            fontSize: 12,
-            fontWeight: 700,
-            border: "2px solid white",
-            borderRadius: 8,
-            background: "rgba(255,255,255,0.85)",
-            color: "#3a2a14",
-            cursor: "pointer",
+            position: "absolute",
+            // Anchor above the button so the popover can't extend below
+            // the bottom of the menu (where the iOS home-bar lives).
+            bottom: "calc(100% + 8px)",
+            right: 0,
+            display: "flex",
+            flexDirection: "column",
+            gap: 6,
+            padding: 8,
+            minWidth: 180,
+            background: "white",
+            border: "3px solid #3a2a14",
+            borderRadius: 18,
+            boxShadow: "0 12px 24px rgba(0,0,0,0.22), 0 6px 0 rgba(0,0,0,0.15)",
+            zIndex: 30,
           }}
         >
-          {voices.map((v) => (
-            <option key={v.slug} value={v.slug}>{v.name}</option>
-          ))}
-        </select>
+          {voices.map((v) => {
+            const active = v.slug === currentSlug;
+            return (
+              <button
+                key={v.slug}
+                type="button"
+                role="option"
+                aria-selected={active}
+                onClick={() => {
+                  setVoiceSlug(v.slug);
+                  setOpen(false);
+                }}
+                style={{
+                  appearance: "none",
+                  border: active ? "3px solid #3a2a14" : "3px solid transparent",
+                  background: active ? "#ffd56b" : "rgba(0,0,0,0.04)",
+                  color: "#3a2a14",
+                  borderRadius: 14,
+                  padding: "10px 14px",
+                  fontSize: 16,
+                  fontWeight: 800,
+                  cursor: "pointer",
+                  textAlign: "left",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 10,
+                  // Big enough touch target — Apple HIG says 44pt minimum,
+                  // and a 3-year-old's thumb is even less precise.
+                  minHeight: 44,
+                }}
+              >
+                <span aria-hidden style={{ fontSize: 18 }}>{active ? "🎙️" : "🎤"}</span>
+                <span style={{ flex: 1 }}>{v.name}</span>
+                {active && <span aria-hidden style={{ fontSize: 16 }}>✓</span>}
+              </button>
+            );
+          })}
+        </div>
       )}
-    </span>
+    </div>
   );
+}
+
+// Pill-button styling shared between the open / read-only states.
+function voiceTriggerStyle(open: boolean): React.CSSProperties {
+  return {
+    appearance: "none",
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 8,
+    border: open ? "3px solid #3a2a14" : "3px solid white",
+    background: open ? "#ffd56b" : "rgba(255,255,255,0.85)",
+    color: "#3a2a14",
+    borderRadius: 999,
+    padding: "8px 14px",
+    fontSize: 14,
+    fontWeight: 800,
+    cursor: "pointer",
+    boxShadow: "0 4px 0 rgba(0,0,0,0.12)",
+    minHeight: 40,
+  };
 }
 
 type AvatarOption = { kind: "kid" | "car"; label: string; emoji: string; color: string };
@@ -319,23 +448,41 @@ const AVATAR_OPTIONS: AvatarOption[] = [
 // can switch what they drive without having to leave the menu screen.
 // The active option gets a thicker ring + slight pop. Voiceover speaks
 // the option name when hovered/touched (helps non-readers).
+//
+// On phones we drop the absolute positioning and put the picker in
+// document flow above the footer — that prevents it from sitting on
+// top of the third game card on tall narrow viewports.
 function AvatarPicker({
   avatar,
   setAvatar,
+  compact,
 }: {
   avatar: "kid" | "car";
   setAvatar: (a: "kid" | "car") => void;
+  compact: boolean;
 }) {
   return (
     <div
-      style={{
-        position: "absolute",
-        bottom: 24,
-        left: 24,
-        display: "flex",
-        gap: 10,
-        zIndex: 8,
-      }}
+      style={
+        compact
+          ? {
+              display: "flex",
+              gap: 10,
+              alignItems: "center",
+              justifyContent: "center",
+              padding: "12px 14px 0",
+              flexWrap: "wrap",
+              zIndex: 8,
+            }
+          : {
+              position: "absolute",
+              bottom: 24,
+              left: 24,
+              display: "flex",
+              gap: 10,
+              zIndex: 8,
+            }
+      }
       aria-label="Pick your character"
     >
       <span
@@ -400,4 +547,18 @@ const cornerBtn: React.CSSProperties = {
   fontWeight: 800,
   cursor: "pointer",
   boxShadow: "0 4px 0 rgba(0,0,0,0.12)",
+};
+
+// Compact icon-only variant for the dev tools on phone — same affordance,
+// barely-there footprint so we don't crowd the title.
+const compactCornerBtn: React.CSSProperties = {
+  ...cornerBtn,
+  padding: 0,
+  width: 40,
+  height: 40,
+  fontSize: 18,
+  borderRadius: 12,
+  borderWidth: 3,
+  display: "grid",
+  placeItems: "center",
 };

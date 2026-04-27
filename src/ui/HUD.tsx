@@ -1,9 +1,16 @@
 import { useGameStore } from "../state/store";
 import { audio } from "../audio/Player";
+import { useIsCompact } from "../util/useIsCompact";
 
 // In-game heads-up display: title bar, prompt text, back button, replay button.
 // Pre-K kids can't read complicated UI, so we keep buttons huge with universal
 // icons (◀ Home, 🔁 Replay).
+
+// Mirrors the touch check in VirtualJoystick.tsx — used to know whether
+// to reserve room in the bottom-left for the on-screen joystick.
+const IS_TOUCH_DEVICE =
+  typeof window !== "undefined" &&
+  ("ontouchstart" in window || navigator.maxTouchPoints > 0);
 
 type HUDProps = {
   title?: string;
@@ -17,6 +24,20 @@ type HUDProps = {
 
 export function HUD({ title, prompt, targets, onReplayPrompt }: HUDProps) {
   const goToMenu = useGameStore((s) => s.goToMenu);
+  const compact = useIsCompact();
+
+  const buttonStyle: React.CSSProperties = {
+    pointerEvents: "auto",
+    border: compact ? "3px solid white" : "4px solid white",
+    color: "white",
+    borderRadius: compact ? 16 : 20,
+    padding: compact ? "8px 12px" : "10px 18px",
+    fontSize: compact ? 16 : 22,
+    fontWeight: 900,
+    cursor: "pointer",
+    boxShadow: "0 6px 0 rgba(0,0,0,0.18)",
+    whiteSpace: "nowrap",
+  };
 
   return (
     <div
@@ -34,8 +55,10 @@ export function HUD({ title, prompt, targets, onReplayPrompt }: HUDProps) {
           display: "flex",
           justifyContent: "space-between",
           alignItems: "center",
-          padding: 16,
-          gap: 12,
+          padding: compact ? 10 : 16,
+          gap: compact ? 6 : 12,
+          // Stay clear of the iOS notch / status bar.
+          paddingTop: `calc(${compact ? 10 : 16}px + env(safe-area-inset-top, 0px))`,
         }}
       >
         <button
@@ -44,32 +67,28 @@ export function HUD({ title, prompt, targets, onReplayPrompt }: HUDProps) {
             audio.stop();
             goToMenu();
           }}
-          style={{
-            pointerEvents: "auto",
-            border: "4px solid white",
-            background: "#ff8c4a",
-            color: "white",
-            borderRadius: 20,
-            padding: "10px 18px",
-            fontSize: 22,
-            fontWeight: 900,
-            cursor: "pointer",
-            boxShadow: "0 6px 0 rgba(0,0,0,0.18)",
-          }}
+          style={{ ...buttonStyle, background: "#ff8c4a" }}
           aria-label="Back to main menu"
         >
-          ◀ Home
+          ◀ {compact ? "" : "Home"}
         </button>
         {title && (
           <div
             style={{
               background: "rgba(255,255,255,0.9)",
-              borderRadius: 18,
-              padding: "8px 18px",
-              fontSize: 22,
+              borderRadius: compact ? 14 : 18,
+              padding: compact ? "6px 12px" : "8px 18px",
+              fontSize: compact ? 16 : 22,
               fontWeight: 900,
               color: "#3a2a14",
               boxShadow: "0 4px 0 rgba(0,0,0,0.1)",
+              minWidth: 0,
+              flex: "0 1 auto",
+              textAlign: "center",
+              // Truncate long titles instead of wrapping when room is tight.
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
             }}
           >
             {title}
@@ -82,21 +101,10 @@ export function HUD({ title, prompt, targets, onReplayPrompt }: HUDProps) {
               audio.stop();
               onReplayPrompt();
             }}
-            style={{
-              pointerEvents: "auto",
-              border: "4px solid white",
-              background: "#46c2cb",
-              color: "white",
-              borderRadius: 20,
-              padding: "10px 18px",
-              fontSize: 22,
-              fontWeight: 900,
-              cursor: "pointer",
-              boxShadow: "0 6px 0 rgba(0,0,0,0.18)",
-            }}
+            style={{ ...buttonStyle, background: "#46c2cb" }}
             aria-label="Replay the prompt"
           >
-            🔁 Hear it
+            🔁{compact ? "" : " Hear it"}
           </button>
         )}
       </div>
@@ -108,19 +116,27 @@ export function HUD({ title, prompt, targets, onReplayPrompt }: HUDProps) {
           display: "flex",
           flexDirection: "column",
           alignItems: "center",
-          gap: 12,
-          padding: 16,
+          gap: compact ? 8 : 12,
+          padding: compact ? "8px 12px" : 16,
+          // Keep the bottom HUD clear of the iOS home-bar.
+          paddingBottom: `calc(${compact ? 8 : 16}px + env(safe-area-inset-bottom, 0px))`,
+          // On phones the virtual joystick sits in the bottom-left
+          // corner (220×220) — leave room so it doesn't hide the
+          // alphabet progress bar. On non-touch devices there's no
+          // joystick, so the bar can stay centred.
+          marginLeft: compact && IS_TOUCH_DEVICE ? 200 : 0,
         }}
       >
         {targets && targets.length > 0 && (
           <div
             style={{
               display: "flex",
-              gap: 12,
-              padding: "10px 18px",
+              gap: compact ? "clamp(2px, 1.2vw, 8px)" : 12,
+              padding: compact ? "6px 12px" : "10px 18px",
               background: "rgba(255,255,255,0.9)",
-              borderRadius: 18,
+              borderRadius: compact ? 14 : 18,
               boxShadow: "0 4px 0 rgba(0,0,0,0.1)",
+              maxWidth: compact && IS_TOUCH_DEVICE ? "calc(100vw - 220px)" : "calc(100vw - 24px)",
             }}
             aria-label={`Letters: ${targets.map((t) => `${t.letter}${t.found ? " found" : ""}`).join(", ")}`}
           >
@@ -130,7 +146,10 @@ export function HUD({ title, prompt, targets, onReplayPrompt }: HUDProps) {
                 <span
                   key={i}
                   style={{
-                    fontSize: 36,
+                    // Scales the alphabet progress letters between roughly
+                    // 18px (small phones) and 36px (desktop). Keeps the
+                    // 10-letter bar from overflowing on narrow viewports.
+                    fontSize: compact ? "clamp(18px, 4.4vw, 28px)" : 36,
                     fontWeight: 900,
                     color: t.found ? "#9bdc4a" : next ? "#ff5e7e" : "#3a2a14",
                     textShadow: t.found ? "0 0 12px rgba(155,220,74,0.7)" : "none",
@@ -146,13 +165,13 @@ export function HUD({ title, prompt, targets, onReplayPrompt }: HUDProps) {
         {prompt && (
           <div
             style={{
-              padding: "10px 16px",
+              padding: compact ? "8px 12px" : "10px 16px",
               background: "rgba(0,0,0,0.55)",
               color: "white",
               borderRadius: 14,
-              fontSize: 18,
+              fontSize: compact ? 14 : 18,
               fontWeight: 700,
-              maxWidth: "70%",
+              maxWidth: compact && IS_TOUCH_DEVICE ? "calc(100vw - 220px)" : compact ? "calc(100vw - 24px)" : "70%",
               textAlign: "center",
             }}
           >
