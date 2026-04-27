@@ -399,10 +399,10 @@ export function FindAlphabetGame() {
     <div style={{ position: "absolute", inset: 0 }}>
       <Scene onEngineReady={onEngineReady} />
       <HUD
-        title={completed ? "🎉 Dance party!" : `Find: ${ALPHABET[foundCount] ?? "🎉"}`}
-        prompt={completed ? "You found the whole alphabet!" : `${moveVerb(avatar)} to the next letter!`}
-        targets={targets}
-        onReplayPrompt={onReplayPrompt}
+        title={completed ? undefined : `Find: ${ALPHABET[foundCount] ?? "🎉"}`}
+        prompt={completed ? undefined : `${moveVerb(avatar)} to the next letter!`}
+        targets={completed ? undefined : targets}
+        onReplayPrompt={completed ? undefined : onReplayPrompt}
       />
     </div>
   );
