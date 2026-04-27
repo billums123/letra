@@ -1,6 +1,8 @@
 import * as THREE from "three";
 import type { Biome, BiomeContext } from "./types";
 import { findOpenSpot, freshSeed, mulberry32 } from "../world";
+import { type AlienGeometry, DEFAULT_ALIEN_GEOMETRY, loadAlienGeometry } from "./alienConfig";
+import { playAlienWave } from "../../audio/sfx";
 
 // Lunar surface biome. Cratered gray ground, deep starry sky, a big
 // blue Earth hanging in the distance, scattered moon rocks + a
@@ -345,7 +347,10 @@ function buildProps(ctx: BiomeContext): void {
   // Friendly cartoon aliens scattered through the play zone. They
   // wander around their starting position at a stroll, and wave when
   // the player drives close. No collision pushed so the kid can
-  // drive right through; the wave is the gameplay reaction.
+  // drive right through; the wave is the gameplay reaction. Geometry
+  // is loaded from localStorage via loadAlienGeometry so AlienEditor
+  // tweaks take effect on the next biome mount.
+  const alienGeometry = loadAlienGeometry();
   const alienRand = mulberry32(freshSeed());
   const ALIEN_COUNT = 6;
   for (let i = 0; i < ALIEN_COUNT; i++) {
@@ -359,7 +364,7 @@ function buildProps(ctx: BiomeContext): void {
     });
     if (!spot) continue;
     const hue = alienRand();
-    const alien = makeAlien(hue, spot.x, spot.z, getPlayerPosition, sampleGround);
+    const alien = makeAlien(hue, spot.x, spot.z, getPlayerPosition, sampleGround, alienGeometry);
     group.add(alien.group);
     tick.push(alien.tick);
   }
@@ -461,26 +466,26 @@ function makeCraterRimDebris(
 // one arm for a few seconds, then resumes its wander. No collision
 // (no obstacle pushed) so the kid can drive right through; the wave
 // is the gameplay reaction.
-function makeAlien(
+// Exported so the AlienEditor can build its preview from the same
+// factory the moon biome uses.
+export function makeAlien(
   hue: number,
   homeX: number,
   homeZ: number,
   getPlayerPosition: () => THREE.Vector3 | null,
-  sampleGround: (x: number, z: number) => number
+  sampleGround: (x: number, z: number) => number,
+  geometry: AlienGeometry = DEFAULT_ALIEN_GEOMETRY
 ): { group: THREE.Group; tick: (dt: number, t: number) => void } {
+  const G = geometry;
   const group = new THREE.Group();
   group.position.set(homeX, sampleGround(homeX, homeZ), homeZ);
 
-  // Soft contact shadow under the alien — flat dark disc that anchors
-  // it to the ground. Lives in the outer group (not the bobbing
-  // body sub-group below) so it stays put while the alien breathes
-  // above it.
   const shadow = new THREE.Mesh(
-    new THREE.CircleGeometry(0.45, 24),
+    new THREE.CircleGeometry(G.shadowRadius, 24),
     new THREE.MeshBasicMaterial({
       color: 0x000000,
       transparent: true,
-      opacity: 0.25,
+      opacity: G.shadowOpacity,
       depthWrite: false,
     })
   );
@@ -512,30 +517,27 @@ function makeAlien(
     emissive: headColor.clone().multiplyScalar(0.2),
     emissiveIntensity: 0.45,
   });
-  const body = new THREE.Mesh(new THREE.SphereGeometry(0.5, 20, 16), bodyMat);
-  body.scale.set(1, 1.05, 1);
-  body.position.y = 0.5;
+  const body = new THREE.Mesh(new THREE.SphereGeometry(G.bodyRadius, 20, 16), bodyMat);
+  body.scale.set(1, G.bodyScaleY, 1);
+  body.position.y = G.bodyY;
   body.castShadow = true;
   body.receiveShadow = true;
   bob.add(body);
 
-  // Lighter belly inset.
   const bellyMat = new THREE.MeshStandardMaterial({
     color: bodyColor.clone().lerp(new THREE.Color(0xffffff), 0.5),
     roughness: 0.7,
   });
-  const belly = new THREE.Mesh(new THREE.SphereGeometry(0.3, 14, 10), bellyMat);
-  belly.position.set(0, 0.42, 0.3);
+  const belly = new THREE.Mesh(new THREE.SphereGeometry(G.bellyRadius, 14, 10), bellyMat);
+  belly.position.set(0, G.bellyY, G.bellyZ);
   bob.add(belly);
 
-  // ── Big oversized head.
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.46, 20, 16), headMat);
-  head.position.y = 1.05;
+  const head = new THREE.Mesh(new THREE.SphereGeometry(G.headRadius, 20, 16), headMat);
+  head.position.y = G.headY;
   head.castShadow = true;
   head.receiveShadow = true;
   bob.add(head);
 
-  // Bigger, brighter cheek blushes.
   const blushMat = new THREE.MeshBasicMaterial({
     color: 0xff7faa,
     transparent: true,
@@ -543,9 +545,9 @@ function makeAlien(
     depthWrite: false,
   });
   for (const side of [-1, 1] as const) {
-    const blush = new THREE.Mesh(new THREE.CircleGeometry(0.13, 16), blushMat);
-    blush.position.set(side * 0.28, 0.92, 0.33);
-    blush.lookAt(side * 0.28, 0.92, 1);
+    const blush = new THREE.Mesh(new THREE.CircleGeometry(G.cheekRadius, 16), blushMat);
+    blush.position.set(side * G.cheekX, G.cheekY, G.cheekZ);
+    blush.lookAt(side * G.cheekX, G.cheekY, 1);
     bob.add(blush);
   }
 
@@ -559,26 +561,30 @@ function makeAlien(
   const stalkPivots: THREE.Group[] = [];
   for (const side of [-1, 1] as const) {
     const pivot = new THREE.Group();
-    pivot.position.set(side * 0.16, 1.32, 0.06);
+    pivot.position.set(side * G.eyeStalkX, G.eyeStalkY, G.eyeStalkZ);
     bob.add(pivot);
     stalkPivots.push(pivot);
 
-    const stalk = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.05, 0.18, 8), stalkMat);
-    stalk.position.y = 0.09;
+    const stalk = new THREE.Mesh(
+      new THREE.CylinderGeometry(G.eyeStalkRadius, G.eyeStalkRadius * 1.1, G.eyeStalkLength, 8),
+      stalkMat
+    );
+    stalk.position.y = G.eyeStalkLength / 2;
     stalk.castShadow = true;
     pivot.add(stalk);
 
-    const eyeball = new THREE.Mesh(new THREE.SphereGeometry(0.18, 14, 12), eyeWhiteMat);
-    eyeball.position.y = 0.3;
+    const eyeballY = G.eyeStalkLength + G.eyeballRadius * 0.65;
+    const eyeball = new THREE.Mesh(new THREE.SphereGeometry(G.eyeballRadius, 14, 12), eyeWhiteMat);
+    eyeball.position.y = eyeballY;
     eyeball.castShadow = true;
     pivot.add(eyeball);
 
-    const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.09, 10, 10), pupilMat);
-    pupil.position.set(0, 0.3, 0.115);
+    const pupil = new THREE.Mesh(new THREE.SphereGeometry(G.pupilRadius, 10, 10), pupilMat);
+    pupil.position.set(0, eyeballY, G.pupilZ);
     pivot.add(pupil);
 
-    const shine = new THREE.Mesh(new THREE.SphereGeometry(0.03, 6, 6), shineMat);
-    shine.position.set(-0.05, 0.34, 0.16);
+    const shine = new THREE.Mesh(new THREE.SphereGeometry(G.shineRadius, 6, 6), shineMat);
+    shine.position.set(side * G.shineX * -1, eyeballY + G.shineY - 0.3, G.shineZ);
     pivot.add(shine);
   }
 
@@ -593,15 +599,18 @@ function makeAlien(
   const antennaPivots: THREE.Group[] = [];
   for (const side of [-1, 1] as const) {
     const pivot = new THREE.Group();
-    pivot.position.set(side * 0.24, 1.4, -0.08);
-    pivot.rotation.z = -side * 0.3;
+    pivot.position.set(side * G.antennaX, G.antennaY, G.antennaZ);
+    pivot.rotation.z = -side * G.antennaRestTilt;
     bob.add(pivot);
     antennaPivots.push(pivot);
-    const wire = new THREE.Mesh(new THREE.CylinderGeometry(0.018, 0.025, 0.32, 6), antennaMat);
-    wire.position.y = 0.16;
+    const wire = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.018, 0.025, G.antennaLength, 6),
+      antennaMat
+    );
+    wire.position.y = G.antennaLength / 2;
     pivot.add(wire);
-    const tip = new THREE.Mesh(new THREE.SphereGeometry(0.07, 10, 10), antennaTipMat);
-    tip.position.y = 0.36;
+    const tip = new THREE.Mesh(new THREE.SphereGeometry(G.antennaTipRadius, 10, 10), antennaTipMat);
+    tip.position.y = G.antennaLength + G.antennaTipRadius * 0.5;
     pivot.add(tip);
   }
 
@@ -610,21 +619,19 @@ function makeAlien(
   // belly silhouette.
   const mouthMat = new THREE.MeshStandardMaterial({ color: 0x1f1428, roughness: 0.55 });
   const mouth = new THREE.Mesh(
-    new THREE.TorusGeometry(0.16, 0.03, 8, 18, Math.PI),
+    new THREE.TorusGeometry(G.mouthRadius, G.mouthThickness, 8, 18, Math.PI),
     mouthMat
   );
   mouth.rotation.x = Math.PI / 2;
   mouth.rotation.z = Math.PI; // flip so the curve smiles
-  mouth.position.set(0, 0.9, 0.42);
+  mouth.position.set(0, G.mouthY, G.mouthZ);
   bob.add(mouth);
-  // Tiny tongue blob inside the smile so the mouth feels open and
-  // friendly rather than flat.
   const tongue = new THREE.Mesh(
-    new THREE.SphereGeometry(0.07, 10, 8),
+    new THREE.SphereGeometry(G.tongueRadius, 10, 8),
     new THREE.MeshStandardMaterial({ color: 0xff6f9c, roughness: 0.6 })
   );
   tongue.scale.set(1, 0.45, 0.6);
-  tongue.position.set(0, 0.83, 0.45);
+  tongue.position.set(0, G.tongueY, G.tongueZ);
   bob.add(tongue);
 
   // ── Arms — short cylinder with a sphere hand at each end. Pivot
@@ -633,32 +640,30 @@ function makeAlien(
   const armMat = new THREE.MeshStandardMaterial({ color: bodyColor.clone().multiplyScalar(0.85), roughness: 0.6 });
   const handMat = new THREE.MeshStandardMaterial({ color: bodyColor.clone().lerp(new THREE.Color(0xffffff), 0.2), roughness: 0.55 });
   const armPivots: THREE.Group[] = [];
-  const armRest = [
-    { x: -0.45, y: 0.7, z: 0, restRot: 0.25 },
-    { x: 0.45, y: 0.7, z: 0, restRot: -0.25 },
-  ];
-  for (const a of armRest) {
+  for (const side of [-1, 1] as const) {
     const pivot = new THREE.Group();
-    pivot.position.set(a.x, a.y, a.z);
-    pivot.rotation.z = a.restRot;
+    pivot.position.set(side * G.armPivotX, G.armPivotY, 0);
+    pivot.rotation.z = side * G.armRestTilt * -1;
     bob.add(pivot);
     armPivots.push(pivot);
-    const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.06, 0.32, 8), armMat);
-    arm.position.y = -0.16;
+    const arm = new THREE.Mesh(
+      new THREE.CylinderGeometry(G.armRadiusTop, G.armRadiusBottom, G.armLength, 8),
+      armMat
+    );
+    arm.position.y = -G.armLength / 2;
     arm.castShadow = true;
     pivot.add(arm);
-    const hand = new THREE.Mesh(new THREE.SphereGeometry(0.11, 12, 10), handMat);
-    hand.position.y = -0.34;
+    const hand = new THREE.Mesh(new THREE.SphereGeometry(G.handRadius, 12, 10), handMat);
+    hand.position.y = -G.armLength - G.handRadius * 0.6;
     hand.castShadow = true;
     pivot.add(hand);
   }
 
-  // ── Stubby feet.
   const footMat = new THREE.MeshStandardMaterial({ color: bodyColor.clone().multiplyScalar(0.6), roughness: 0.7 });
   for (const side of [-1, 1] as const) {
-    const foot = new THREE.Mesh(new THREE.SphereGeometry(0.13, 12, 8), footMat);
-    foot.scale.set(1, 0.4, 1.2);
-    foot.position.set(side * 0.2, 0.06, 0.02);
+    const foot = new THREE.Mesh(new THREE.SphereGeometry(G.footRadius, 12, 8), footMat);
+    foot.scale.set(G.footScaleX, G.footScaleY, G.footScaleZ);
+    foot.position.set(side * G.footX, G.footY, G.footZ);
     foot.castShadow = true;
     bob.add(foot);
   }
@@ -714,6 +719,9 @@ function makeAlien(
           const targetYaw = Math.atan2(dx, dz);
           facing = targetYaw;
           group.rotation.y = facing;
+          // Cute alien greeting — pre-recorded clip if loaded, else
+          // a procedural triangle chirp. See sfx.ts.
+          playAlienWave();
         }
       }
 

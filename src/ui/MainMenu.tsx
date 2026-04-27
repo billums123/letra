@@ -310,6 +310,14 @@ export function MainMenu() {
           >
             {compact ? "✏️" : "✏️ Editor"}
           </button>
+          <button
+            type="button"
+            onClick={() => setScreen("alien-editor")}
+            aria-label="Open the alien editor"
+            style={compact ? compactCornerBtn : cornerBtn}
+          >
+            {compact ? "👽" : "👽 Alien"}
+          </button>
         </div>
       )}
 

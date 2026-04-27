@@ -57,6 +57,56 @@ const SFX: Spec[] = [
     durationSeconds: 1.6,
     promptInfluence: 0.4,
   },
+  // Five cute alien greeting sounds. Triggered when the player runs
+  // into a moon-biome alien and it waves; runtime picks one at
+  // random. Each one has its own personality so consecutive bumps
+  // don't feel repetitive.
+  {
+    id: "alien-wave-1",
+    prompt:
+      "Cute friendly cartoon alien greeting noise. A short happy " +
+      "'boop bee-doo!' chirp with a rising playful pitch. Bubbly, " +
+      "warm, kid-friendly. No words, no scary growl, no music.",
+    durationSeconds: 0.9,
+    promptInfluence: 0.45,
+  },
+  {
+    id: "alien-wave-2",
+    prompt:
+      "Cute alien hello sound — a soft warbling 'wah-doo-wee' " +
+      "warble, like a small creature waving and saying hi. Bright, " +
+      "friendly, slightly synthy. No words, no music, kid-safe.",
+    durationSeconds: 1.0,
+    promptInfluence: 0.45,
+  },
+  {
+    id: "alien-wave-3",
+    prompt:
+      "Cute happy alien giggle. A soft chirpy bubbly laugh, like a " +
+      "tiny extraterrestrial creature giggling at meeting a friend. " +
+      "Bright, warm, cartoony, kid-friendly. No words, no music.",
+    durationSeconds: 1.0,
+    promptInfluence: 0.45,
+  },
+  {
+    id: "alien-wave-4",
+    prompt:
+      "Cute alien greeting beep — a short cheerful 'bleep-blorp!' " +
+      "two-note chirp, descending then rising. Bouncy, friendly, " +
+      "synth-toy character. No words, no scary tones, no music.",
+    durationSeconds: 0.8,
+    promptInfluence: 0.45,
+  },
+  {
+    id: "alien-wave-5",
+    prompt:
+      "Cute alien excited squeak. A bright bubbly 'boi-oing!' " +
+      "rising squeal, like a happy little space creature surprised " +
+      "to see you. Cartoony, kid-friendly, warm and playful. No " +
+      "words, no music, no scary sounds.",
+    durationSeconds: 0.9,
+    promptInfluence: 0.45,
+  },
 ];
 
 async function exists(p: string): Promise<boolean> {

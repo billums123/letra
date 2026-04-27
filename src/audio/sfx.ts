@@ -629,6 +629,89 @@ function playProceduralBurst(c: AudioContext, dest: AudioNode) {
   }
 }
 
+// ─── Alien wave ──────────────────────────────────────────────────────
+// Cute chirpy "hi!" sound when a moon-biome alien waves at the player.
+// Prefers pre-recorded MP3 / OGG clips at /audio/sfx/alien-wave-{1..5}
+// (random rotation + pitch jitter). Falls back to a procedural triangle-
+// wave chirp synth when no clips are loaded yet — covers the case where
+// the ElevenLabs Sound Effects permission isn't enabled and we haven't
+// dropped in user-supplied recordings.
+const ALIEN_WAVE_URLS = [
+  "/audio/sfx/alien-wave-1.mp3",
+  "/audio/sfx/alien-wave-2.mp3",
+  "/audio/sfx/alien-wave-3.mp3",
+  "/audio/sfx/alien-wave-4.mp3",
+  "/audio/sfx/alien-wave-5.mp3",
+];
+const alienWaveBuffers: (AudioBuffer | null)[] = ALIEN_WAVE_URLS.map(() => null);
+let alienWaveLoadStarted = false;
+function ensureAlienWaveBuffers(c: AudioContext) {
+  if (alienWaveLoadStarted) return;
+  alienWaveLoadStarted = true;
+  for (let i = 0; i < ALIEN_WAVE_URLS.length; i++) {
+    void (async () => {
+      try {
+        const res = await fetch(ALIEN_WAVE_URLS[i]);
+        if (!res.ok) return;
+        const arr = await res.arrayBuffer();
+        alienWaveBuffers[i] = await c.decodeAudioData(arr);
+      } catch {
+        /* swallow — procedural fallback already covers this case */
+      }
+    })();
+  }
+}
+
+export function playAlienWave() {
+  const c = getCtx();
+  if (!c) return;
+  const dest = getFxBus(c);
+  ensureAlienWaveBuffers(c);
+  const ready: AudioBuffer[] = [];
+  for (const b of alienWaveBuffers) if (b) ready.push(b);
+  if (ready.length > 0) {
+    const buf = ready[(Math.random() * ready.length) | 0];
+    const src = c.createBufferSource();
+    src.buffer = buf;
+    // Pitch jitter so consecutive plays of the same clip don't feel
+    // mechanically identical (±2 semitones).
+    src.playbackRate.value = 0.92 + Math.random() * 0.16;
+    const g = c.createGain();
+    g.gain.value = 0.7;
+    src.connect(g).connect(dest);
+    src.start();
+    return;
+  }
+  playProceduralAlienWave(c, dest);
+}
+
+// Procedural fallback — 2-3 short triangle chirps with playful pitch
+// sweeps. Reads as a cute synth-creature noise, friendlier than any
+// tonal arpeggio. Each call randomizes the base freq + sweep
+// directions so consecutive aliens don't sound identical.
+function playProceduralAlienWave(c: AudioContext, dest: AudioNode) {
+  const t0 = c.currentTime;
+  const baseFreq = 500 + Math.random() * 300;
+  const noteCount = 2 + Math.floor(Math.random() * 2);
+  for (let i = 0; i < noteCount; i++) {
+    const start = t0 + i * 0.13;
+    const dur = 0.14 + Math.random() * 0.08;
+    const f1 = baseFreq * (0.7 + Math.random() * 0.7);
+    const f2 = f1 * (0.85 + Math.random() * 0.55);
+    const osc = c.createOscillator();
+    osc.type = "triangle";
+    osc.frequency.setValueAtTime(f1, start);
+    osc.frequency.exponentialRampToValueAtTime(f2, start + dur);
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.0001, start);
+    g.gain.exponentialRampToValueAtTime(0.14, start + 0.015);
+    g.gain.exponentialRampToValueAtTime(0.0001, start + dur);
+    osc.connect(g).connect(dest);
+    osc.start(start);
+    osc.stop(start + dur + 0.05);
+  }
+}
+
 // Bigger flourish for end-of-word / end-of-round. Octave jump at the end.
 export function playWoo() {
   tone(N.G4, 0, 0.16);
