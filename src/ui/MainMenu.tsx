@@ -248,17 +248,23 @@ export function MainMenu() {
           ariaLabel="Find the alphabet from A to Z"
           compact={compact}
         />
-        <GameCard
-          iconUrl="/icons/match-sound.png"
-          emoji="👂"
-          title="Match the Sound"
-          subtitle="Hear it, find it"
-          color="#ff8aaa"
-          voiceClipId={audio.menu("sounds")}
-          onSelect={() => setScreen("sound-match")}
-          ariaLabel="Match the sound to the letter"
-          compact={compact}
-        />
+        {/* Match the Sound is dev-gated for now while we keep iterating
+            on the audio match heuristics — kid users only see Spell
+            the Word and Find the Alphabet. Drop the isDev() wrapper to
+            re-enable it. */}
+        {isDev() && (
+          <GameCard
+            iconUrl="/icons/match-sound.png"
+            emoji="👂"
+            title="Match the Sound"
+            subtitle="Hear it, find it"
+            color="#ff8aaa"
+            voiceClipId={audio.menu("sounds")}
+            onSelect={() => setScreen("sound-match")}
+            ariaLabel="Match the sound to the letter"
+            compact={compact}
+          />
+        )}
       </main>
 
       <AvatarPicker avatar={avatar} setAvatar={setAvatar} compact={compact} />

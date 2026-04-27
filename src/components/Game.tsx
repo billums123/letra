@@ -47,7 +47,7 @@ export function Game() {
   // If a non-dev visitor lands on a dev-only screen (e.g. via leftover
   // localStorage state or a stale link), bounce them back to the main menu.
   useEffect(() => {
-    if (!dev && (screen === "letter-test" || screen === "letter-editor")) {
+    if (!dev && (screen === "letter-test" || screen === "letter-editor" || screen === "sound-match")) {
       goToMenu();
     }
   }, [dev, screen, goToMenu]);
