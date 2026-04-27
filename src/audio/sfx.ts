@@ -3,18 +3,7 @@
 // recorded asset (and where the round-trip to fetch one would be
 // noticeable).
 
-let ctx: AudioContext | null = null;
-
-function getCtx(): AudioContext | null {
-  if (typeof window === "undefined") return null;
-  if (!ctx) {
-    const Ctor = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-    if (!Ctor) return null;
-    ctx = new Ctor();
-  }
-  if (ctx.state === "suspended") void ctx.resume();
-  return ctx;
-}
+import { getMusicCtx as getCtx } from "./audioCtx";
 
 // Lightweight tone helper. `wave` defaults to triangle which sounds friendly
 // (no harsh harmonics like sawtooth, no buzz like square).
@@ -276,20 +265,9 @@ export const motor = makeMotor();
 
 // ─── Cartoony car flourishes ─────────────────────────────────────────────
 // Sit on top of the steady motor loop so the car feels playful instead of
-// monotone. Two cues:
-//   • playCarVroom — short rising sweep, fired on idle→moving transitions
-//   • playCarPutt  — quick double-blip, fired at random while driving
-// Volumes are deliberately tiny — they should add personality, not fight
-// with letter audio playing in the same moment.
-
-export function playCarVroom() {
-  const c = getCtx();
-  if (!c) return;
-  // Two-octave rising sweep with a low fundamental — reads as "starting
-  // up" without sounding mechanical or scary.
-  glide(120, 320, 0, 0.32, 0.10, "triangle");
-  glide(240, 540, 0.04, 0.28, 0.06, "sine");
-}
+// monotone. Single cue: a quick double-blip "putt-putt" sprinkled at
+// random while driving. Volume is deliberately tiny — it should add
+// personality, not fight with letter audio playing in the same moment.
 
 export function playCarPutt() {
   const c = getCtx();

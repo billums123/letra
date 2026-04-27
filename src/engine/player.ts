@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import type { AvatarKind } from "../state/store";
-import { motor, playKidStep, playCarVroom, playCarPutt } from "../audio/sfx";
+import { motor, playKidStep, playCarPutt } from "../audio/sfx";
 
 export type PlayerHandles = {
   group: THREE.Group;
@@ -237,12 +237,6 @@ function buildCar(): PlayerHandles {
   let facing = 0;
   let bob = 0;
   let wheelSpin = 0;
-  // Tracks how long the joystick has been at rest. We only count a kid
-  // as "stopped" once they've held neutral for STOP_HYSTERESIS_MS — that
-  // way merely passing through neutral while changing direction during a
-  // turn doesn't re-trigger the vroom and make the car "boing" mid-turn.
-  let stillSinceMs: number | null = null;
-  const STOP_HYSTERESIS_MS = 500;
   // Schedule the next cartoony "putt-putt" at a random interval so the
   // engine flourishes don't feel metronomic. Re-rolled after each pop.
   let nextPuttAt = performance.now() + 1500 + Math.random() * 2500;
@@ -286,24 +280,12 @@ function buildCar(): PlayerHandles {
       for (const w of wheels) w.rotation.x = wheelSpin;
       // Engine pitch + volume tracks input magnitude.
       motor.setActivity(mag);
-      // Cartoony flourishes ride on top of the motor loop. Vroom marks
-      // a real takeoff after the kid has come to rest for at least
-      // STOP_HYSTERESIS_MS — brief joystick neutral during a turn does
-      // not count, so the car never "boings" mid-corner. Putt-putts
-      // sprinkle through the drive at random intervals.
-      const now = performance.now();
-      if (isMoving) {
-        if (stillSinceMs !== null && now - stillSinceMs >= STOP_HYSTERESIS_MS) {
-          playCarVroom();
-          nextPuttAt = now + 1500 + Math.random() * 2500;
-        }
-        stillSinceMs = null;
-        if (now >= nextPuttAt) {
-          playCarPutt();
-          nextPuttAt = now + 2000 + Math.random() * 2500;
-        }
-      } else if (stillSinceMs === null) {
-        stillSinceMs = now;
+      // Cartoony putt-putts sprinkle through the drive at random
+      // intervals so the engine reads as alive. No takeoff vroom —
+      // it kept retriggering on direction changes mid-turn.
+      if (isMoving && performance.now() >= nextPuttAt) {
+        playCarPutt();
+        nextPuttAt = performance.now() + 2000 + Math.random() * 2500;
       }
     },
     position() {
