@@ -278,19 +278,17 @@ export function playCarPutt() {
   tone(180, 0.09, 0.06, 0.06, "triangle");
 }
 
-// ─── Firework SFX ────────────────────────────────────────────────────────
-// Filtered-noise renders of a real firework launch + burst. Tonal
-// synth (oscillators + scale notes) sounds like a chime no matter
-// what; firework noise needs to be aperiodic, so we drive everything
-// off white-noise sources passed through bandpass / lowpass / highpass
-// filters with carefully shaped envelopes. Sounds far closer to a
-// real rocket pop than anything we could build from oscillators.
+// ─── Aerial-firework SFX ──────────────────────────────────────────────
+// Tonal synth always reads as a chime — for a real aerial firework you
+// need (1) a brief mortar thump + ascending shell whistle on launch,
+// and (2) a wide deep low-frequency KABOOM with body and a soft
+// reverb tail on the burst. Sparkle crackle is kept but pushed below
+// the boom so it reads as a tail, not as the whole sound.
 
 // Cached white-noise AudioBuffer — generated once per AudioContext.
 let noiseBuffer: AudioBuffer | null = null;
 function getNoiseBuffer(c: AudioContext): AudioBuffer {
   if (noiseBuffer && noiseBuffer.sampleRate === c.sampleRate) return noiseBuffer;
-  // Two seconds is enough to source any individual SFX without looping.
   const length = c.sampleRate * 2;
   const buf = c.createBuffer(1, length, c.sampleRate);
   const data = buf.getChannelData(0);
@@ -299,109 +297,195 @@ function getNoiseBuffer(c: AudioContext): AudioBuffer {
   return buf;
 }
 
-function makeNoiseSource(c: AudioContext): AudioBufferSourceNode {
+function startNoise(c: AudioContext, startTime: number, stopTime: number): AudioBufferSourceNode {
   const src = c.createBufferSource();
   src.buffer = getNoiseBuffer(c);
-  // Random offset so consecutive plays don't have the same noise pattern.
+  // Random read offset so consecutive bursts don't share noise patterns.
   const offset = Math.random() * (src.buffer!.duration * 0.5);
-  src.start(0, offset);
+  src.start(startTime, offset);
+  src.stop(stopTime);
   return src;
 }
 
-// "Whoosh" of a rocket leaving the ground. Sharp tssss with a rising
-// pitch sweep on the highpass filter so it reads as motion upward.
+// Master gain limiter for fireworks — one shared gain bus capped at
+// 0.85 so simultaneous launches/bursts can't pile up into clipping.
+let fxBus: GainNode | null = null;
+function getFxBus(c: AudioContext): GainNode {
+  if (fxBus) return fxBus;
+  fxBus = c.createGain();
+  fxBus.gain.value = 0.85;
+  fxBus.connect(c.destination);
+  return fxBus;
+}
+
+// Aerial mortar launch. Two phases:
+//   1) Brief THOOMP at t0 — sub-bass sine drop + short bandpassed
+//      noise puff (the sound of the shell leaving the tube).
+//   2) Rising shell whistle from t0+0.05 — two detuned sine sweeps
+//      from ~600 Hz up through ~3 kHz over ~0.55s, the classic
+//      "shell ascending" whistle.
 export function playFireworkLaunch() {
   const c = getCtx();
   if (!c) return;
+  const dest = getFxBus(c);
   const t0 = c.currentTime;
-  const dur = 0.55;
-  const src = c.createBufferSource();
-  src.buffer = getNoiseBuffer(c);
-  src.start(t0, Math.random() * 1);
-  src.stop(t0 + dur + 0.05);
-  // Sweeping highpass gives the rocket its rising hiss.
-  const hp = c.createBiquadFilter();
-  hp.type = "highpass";
-  hp.Q.value = 1.2;
-  hp.frequency.setValueAtTime(900, t0);
-  hp.frequency.exponentialRampToValueAtTime(3600, t0 + dur);
-  // A bandpass on top sharpens the whistle so it doesn't read as just
-  // wind noise.
-  const bp = c.createBiquadFilter();
-  bp.type = "bandpass";
-  bp.Q.value = 4;
-  bp.frequency.setValueAtTime(1400, t0);
-  bp.frequency.exponentialRampToValueAtTime(4200, t0 + dur);
-  // Volume envelope — quick attack, exponential tail.
-  const g = c.createGain();
-  g.gain.setValueAtTime(0.0001, t0);
-  g.gain.exponentialRampToValueAtTime(0.18, t0 + 0.04);
-  g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
-  src.connect(hp).connect(bp).connect(g).connect(c.destination);
+
+  // 1a — sub-bass mortar thump
+  {
+    const osc = c.createOscillator();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(85, t0);
+    osc.frequency.exponentialRampToValueAtTime(38, t0 + 0.1);
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(0.5, t0 + 0.005);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.13);
+    osc.connect(g).connect(dest);
+    osc.start(t0);
+    osc.stop(t0 + 0.16);
+  }
+  // 1b — short noise puff (the actual mortar tube exhaust)
+  {
+    const n = startNoise(c, t0, t0 + 0.15);
+    const bp = c.createBiquadFilter();
+    bp.type = "bandpass";
+    bp.frequency.value = 550;
+    bp.Q.value = 1.2;
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(0.18, t0 + 0.005);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.13);
+    n.connect(bp).connect(g).connect(dest);
+  }
+
+  // 2 — rising shell whistle. Two slightly-detuned sine oscillators
+  // give the whistle a fuller, warmer tone than a single sine; the
+  // exponential pitch sweep up through the audible range reads as
+  // motion away from the listener.
+  {
+    const whistleStart = t0 + 0.05;
+    const whistleEnd = t0 + 0.6;
+    const osc1 = c.createOscillator();
+    osc1.type = "sine";
+    osc1.frequency.setValueAtTime(620, whistleStart);
+    osc1.frequency.exponentialRampToValueAtTime(2900, whistleEnd);
+    const osc2 = c.createOscillator();
+    osc2.type = "sine";
+    osc2.frequency.setValueAtTime(940, whistleStart);
+    osc2.frequency.exponentialRampToValueAtTime(4400, whistleEnd);
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.0001, whistleStart);
+    g.gain.exponentialRampToValueAtTime(0.09, whistleStart + 0.08);
+    g.gain.exponentialRampToValueAtTime(0.0001, whistleEnd);
+    osc1.connect(g);
+    osc2.connect(g);
+    g.connect(dest);
+    osc1.start(whistleStart);
+    osc1.stop(whistleEnd + 0.05);
+    osc2.start(whistleStart);
+    osc2.stop(whistleEnd + 0.05);
+  }
 }
 
-// Big "boom + crackle" of a firework exploding — three layers stacked:
-//   1. A low-frequency thump (the body of the boom)
-//   2. A mid-frequency snap (the bright "pop")
-//   3. A scatter of tiny high-frequency cracks over ~1.2s (the
-//      glittery sparkle tail)
+// Aerial burst — a real KABOOM. Layer plan:
+//   1) Sub-bass sine drop (50→25 Hz) — the gut-punch "thump" you feel
+//   2) Heavily low-passed noise (180→70 Hz) — the body of the boom
+//   3) Mid-band (~350 Hz) noise smack — the bright "BOOM" attack
+//   4) Reverberant tail via feedback delay — open-sky echo
+//   5) Subtle sparkle crackle — fewer, quieter pops, only after the
+//      boom has had room to land
 export function playFireworkBurst() {
   const c = getCtx();
   if (!c) return;
+  const dest = getFxBus(c);
   const t0 = c.currentTime;
 
-  // Layer 1 — low thump
+  // 1 — sub-bass body
   {
-    const src = c.createBufferSource();
-    src.buffer = getNoiseBuffer(c);
-    src.start(t0, Math.random() * 0.5);
-    src.stop(t0 + 0.55);
+    const osc = c.createOscillator();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(55, t0);
+    osc.frequency.exponentialRampToValueAtTime(25, t0 + 0.55);
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(0.7, t0 + 0.012);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.7);
+    osc.connect(g).connect(dest);
+    osc.start(t0);
+    osc.stop(t0 + 0.75);
+  }
+
+  // 2 — low-passed boom noise (the rumbling body)
+  {
+    const n = startNoise(c, t0, t0 + 0.85);
     const lp = c.createBiquadFilter();
     lp.type = "lowpass";
     lp.frequency.setValueAtTime(180, t0);
-    lp.frequency.exponentialRampToValueAtTime(60, t0 + 0.4);
+    lp.frequency.exponentialRampToValueAtTime(70, t0 + 0.6);
     const g = c.createGain();
     g.gain.setValueAtTime(0.0001, t0);
-    g.gain.exponentialRampToValueAtTime(0.45, t0 + 0.008);
-    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.5);
-    src.connect(lp).connect(g).connect(c.destination);
+    g.gain.exponentialRampToValueAtTime(0.55, t0 + 0.012);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.8);
+    n.connect(lp).connect(g).connect(dest);
   }
 
-  // Layer 2 — mid snap
+  // 3 — mid-band attack snap (the "BOOM!" front edge)
   {
-    const src = c.createBufferSource();
-    src.buffer = getNoiseBuffer(c);
-    src.start(t0, Math.random() * 0.5);
-    src.stop(t0 + 0.3);
+    const n = startNoise(c, t0, t0 + 0.4);
     const bp = c.createBiquadFilter();
     bp.type = "bandpass";
-    bp.frequency.value = 700;
-    bp.Q.value = 0.9;
+    bp.frequency.setValueAtTime(380, t0);
+    bp.frequency.exponentialRampToValueAtTime(180, t0 + 0.35);
+    bp.Q.value = 0.7;
     const g = c.createGain();
     g.gain.setValueAtTime(0.0001, t0);
-    g.gain.exponentialRampToValueAtTime(0.32, t0 + 0.005);
-    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.28);
-    src.connect(bp).connect(g).connect(c.destination);
+    g.gain.exponentialRampToValueAtTime(0.32, t0 + 0.008);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.36);
+    n.connect(bp).connect(g).connect(dest);
   }
 
-  // Layer 3 — sparkle crackle. ~22 micro-pops randomly distributed
-  // across the next 1.2s, each a tiny highpass-filtered noise blip.
-  for (let i = 0; i < 22; i++) {
-    const at = t0 + 0.04 + Math.random() * 1.15;
-    const dur = 0.04 + Math.random() * 0.06;
-    const src = c.createBufferSource();
-    src.buffer = getNoiseBuffer(c);
-    src.start(at, Math.random() * 1.5);
-    src.stop(at + dur + 0.02);
+  // 4 — feedback-delay tail. A quieter, lowpassed copy of the boom
+  // body fed through a 180ms delay loop with diminishing feedback
+  // gives the burst that "open sky" reverberance without needing
+  // a real convolver impulse.
+  {
+    const n = startNoise(c, t0, t0 + 0.6);
+    const lp = c.createBiquadFilter();
+    lp.type = "lowpass";
+    lp.frequency.value = 300;
+    const send = c.createGain();
+    send.gain.setValueAtTime(0.0001, t0);
+    send.gain.exponentialRampToValueAtTime(0.18, t0 + 0.02);
+    send.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.5);
+    const delay = c.createDelay(0.6);
+    delay.delayTime.value = 0.18;
+    const fb = c.createGain();
+    fb.gain.value = 0.42;
+    n.connect(lp).connect(send);
+    // Direct path is omitted — we only want the wet (echoed) signal.
+    send.connect(delay);
+    delay.connect(fb);
+    fb.connect(delay);
+    fb.connect(dest);
+  }
+
+  // 5 — sparkle crackle, but pushed back so it reads as a tail behind
+  // the boom rather than a wall of static. Half the previous count and
+  // each pop quieter; window starts after the boom's peak so the
+  // listener registers the KABOOM first.
+  for (let i = 0; i < 11; i++) {
+    const at = t0 + 0.18 + Math.random() * 0.9;
+    const dur = 0.04 + Math.random() * 0.05;
+    const n = startNoise(c, at, at + dur + 0.02);
     const hp = c.createBiquadFilter();
     hp.type = "highpass";
-    hp.frequency.value = 2200 + Math.random() * 2400;
+    hp.frequency.value = 2400 + Math.random() * 2200;
     hp.Q.value = 1.1;
     const g = c.createGain();
     g.gain.setValueAtTime(0.0001, at);
-    g.gain.exponentialRampToValueAtTime(0.08 + Math.random() * 0.06, at + 0.005);
+    g.gain.exponentialRampToValueAtTime(0.05 + Math.random() * 0.03, at + 0.005);
     g.gain.exponentialRampToValueAtTime(0.0001, at + dur);
-    src.connect(hp).connect(g).connect(c.destination);
+    n.connect(hp).connect(g).connect(dest);
   }
 }
 
