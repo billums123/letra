@@ -237,7 +237,12 @@ function buildCar(): PlayerHandles {
   let facing = 0;
   let bob = 0;
   let wheelSpin = 0;
-  let wasMoving = false;
+  // Tracks how long the joystick has been at rest. We only count a kid
+  // as "stopped" once they've held neutral for STOP_HYSTERESIS_MS — that
+  // way merely passing through neutral while changing direction during a
+  // turn doesn't re-trigger the vroom and make the car "boing" mid-turn.
+  let stillSinceMs: number | null = null;
+  const STOP_HYSTERESIS_MS = 500;
   // Schedule the next cartoony "putt-putt" at a random interval so the
   // engine flourishes don't feel metronomic. Re-rolled after each pop.
   let nextPuttAt = performance.now() + 1500 + Math.random() * 2500;
@@ -282,18 +287,24 @@ function buildCar(): PlayerHandles {
       // Engine pitch + volume tracks input magnitude.
       motor.setActivity(mag);
       // Cartoony flourishes ride on top of the motor loop. Vroom marks
-      // the transition off idle; putt-putts sprinkle through the drive
-      // at random intervals so the engine feels alive without ever
-      // being predictable.
-      if (isMoving && !wasMoving) {
-        playCarVroom();
-        nextPuttAt = performance.now() + 1500 + Math.random() * 2500;
+      // a real takeoff after the kid has come to rest for at least
+      // STOP_HYSTERESIS_MS — brief joystick neutral during a turn does
+      // not count, so the car never "boings" mid-corner. Putt-putts
+      // sprinkle through the drive at random intervals.
+      const now = performance.now();
+      if (isMoving) {
+        if (stillSinceMs !== null && now - stillSinceMs >= STOP_HYSTERESIS_MS) {
+          playCarVroom();
+          nextPuttAt = now + 1500 + Math.random() * 2500;
+        }
+        stillSinceMs = null;
+        if (now >= nextPuttAt) {
+          playCarPutt();
+          nextPuttAt = now + 2000 + Math.random() * 2500;
+        }
+      } else if (stillSinceMs === null) {
+        stillSinceMs = now;
       }
-      if (isMoving && performance.now() >= nextPuttAt) {
-        playCarPutt();
-        nextPuttAt = performance.now() + 2000 + Math.random() * 2500;
-      }
-      wasMoving = isMoving;
     },
     position() {
       return group.position;

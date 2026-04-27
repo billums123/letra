@@ -261,11 +261,11 @@ function makeMotor(): Motor {
       // narrow so the motor reads as ambient rather than dynamic — kids
       // notice the difference between idle and moving without it ever
       // demanding attention.
-      //   master: idle 0.20, full 0.45
+      //   master: idle 0.35, full 0.75
       //   rumble freq: idle 48 Hz, full 60 Hz (small Δ feels alive)
       //   buzz freq:   idle 96 Hz, full 124 Hz
       const now = c.currentTime;
-      nodes.master.gain.setTargetAtTime(0.20 + clamped * 0.25, now, 0.12);
+      nodes.master.gain.setTargetAtTime(0.35 + clamped * 0.40, now, 0.12);
       nodes.rumble.frequency.setTargetAtTime(48 + clamped * 12, now, 0.12);
       nodes.buzz.frequency.setTargetAtTime(96 + clamped * 28, now, 0.12);
     },
