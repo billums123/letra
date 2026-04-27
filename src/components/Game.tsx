@@ -52,10 +52,14 @@ export function Game() {
     }
   }, [dev, screen, goToMenu]);
 
-  // Background music. Menu screen plays the dedicated theme; game screens
-  // play whichever in-game track was rolled for this session. Dev tools
-  // (letter-test, letter-editor) get silence so music doesn't fight with
-  // whatever the dev is debugging.
+  // Background music. Menu screen plays the dedicated theme; game
+  // screens randomly cycle through the game pool — pickGameTrack rolls
+  // a fresh track each time we enter an activity (avoiding repeats).
+  // Dev tools (letter-test, letter-editor) get silence so music doesn't
+  // fight with whatever the dev is debugging. Browsers auto-resume any
+  // suspended AudioContext on the user's first gesture, so the source
+  // we schedule here will start playing as soon as they tap anywhere
+  // — no separate "prime" listener needed.
   useEffect(() => {
     if (screen === "menu") {
       void music.play(MENU_TRACK, 0.18);
@@ -65,30 +69,6 @@ export function Game() {
       void music.play(pickGameTrack(), 0.16);
     }
   }, [screen]);
-
-  // AudioContext starts in suspended state on every page load until the
-  // user actually clicks/touches something. The screen-change effect
-  // above runs at mount but the player produces silence until a gesture
-  // unblocks it. Re-fire the music start on the first pointerdown so
-  // the menu theme actually plays as soon as the kid taps anywhere.
-  useEffect(() => {
-    let primed = false;
-    const prime = () => {
-      if (primed) return;
-      primed = true;
-      const s = useGameStore.getState().screen;
-      if (s === "menu") void music.play(MENU_TRACK, 0.18);
-      else if (s !== "letter-test" && s !== "letter-editor") void music.play(pickGameTrack(), 0.16);
-    };
-    window.addEventListener("pointerdown", prime, { once: true });
-    window.addEventListener("touchstart", prime, { once: true });
-    window.addEventListener("keydown", prime, { once: true });
-    return () => {
-      window.removeEventListener("pointerdown", prime);
-      window.removeEventListener("touchstart", prime);
-      window.removeEventListener("keydown", prime);
-    };
-  }, []);
 
   return (
     <div style={{ position: "absolute", inset: 0 }}>

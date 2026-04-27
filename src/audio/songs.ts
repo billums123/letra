@@ -18,26 +18,17 @@ export const GAME_TRACKS: Track[] = [
   { id: "bouncy-castle", name: "Bouncy Castle", url: "/audio/music/bouncy-castle.mp3" },
 ];
 
-// Pick one game track per session. Stored in sessionStorage so navigating
-// between menu and games doesn't keep re-rolling — the kid hears the same
-// in-game track until they reload the page.
-const SESSION_KEY = "letra:gameTrack";
+// Pick a fresh random game track each time an activity starts. Avoid
+// repeating the immediately previous pick so the kid gets variety even
+// across consecutive games.
+let lastPickedId: string | null = null;
 
 export function pickGameTrack(): Track {
-  try {
-    const cached = sessionStorage.getItem(SESSION_KEY);
-    if (cached) {
-      const found = GAME_TRACKS.find((t) => t.id === cached);
-      if (found) return found;
-    }
-  } catch {
-    // sessionStorage may be unavailable — fall through to a fresh pick.
-  }
-  const choice = GAME_TRACKS[Math.floor(Math.random() * GAME_TRACKS.length)];
-  try {
-    sessionStorage.setItem(SESSION_KEY, choice.id);
-  } catch {
-    // Non-fatal.
-  }
+  if (GAME_TRACKS.length === 1) return GAME_TRACKS[0];
+  let choice: Track;
+  do {
+    choice = GAME_TRACKS[Math.floor(Math.random() * GAME_TRACKS.length)];
+  } while (choice.id === lastPickedId);
+  lastPickedId = choice.id;
   return choice;
 }
