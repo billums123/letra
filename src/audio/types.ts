@@ -98,22 +98,45 @@ export const LETTER_NAME_TEXT: Record<string, string> = {
 //
 // To add a new override: pick the IPA from a phoneme chart (or just paste the
 // character — æ, ɪ, oʊ, etc.), wrap with the visible glyph as the ph fallback.
+// Every letter NAME gets an explicit IPA override. Letting any of them
+// fall through to the multilingual model meant Marissa (and to a lesser
+// extent Rachel) would slip into a non-English pronunciation for the
+// first beat before snapping back to English — particularly noticeable
+// on the consonants whose bare glyph also exists as a Spanish / Italian
+// word (E, F, L, M, N, R, S). Pinning IPA here forces the phoneme-aware
+// flash_v2 model and locks in the standard American letter name.
+//
+// IMPORTANT: this map is the LETTER NAME (what you say when reciting
+// the alphabet — "ay, bee, see, dee…"), NOT the phonics SOUND
+// (the noise the letter makes — /æ/, /b/, /k/, /d/…). Those live in
+// LETTER_SOUND_PHONEME below.
 export const LETTER_NAME_PHONEME: Record<string, string> = {
-  A: "æ", // short-a as in "apple"
-  // The bare glyph for these letters got mispronounced by some voices —
-  // the multilingual model would slip into a non-English language for a
-  // beat before recovering, so we pin the standard American letter name
-  // in IPA and force the phoneme-aware flash_v2 model.
-  B: "biː",
-  C: "siː",
-  H: "eɪtʃ",
-  J: "dʒeɪ",
-  P: "piː",
-  T: "tiː",
-  U: "juː",
-  V: "viː", // standard /viː/ — long-E vowel after the V
-  W: "ˈdʌbəljuː",
-  Y: "waɪ",
+  A: "eɪ",       // "ay"
+  B: "biː",      // "bee"
+  C: "siː",      // "see"
+  D: "diː",      // "dee"
+  E: "iː",       // "ee"
+  F: "ɛf",       // "ef"
+  G: "dʒiː",     // "jee"
+  H: "eɪtʃ",     // "aitch"
+  I: "aɪ",       // "eye"
+  J: "dʒeɪ",     // "jay"
+  K: "keɪ",      // "kay"
+  L: "ɛl",       // "el"
+  M: "ɛm",       // "em"
+  N: "ɛn",       // "en"
+  O: "oʊ",       // "oh"
+  P: "piː",      // "pee"
+  Q: "kjuː",     // "kyoo"
+  R: "ɑɹ",       // "ar" (American)
+  S: "ɛs",       // "ess"
+  T: "tiː",      // "tee"
+  U: "juː",      // "you"
+  V: "viː",      // "vee"
+  W: "ˈdʌbəljuː", // "double-you"
+  X: "ɛks",      // "ex"
+  Y: "waɪ",      // "why"
+  Z: "ziː",      // "zee" (American)
 };
 
 // Phonics-style letter SOUNDS. Used in the sound-match game and as the
@@ -128,27 +151,27 @@ export const LETTER_SOUND_PHONEME: Record<string, string> = {
   C: "kə",     // hard C, "kuh"
   D: "də",     // "duh"
   E: "ɛ",      // egg
-  F: "fːː",    // sustained /f/
+  F: "fː",     // sustained /f/
   G: "ɡə",     // hard G, "guh"
   H: "hə",     // "huh"
   I: "ɪ",      // igloo
   J: "dʒə",    // "juh"
   K: "kə",     // "kuh"
-  L: "lːː",    // sustained /l/
-  M: "mːː",    // sustained /m/
-  N: "nːː",    // sustained /n/
+  L: "lː",     // sustained /l/
+  M: "mː",     // sustained /m/
+  N: "nː",     // sustained /n/
   O: "ɑ",      // octopus (American short O)
   P: "pə",     // "puh"
   Q: "kwə",    // "kwuh"
-  R: "ɹːː",    // sustained English /r/
-  S: "sːː",    // sustained /s/
+  R: "ɹː",     // sustained English /r/
+  S: "sː",     // sustained /s/
   T: "tə",     // "tuh"
   U: "ʌ",      // umbrella
-  V: "vːː",    // sustained /v/
+  V: "vː",     // sustained /v/
   W: "wə",     // "wuh"
   X: "ks",     // fox
   Y: "jə",     // "yuh"
-  Z: "zːː",    // sustained /z/
+  Z: "zː",     // sustained /z/
 };
 
 const PHONEME_MODEL = "eleven_flash_v2";
