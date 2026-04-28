@@ -91,6 +91,24 @@ function saveVoiceSlug(slug: string | null) {
   }
 }
 
+function loadLetterCase(): LetterCase {
+  try {
+    const raw = localStorage.getItem(LETTER_CASE_KEY);
+    if (raw === "uppercase" || raw === "lowercase" || raw === "mixed") return raw;
+  } catch {
+    // ignore
+  }
+  return "uppercase";
+}
+
+function saveLetterCase(c: LetterCase) {
+  try {
+    localStorage.setItem(LETTER_CASE_KEY, c);
+  } catch {
+    // Non-fatal.
+  }
+}
+
 function loadBiomeId(): string {
   try {
     const raw = localStorage.getItem(BIOME_KEY);
@@ -164,5 +182,11 @@ export const useGameStore = create<GameState>((set, get) => ({
   setBiomeId: (id) => {
     saveBiomeId(id);
     set({ biomeId: id });
+  },
+
+  letterCase: loadLetterCase(),
+  setLetterCase: (c) => {
+    saveLetterCase(c);
+    set({ letterCase: c });
   },
 }));

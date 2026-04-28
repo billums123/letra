@@ -70,8 +70,10 @@ function GameCard({ emoji, iconUrl, title, subtitle, color, voiceClipId, onSelec
         margin: 0,
         minWidth: 0,
         // Fixed minimum so all cards stay the same height even if a
-        // longer title wraps to two lines.
-        minHeight: compact ? 240 : 340,
+        // longer title wraps to two lines. Desktop sits a bit shorter
+        // than wide (~360 max width) so the cards read as squares
+        // rather than tall rectangles with empty space below the art.
+        minHeight: compact ? 240 : 290,
         cursor: "pointer",
         boxShadow: pressed
           ? "0 4px 0 rgba(0,0,0,0.18), 0 6px 12px rgba(0,0,0,0.15)"
@@ -87,7 +89,10 @@ function GameCard({ emoji, iconUrl, title, subtitle, color, voiceClipId, onSelec
         display: "flex",
         flexDirection: "column",
         alignItems: "center",
-        justifyContent: "flex-start",
+        // Centre vertically so any extra height distributes evenly
+        // above + below the icon/title block instead of pooling
+        // empty space at the bottom of the card.
+        justifyContent: "center",
         // Don't allow the icon to bleed visually into the next card —
         // a quick crop matches the rounded card edge.
         overflow: "hidden",
