@@ -156,7 +156,13 @@ function buildManifest(voiceId: string, modelId: string): AudioManifest {
     letters,
     prompts,
     celebrate: ["celebrate-1", "celebrate-2", "celebrate-3", "celebrate-4", "celebrate-5", "celebrate-6"],
-    hints: { keepLooking: "hint-keep-looking", lookAround: "hint-look-around" },
+    hints: [
+      "hint-keep-looking",
+      "hint-look-around",
+      "hint-i-believe",
+      "hint-where-could-it-be",
+      "hint-keep-going",
+    ],
     menu: {
       welcome: "menu-welcome",
       spell: "menu-spell",

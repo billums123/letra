@@ -13,7 +13,7 @@ export type AudioManifest = {
   letters: Record<string, LetterClip>; // keys uppercase A-Z
   prompts: Record<string, string>;
   celebrate: string[];
-  hints: Record<string, string>;
+  hints: string[];
   menu: Record<string, string>;
 };
 
@@ -264,9 +264,13 @@ export function buildEntries(): AudioEntry[] {
     entries.push({ id: `celebrate-${i + 1}`, text: line });
   }
 
-  // Hints
+  // Hints — picked randomly when a kid stalls, so any new line just
+  // needs a unique id and an mp3 in the voice's audio folder.
   entries.push({ id: "hint-keep-looking", text: "Keep looking! You can do it!" });
   entries.push({ id: "hint-look-around", text: "Look all around the world. The letter is hiding somewhere!" });
+  entries.push({ id: "hint-i-believe", text: "I believe in you!" });
+  entries.push({ id: "hint-where-could-it-be", text: "Where could it be?" });
+  entries.push({ id: "hint-keep-going", text: "Keep going, you're doing great!" });
 
   // Menu
   entries.push({ id: "menu-welcome", text: "Welcome to Letra! Pick a game to start!" });
@@ -281,4 +285,9 @@ export function buildEntries(): AudioEntry[] {
 export function getCelebrateIds(manifest?: AudioManifest): string[] {
   if (manifest) return manifest.celebrate;
   return ["celebrate-1", "celebrate-2", "celebrate-3", "celebrate-4", "celebrate-5", "celebrate-6"];
+}
+
+export function getHintIds(manifest?: AudioManifest): string[] {
+  if (manifest && manifest.hints.length > 0) return manifest.hints;
+  return ["hint-keep-looking", "hint-look-around"];
 }

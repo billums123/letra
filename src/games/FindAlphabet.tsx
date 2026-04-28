@@ -25,7 +25,7 @@ import { isDev } from "../util/isDev";
 const COLLECT_DIST = 1.6;
 const RING_INNER = 6;
 const RING_OUTER = 30;
-const HINT_AFTER_SECONDS = 22;
+const HINT_AFTER_SECONDS = 40;
 
 // Dance-party tuning. Letters arrange in a ring around the player at
 // finale time and pick a randomized dance style apiece.
@@ -159,7 +159,7 @@ export function FindAlphabetGame() {
       const since = (performance.now() - lastProgressRef.current) / 1000;
       if (since > HINT_AFTER_SECONDS && !hintScheduledRef.current) {
         hintScheduledRef.current = true;
-        audio.play(audio.hint("keepLooking")).then(() => {
+        audio.play(audio.randomHint()).then(() => {
           audio.play(audio.letterName(next.letter), { interrupt: false });
           lastProgressRef.current = performance.now();
           hintScheduledRef.current = false;

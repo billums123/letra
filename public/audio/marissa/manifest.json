@@ -131,10 +131,13 @@
     "celebrate-5",
     "celebrate-6"
   ],
-  "hints": {
-    "keepLooking": "hint-keep-looking",
-    "lookAround": "hint-look-around"
-  },
+  "hints": [
+    "hint-keep-looking",
+    "hint-look-around",
+    "hint-i-believe",
+    "hint-where-could-it-be",
+    "hint-keep-going"
+  ],
   "menu": {
     "welcome": "menu-welcome",
     "spell": "menu-spell",

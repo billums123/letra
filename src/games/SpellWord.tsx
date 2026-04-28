@@ -17,7 +17,7 @@ import { useGameStore } from "../state/store";
 // savour the celebration before the next round.
 
 const COLLECT_DIST = 1.7;
-const HINT_AFTER_SECONDS = 18;
+const HINT_AFTER_SECONDS = 35;
 const SPAWN_INNER = 7;
 const SPAWN_OUTER = 18;
 
@@ -139,7 +139,7 @@ function SpellWordRound({
       const since = (performance.now() - lastProgressRef.current) / 1000;
       if (since > HINT_AFTER_SECONDS && !hintScheduledRef.current) {
         hintScheduledRef.current = true;
-        audio.play(audio.hint("lookAround")).then(() => {
+        audio.play(audio.randomHint()).then(() => {
           lastProgressRef.current = performance.now();
           hintScheduledRef.current = false;
         });

@@ -11,7 +11,7 @@
 // back to the legacy flat layout (/audio/<id>.mp3) for backward compat.
 
 import type { AudioManifest, VoicesRegistry, VoiceRegistryEntry } from "./types";
-import { ALPHABET, LETTER_NAME_TEXT, LETTER_SOUND_TEXT } from "./types";
+import { ALPHABET, LETTER_NAME_TEXT, LETTER_SOUND_TEXT, getHintIds } from "./types";
 
 type Mode = "elevenlabs" | "speech" | "muted";
 
@@ -386,8 +386,9 @@ class AudioPlayer {
     return ids[(Math.random() * ids.length) | 0];
   }
 
-  hint(key: "keepLooking" | "lookAround"): string {
-    return this.manifest?.hints[key] ?? `hint-${key === "keepLooking" ? "keep-looking" : "look-around"}`;
+  randomHint(): string {
+    const ids = getHintIds(this.manifest ?? undefined);
+    return ids[(Math.random() * ids.length) | 0];
   }
 
   menu(key: string): string {
@@ -430,6 +431,9 @@ function textForId(id: string): string {
     "celebrate-6": "Way to go!",
     "hint-keep-looking": "Keep looking! You can do it!",
     "hint-look-around": "Look all around the world. The letter is hiding!",
+    "hint-i-believe": "I believe in you!",
+    "hint-where-could-it-be": "Where could it be?",
+    "hint-keep-going": "Keep going, you're doing great!",
     "menu-welcome": "Welcome to Letra! Pick a game to start.",
     "menu-spell": "Spell the word.",
     "menu-alphabet": "Find the alphabet.",

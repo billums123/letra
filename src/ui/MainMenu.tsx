@@ -27,14 +27,13 @@ type GameCardProps = {
   emoji?: string;
   iconUrl?: string;
   title: string;
-  subtitle: string;
   color: string;
   voiceClipId: string;
   onSelect: () => void;
   ariaLabel: string;
 };
 
-function GameCard({ emoji, iconUrl, title, subtitle, color, voiceClipId, onSelect, ariaLabel, compact }: GameCardProps & { compact: boolean }) {
+function GameCard({ emoji, iconUrl, title, color, voiceClipId, onSelect, ariaLabel, compact }: GameCardProps & { compact: boolean }) {
   const lastSpoken = useRef(0);
   const [hover, setHover] = useState(false);
   const [pressed, setPressed] = useState(false);
@@ -140,38 +139,18 @@ function GameCard({ emoji, iconUrl, title, subtitle, color, voiceClipId, onSelec
       </div>
       <div
         style={{
-          // Title + subtitle share a flex column that balances the card
-          // bottom regardless of title length.
           marginTop: compact ? 6 : 10,
-          display: "flex",
-          flexDirection: "column",
-          alignItems: "center",
-          gap: 4,
+          // clamp() keeps the title from blowing the card width when
+          // it wraps (Find the Alphabet → 2 lines on narrow phones)
+          // while still reading large on desktop.
+          fontSize: compact ? "clamp(18px, 5vw, 22px)" : 30,
+          fontWeight: 900,
+          letterSpacing: 0.4,
+          lineHeight: 1.1,
+          textShadow: "0 2px 0 rgba(255,255,255,0.4)",
         }}
       >
-        <div
-          style={{
-            // clamp() keeps the title from blowing the card width when
-            // it wraps (Find the Alphabet → 2 lines on narrow phones)
-            // while still reading large on desktop.
-            fontSize: compact ? "clamp(18px, 5vw, 22px)" : 30,
-            fontWeight: 900,
-            letterSpacing: 0.4,
-            lineHeight: 1.1,
-            textShadow: "0 2px 0 rgba(255,255,255,0.4)",
-          }}
-        >
-          {title}
-        </div>
-        <div
-          style={{
-            fontSize: compact ? 13 : 17,
-            fontWeight: 700,
-            opacity: 0.78,
-          }}
-        >
-          {subtitle}
-        </div>
+        {title}
       </div>
     </button>
   );
@@ -260,7 +239,6 @@ export function MainMenu() {
           iconUrl="/icons/spell-word.png"
           emoji="🐱"
           title="Spell the Word"
-          subtitle="Find the missing pet"
           color="#ffd56b"
           voiceClipId={audio.menu("spell")}
           onSelect={() => setPickingFor("spell-word")}
@@ -271,7 +249,6 @@ export function MainMenu() {
           iconUrl="/icons/find-alphabet.png"
           emoji="🔤"
           title="Find the Alphabet"
-          subtitle="A all the way to Z"
           color="#9bdc4a"
           voiceClipId={audio.menu("alphabet")}
           onSelect={() => setPickingFor("find-alphabet")}
@@ -282,7 +259,6 @@ export function MainMenu() {
           iconUrl="/icons/match-sound.png"
           emoji="👂"
           title="Match the Sound"
-          subtitle="Hear it, find it"
           color="#ff8aaa"
           voiceClipId={audio.menu("sounds")}
           onSelect={() => setScreen("sound-match")}
