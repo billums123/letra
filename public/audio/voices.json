@@ -5,15 +5,15 @@
       "name": "Rachel",
       "voiceId": "21m00Tcm4TlvDq8ikWAM",
       "modelId": "eleven_multilingual_v2",
-      "generatedAt": "2026-04-27T21:59:16.236Z",
-      "isDefault": true
+      "generatedAt": "2026-04-27T21:59:16.236Z"
     },
     {
       "slug": "marissa",
       "name": "Marissa",
       "voiceId": "A2JkxH7o94rRxvRjHHLO",
       "modelId": "eleven_multilingual_v2",
-      "generatedAt": "2026-04-27T21:59:18.034Z"
+      "generatedAt": "2026-04-27T21:59:18.034Z",
+      "isDefault": true
     }
   ]
 }
