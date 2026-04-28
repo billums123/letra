@@ -74,12 +74,17 @@ function saveAvatar(avatar: AvatarKind) {
 }
 
 function loadVoiceSlug(): string | null {
+  // The voice picker is currently disabled in the UI and we ship a
+  // single canonical voice (Marissa, marked isDefault in voices.json).
+  // Returning null here forces every user — even those who previously
+  // selected a different voice — onto the registry default. When the
+  // picker is re-enabled, restore the original localStorage read.
   try {
-    const raw = localStorage.getItem(VOICE_KEY);
-    return raw && raw.length > 0 ? raw : null;
+    localStorage.removeItem(VOICE_KEY);
   } catch {
-    return null;
+    /* non-fatal */
   }
+  return null;
 }
 
 function saveVoiceSlug(slug: string | null) {

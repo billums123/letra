@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { Scene } from "../world/Scene";
 import { HUD } from "../ui/HUD";
@@ -63,6 +63,21 @@ function moveVerb(avatar: "kid" | "car" | "rocket"): string {
 export function FindAlphabetGame() {
   const collect = useGameStore((s) => s.collect);
   const avatar = useGameStore((s) => s.avatar);
+  const letterCase = useGameStore((s) => s.letterCase);
+  // Decide each letter's display case once at mount so the HUD can
+  // render the right glyphs on the very first frame (before bootstrap
+  // has finished building characters). The bootstrap reads the same
+  // array so on-screen letters and HUD always agree.
+  const displayLetters = useMemo<string[]>(() => {
+    return ALPHABET.map((L) => {
+      if (letterCase === "lowercase") return L.toLowerCase();
+      if (letterCase === "mixed" && Math.random() < 0.5) return L.toLowerCase();
+      return L;
+    });
+    // letterCase is read once per mount — ignore later changes so a
+    // store flip doesn't reshuffle in the middle of a round.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [foundCount, setFoundCount] = useState(0);
   const [completed, setCompleted] = useState(false);
   const engineRef = useRef<Engine | null>(null);
@@ -106,7 +121,11 @@ export function FindAlphabetGame() {
     })();
 
     const letters: LetterEntry[] = ALPHABET.map((L, i) => {
-      const character = buildLetterCharacter(font, { letter: L });
+      // displayLetters was decided at mount time so the HUD and the
+      // characters rendered into the world stay in lockstep. Audio and
+      // the collected sticker still key on the uppercase glyph.
+      const lowercase = displayLetters[i] !== L;
+      const character = buildLetterCharacter(font, { letter: L, lowercase });
       // Try a spiral position first; if obstructed, pickClearSpawn retries.
       const t = i / ALPHABET.length;
       const minR = Math.max(RING_INNER, RING_INNER + t * 4);
@@ -381,19 +400,21 @@ export function FindAlphabetGame() {
   }, []);
 
   // HUD: show a window of letters around the current target so the bar
-  // doesn't get unreadably long.
+  // doesn't get unreadably long. displayLetters is the source of truth
+  // for case — same array the bootstrap reads when building characters.
   const windowSize = 10;
   const windowStart = Math.max(0, Math.min(foundCount - 2, ALPHABET.length - windowSize));
-  const targets = ALPHABET.slice(windowStart, windowStart + windowSize).map((L, i) => ({
+  const targets = displayLetters.slice(windowStart, windowStart + windowSize).map((L, i) => ({
     letter: L,
     found: windowStart + i < foundCount,
   }));
+  const titleLetter = displayLetters[foundCount];
 
   return (
     <div style={{ position: "absolute", inset: 0 }}>
       <Scene onEngineReady={onEngineReady} />
       <HUD
-        title={completed ? undefined : `Find: ${ALPHABET[foundCount] ?? "🎉"}`}
+        title={completed ? undefined : `Find: ${titleLetter ?? "🎉"}`}
         prompt={completed ? undefined : `${moveVerb(avatar)} to the next letter!`}
         targets={completed ? undefined : targets}
       />

@@ -34,22 +34,56 @@ function pickWord(prevWord?: string) {
 
 export function SpellWordGame() {
   const collect = useGameStore((s) => s.collect);
+  const letterCase = useGameStore((s) => s.letterCase);
   // Use roundKey to force a remount when "Next Word!" is pressed.
   const [roundKey, setRoundKey] = useState(0);
   const [prevWord, setPrevWord] = useState<string | undefined>();
-  return <SpellWordRound key={roundKey} prevWord={prevWord} onNext={(w) => { setPrevWord(w); setRoundKey((n) => n + 1); }} collect={collect} />;
+  // Track the case used on the previous word so "mixed" actually
+  // alternates instead of randomly landing on the same case twice in
+  // a row. Initialised null so the very first round rolls freely.
+  const [prevLowercase, setPrevLowercase] = useState<boolean | null>(null);
+  return (
+    <SpellWordRound
+      key={roundKey}
+      prevWord={prevWord}
+      prevLowercase={prevLowercase}
+      letterCase={letterCase}
+      onNext={(w, lc) => {
+        setPrevWord(w);
+        setPrevLowercase(lc);
+        setRoundKey((n) => n + 1);
+      }}
+      collect={collect}
+    />
+  );
 }
 
 function SpellWordRound({
   prevWord,
+  prevLowercase,
+  letterCase,
   onNext,
   collect,
 }: {
   prevWord?: string;
-  onNext: (justFinished: string) => void;
+  prevLowercase: boolean | null;
+  letterCase: "uppercase" | "lowercase" | "mixed";
+  onNext: (justFinished: string, lowercase: boolean) => void;
   collect: (letter: string) => void;
 }) {
   const word = useMemo(() => pickWord(prevWord), [prevWord]);
+  // Roll the case for THIS word. Uppercase / lowercase modes are pinned;
+  // "mixed" flips deterministically from the previous round when one
+  // exists, otherwise it rolls randomly. Computed once so a re-render
+  // (e.g. progress update) doesn't re-roll mid-round.
+  const lowercase = useMemo(() => {
+    if (letterCase === "uppercase") return false;
+    if (letterCase === "lowercase") return true;
+    return prevLowercase === null ? Math.random() < 0.5 : !prevLowercase;
+    // Re-rolls only when we move to a new round (new word picked).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [word]);
+  const displayWord = lowercase ? word.word.toLowerCase() : word.word;
   const [foundCount, setFoundCount] = useState(0);
   const [completed, setCompleted] = useState(false);
   const engineRef = useRef<Engine | null>(null);
@@ -79,7 +113,7 @@ function SpellWordRound({
       };
     })();
     const letters: LetterEntry[] = word.word.split("").map((L, i) => {
-      const character = buildLetterCharacter(font, { letter: L });
+      const character = buildLetterCharacter(font, { letter: L, lowercase });
       const spawn = pickClearSpawn(engine.obstacles, taken, { minRadius: SPAWN_INNER, maxRadius: SPAWN_OUTER }, 1.0, rng);
       character.group.position.set(spawn.x, 0, spawn.z);
       taken.push({ x: spawn.x, z: spawn.z, radius: 1.0 });
@@ -163,14 +197,14 @@ function SpellWordRound({
     };
   }, []);
 
-  const targets = word.word.split("").map((L, i) => ({ letter: L, found: i < foundCount }));
+  const targets = displayWord.split("").map((L, i) => ({ letter: L, found: i < foundCount }));
 
   return (
     <div style={{ position: "absolute", inset: 0 }}>
       <Scene onEngineReady={onEngineReady} />
       <HUD
-        title={`Spell: ${word.word}`}
-        prompt={completed ? "🎉 You spelled it!" : `Find the next letter: ${word.word[foundCount]}`}
+        title={`Spell: ${displayWord}`}
+        prompt={completed ? "🎉 You spelled it!" : `Find the next letter: ${displayWord[foundCount]}`}
         targets={targets}
       />
       {completed && (
@@ -186,7 +220,7 @@ function SpellWordRound({
         >
           <button
             type="button"
-            onClick={() => onNext(word.word)}
+            onClick={() => onNext(word.word, lowercase)}
             style={{
               pointerEvents: "auto",
               appearance: "none",

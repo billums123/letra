@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useGameStore } from "../state/store";
+import { useGameStore, type LetterCase } from "../state/store";
 import { audio } from "../audio/Player";
 import { StickerBook } from "./StickerBook";
 import { ALPHABET } from "../audio/types";
@@ -7,9 +7,19 @@ import { isDev } from "../util/isDev";
 import { useIsCompact } from "../util/useIsCompact";
 import { BIOMES } from "../engine/biomes";
 
+// Cards that route through the case picker before launching. The third
+// game (Match the Sound, dev-gated) is audio-only so it bypasses this.
+type CasedScreen = "spell-word" | "find-alphabet";
+
 // Picture-based main menu. Designed for ages 3-6: huge buttons, big icons,
 // audio narration on hover, no required reading. Pre-readers can navigate
 // by visual identification + voice cue.
+
+// Feature flag for the voice-selection chip. We currently force every
+// user onto Marissa (the registry default in /audio/voices.json) for
+// simplicity; flip this to true to surface the picker again. The
+// VoicePicker component itself stays in this file regardless.
+const SHOW_VOICE_PICKER = false;
 
 type GameCardProps = {
   // Either an emoji glyph or a URL for a PNG icon. PNG wins when both
@@ -173,7 +183,11 @@ export function MainMenu() {
   const collected = useGameStore((s) => s.collected);
   const avatar = useGameStore((s) => s.avatar);
   const setAvatar = useGameStore((s) => s.setAvatar);
+  const setLetterCase = useGameStore((s) => s.setLetterCase);
   const [showStickers, setShowStickers] = useState(false);
+  // Pending screen waiting on a case-picker decision. null when the
+  // picker is closed.
+  const [pickingFor, setPickingFor] = useState<CasedScreen | null>(null);
   const compact = useIsCompact();
 
   // Stop any leftover voice clip if we land on the menu mid-utterance,
@@ -250,7 +264,7 @@ export function MainMenu() {
           subtitle="Find the missing pet"
           color="#ffd56b"
           voiceClipId={audio.menu("spell")}
-          onSelect={() => setScreen("spell-word")}
+          onSelect={() => setPickingFor("spell-word")}
           ariaLabel="Spell the Word — find the letters that spell missing animals"
           compact={compact}
         />
@@ -261,7 +275,7 @@ export function MainMenu() {
           subtitle="A all the way to Z"
           color="#9bdc4a"
           voiceClipId={audio.menu("alphabet")}
-          onSelect={() => setScreen("find-alphabet")}
+          onSelect={() => setPickingFor("find-alphabet")}
           ariaLabel="Find the alphabet from A to Z"
           compact={compact}
         />
@@ -304,7 +318,11 @@ export function MainMenu() {
       >
         <AvatarPicker avatar={avatar} setAvatar={setAvatar} compact={compact} />
         <BiomePicker compact={compact} />
-        <VoicePicker audioMode={audioMode} />
+        {/* Voice picker is hidden for now — every user lands on
+            Marissa via voices.json's isDefault. Flip SHOW_VOICE_PICKER
+            back to true to re-enable; the component itself is kept
+            in this file untouched so the toggle is one line. */}
+        {SHOW_VOICE_PICKER && <VoicePicker audioMode={audioMode} />}
       </footer>
 
       {/* Authoring tools — only mounted on localhost / dev builds, never
@@ -380,6 +398,139 @@ export function MainMenu() {
       </button>
 
       <StickerBook open={showStickers} onClose={() => setShowStickers(false)} />
+      <CasePicker
+        screen={pickingFor}
+        onCancel={() => setPickingFor(null)}
+        onPick={(c) => {
+          if (!pickingFor) return;
+          const target = pickingFor;
+          setLetterCase(c);
+          setPickingFor(null);
+          setScreen(target);
+        }}
+      />
+    </div>
+  );
+}
+
+// Big-button modal that asks the kid which case they want to play in
+// before launching Spell the Word or Find the Alphabet. Three options
+// arranged horizontally on desktop, stacked on phones. Closes on
+// outside click or Escape — same affordance as the other modals.
+type CasePickerProps = {
+  screen: CasedScreen | null;
+  onCancel: () => void;
+  onPick: (c: LetterCase) => void;
+};
+
+function CasePicker({ screen, onCancel, onPick }: CasePickerProps) {
+  const compact = useIsCompact();
+  const dialogRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!screen) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onCancel(); };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [screen, onCancel]);
+  if (!screen) return null;
+  const heading = screen === "spell-word" ? "Spell the Word" : "Find the Alphabet";
+  const options: { id: LetterCase; label: string; sample: string; color: string }[] = [
+    { id: "uppercase", label: "Uppercase", sample: "ABC", color: "#ffd56b" },
+    { id: "lowercase", label: "Lowercase", sample: "abc", color: "#9bdc4a" },
+    { id: "mixed", label: "Mixed", sample: "AbC", color: "#7e9bff" },
+  ];
+  return (
+    <div
+      role="dialog"
+      aria-label={`Pick letter case for ${heading}`}
+      onClick={(e) => {
+        if (dialogRef.current && !dialogRef.current.contains(e.target as Node)) onCancel();
+      }}
+      style={{
+        position: "absolute",
+        inset: 0,
+        background: "rgba(0,0,0,0.55)",
+        display: "grid",
+        placeItems: "center",
+        zIndex: 60,
+        padding: 24,
+      }}
+    >
+      <div
+        ref={dialogRef}
+        style={{
+          background: "linear-gradient(180deg, #fff7d6, #ffd56b)",
+          border: "8px solid white",
+          borderRadius: 32,
+          padding: compact ? 22 : 32,
+          maxWidth: 720,
+          width: "100%",
+          boxShadow: "0 18px 0 rgba(0,0,0,0.18), 0 30px 60px rgba(0,0,0,0.3)",
+          color: "#3a2a14",
+          textAlign: "center",
+        }}
+      >
+        <div style={{ fontSize: compact ? 30 : 42, fontWeight: 900 }}>{heading}</div>
+        <div style={{ marginTop: 6, fontWeight: 800, fontSize: compact ? 16 : 20 }}>
+          Pick your letters
+        </div>
+        <div
+          style={{
+            marginTop: compact ? 18 : 24,
+            display: "grid",
+            gridTemplateColumns: compact ? "1fr" : "repeat(3, 1fr)",
+            gap: compact ? 12 : 18,
+          }}
+        >
+          {options.map((opt) => (
+            <button
+              key={opt.id}
+              type="button"
+              onClick={() => onPick(opt.id)}
+              aria-label={`${opt.label} letters — example ${opt.sample}`}
+              style={{
+                appearance: "none",
+                border: "6px solid white",
+                background: opt.color,
+                color: "#3a2a14",
+                borderRadius: 24,
+                padding: compact ? "16px 12px" : "22px 16px",
+                cursor: "pointer",
+                boxShadow: "0 10px 0 rgba(0,0,0,0.18), 0 14px 24px rgba(0,0,0,0.18)",
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                gap: 4,
+              }}
+            >
+              <span style={{ fontSize: compact ? 44 : 60, fontWeight: 900, lineHeight: 1 }} aria-hidden>
+                {opt.sample}
+              </span>
+              <span style={{ fontSize: compact ? 18 : 22, fontWeight: 900, marginTop: 6 }}>
+                {opt.label}
+              </span>
+            </button>
+          ))}
+        </div>
+        <button
+          type="button"
+          onClick={onCancel}
+          style={{
+            marginTop: compact ? 18 : 22,
+            appearance: "none",
+            border: "3px solid white",
+            background: "rgba(255,255,255,0.4)",
+            color: "#3a2a14",
+            borderRadius: 18,
+            padding: "10px 18px",
+            fontSize: 16,
+            fontWeight: 800,
+            cursor: "pointer",
+          }}
+        >
+          ◀ Back
+        </button>
+      </div>
     </div>
   );
 }
@@ -611,20 +762,26 @@ function AvatarPicker({
             aria-pressed={active}
             style={{
               appearance: "none",
-              border: active ? "5px solid white" : "3px solid rgba(255,255,255,0.6)",
+              // Match BiomePicker chip dimensions exactly so the
+              // avatar / world rows sit at the same height in the
+              // bottom flex bar.
+              border: active ? "4px solid #3a2a14" : "3px solid white",
               background: opt.color,
               color: "white",
-              borderRadius: 22,
-              padding: "10px 14px 6px",
+              borderRadius: 18,
+              padding: "8px 12px 6px",
               cursor: "pointer",
-              boxShadow: active ? "0 8px 0 rgba(0,0,0,0.2)" : "0 4px 0 rgba(0,0,0,0.15)",
-              minWidth: 76,
+              boxShadow: active ? "0 6px 0 rgba(0,0,0,0.18)" : "0 4px 0 rgba(0,0,0,0.12)",
+              minWidth: 64,
               transform: active ? "translateY(-2px)" : "none",
               transition: "transform 0.12s ease",
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
             }}
           >
-            <div style={{ fontSize: 36, lineHeight: 1 }} aria-hidden>{opt.emoji}</div>
-            <div style={{ fontSize: 12, fontWeight: 900, marginTop: 4 }}>{opt.label}</div>
+            <span aria-hidden style={{ fontSize: 22, lineHeight: 1 }}>{opt.emoji}</span>
+            <span style={{ fontSize: 11, fontWeight: 900, marginTop: 2 }}>{opt.label}</span>
           </button>
         );
       })}
