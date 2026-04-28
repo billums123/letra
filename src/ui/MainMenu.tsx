@@ -35,7 +35,7 @@ function GameCard({ emoji, iconUrl, title, subtitle, color, voiceClipId, onSelec
     lastSpoken.current = now;
     audio.play(voiceClipId);
   };
-  const iconSize = compact ? 120 : 156;
+  const iconSize = compact ? 120 : 180;
   // Compose the card transform from press / hover state. Pressed wins
   // (drops the card 4px) but hover gives a small lift + tilt that
   // reads as "this is alive, you can tap me".
@@ -71,7 +71,7 @@ function GameCard({ emoji, iconUrl, title, subtitle, color, voiceClipId, onSelec
         minWidth: 0,
         // Fixed minimum so all cards stay the same height even if a
         // longer title wraps to two lines.
-        minHeight: compact ? 240 : 300,
+        minHeight: compact ? 240 : 340,
         cursor: "pointer",
         boxShadow: pressed
           ? "0 4px 0 rgba(0,0,0,0.18), 0 6px 12px rgba(0,0,0,0.15)"
@@ -139,7 +139,7 @@ function GameCard({ emoji, iconUrl, title, subtitle, color, voiceClipId, onSelec
             // clamp() keeps the title from blowing the card width when
             // it wraps (Find the Alphabet → 2 lines on narrow phones)
             // while still reading large on desktop.
-            fontSize: compact ? "clamp(18px, 5vw, 22px)" : 26,
+            fontSize: compact ? "clamp(18px, 5vw, 22px)" : 30,
             fontWeight: 900,
             letterSpacing: 0.4,
             lineHeight: 1.1,
@@ -150,7 +150,7 @@ function GameCard({ emoji, iconUrl, title, subtitle, color, voiceClipId, onSelec
         </div>
         <div
           style={{
-            fontSize: compact ? 13 : 16,
+            fontSize: compact ? 13 : 17,
             fontWeight: 700,
             opacity: 0.78,
           }}
@@ -217,14 +217,25 @@ export function MainMenu() {
       <main
         style={{
           display: "grid",
-          // auto-fit collapses to one column on phones and expands to
-          // 3 wide on a desktop without a separate breakpoint.
-          gridTemplateColumns: `repeat(auto-fit, minmax(${compact ? "240px" : "260px"}, 1fr))`,
-          gap: compact ? 12 : 18,
-          padding: compact ? "12px 14px" : "16px 24px",
+          // auto-fit collapses to one column on phones, two cards
+          // sit comfortably on tablet, and on desktop we cap each
+          // card at ~360px so two-card layouts don't stretch into
+          // wide ribbons. The container max-width keeps everything
+          // centred with healthy breathing room on big screens.
+          gridTemplateColumns: compact
+            ? "repeat(auto-fit, minmax(240px, 1fr))"
+            : "repeat(auto-fit, minmax(280px, 360px))",
+          justifyContent: "center",
+          alignItems: "stretch",
+          gap: compact ? 12 : 28,
+          padding: compact ? "12px 14px" : "24px 32px",
           maxWidth: 1100,
           width: "100%",
           margin: "0 auto",
+          // Push the cards toward the visual centre on tall desktop
+          // viewports rather than letting them sit at the very top.
+          flex: compact ? "0 0 auto" : "1 1 auto",
+          alignSelf: "center",
         }}
       >
         <GameCard
