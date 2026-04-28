@@ -5,6 +5,7 @@ import { StickerBook } from "./StickerBook";
 import { ALPHABET } from "../audio/types";
 import { isDev } from "../util/isDev";
 import { useIsCompact } from "../util/useIsCompact";
+import { BIOMES } from "../engine/biomes";
 
 // Picture-based main menu. Designed for ages 3-6: huge buttons, big icons,
 // audio narration on hover, no required reading. Pre-readers can navigate
@@ -268,6 +269,7 @@ export function MainMenu() {
       </main>
 
       <AvatarPicker avatar={avatar} setAvatar={setAvatar} compact={compact} />
+      <BiomePicker compact={compact} />
       <footer
         style={{
           padding: compact ? "10px 14px 18px" : "12px 24px 16px",
@@ -307,6 +309,14 @@ export function MainMenu() {
             style={compact ? compactCornerBtn : cornerBtn}
           >
             {compact ? "✏️" : "✏️ Editor"}
+          </button>
+          <button
+            type="button"
+            onClick={() => setScreen("alien-editor")}
+            aria-label="Open the alien editor"
+            style={compact ? compactCornerBtn : cornerBtn}
+          >
+            {compact ? "👽" : "👽 Alien"}
           </button>
         </div>
       )}
@@ -612,6 +622,94 @@ function AvatarPicker({
           >
             <div style={{ fontSize: 36, lineHeight: 1 }} aria-hidden>{opt.emoji}</div>
             <div style={{ fontSize: 12, fontWeight: 900, marginTop: 4 }}>{opt.label}</div>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+// Pill chips along the bottom-right (or top of footer on phones)
+// that swap the active biome. Currently experimental — the registry
+// in src/engine/biomes ships meadow + moon. Selecting one writes
+// to the store; the engine reads it on next mount, so the choice
+// takes effect when the kid enters a game.
+function BiomePicker({ compact }: { compact: boolean }) {
+  const biomeId = useGameStore((s) => s.biomeId);
+  const setBiomeId = useGameStore((s) => s.setBiomeId);
+  const setAvatar = useGameStore((s) => s.setAvatar);
+  return (
+    <div
+      style={
+        compact
+          ? {
+              display: "flex",
+              gap: 8,
+              alignItems: "center",
+              justifyContent: "center",
+              padding: "8px 14px 0",
+              flexWrap: "wrap",
+              zIndex: 8,
+            }
+          : {
+              position: "absolute",
+              bottom: 24,
+              right: 24,
+              display: "flex",
+              gap: 8,
+              zIndex: 8,
+              alignItems: "center",
+            }
+      }
+      aria-label="Pick a world"
+    >
+      <span
+        style={{
+          alignSelf: "center",
+          fontSize: 13,
+          fontWeight: 800,
+          background: "rgba(255,255,255,0.8)",
+          color: "#3a2a14",
+          padding: "6px 10px",
+          borderRadius: 10,
+        }}
+      >
+        World:
+      </span>
+      {BIOMES.map((b) => {
+        const active = biomeId === b.id;
+        return (
+          <button
+            key={b.id}
+            type="button"
+            onClick={() => {
+              setBiomeId(b.id);
+              // Each biome can suggest a "go-with" avatar. Apply it
+              // automatically so picking the moon also flips you to
+              // the rocket — feels right and saves a tap.
+              if (b.recommendedAvatar) setAvatar(b.recommendedAvatar);
+            }}
+            aria-label={`World: ${b.label}${active ? ", currently selected" : ""}`}
+            aria-pressed={active}
+            style={{
+              appearance: "none",
+              border: active ? "4px solid #3a2a14" : "3px solid white",
+              background: active ? "#fff7d6" : "rgba(255,255,255,0.85)",
+              color: "#3a2a14",
+              borderRadius: 18,
+              padding: "8px 12px 6px",
+              cursor: "pointer",
+              boxShadow: active ? "0 6px 0 rgba(0,0,0,0.18)" : "0 4px 0 rgba(0,0,0,0.12)",
+              minWidth: 64,
+              transform: active ? "translateY(-2px)" : "none",
+              transition: "transform 0.12s ease",
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+            }}
+          >
+            <span aria-hidden style={{ fontSize: 22, lineHeight: 1 }}>{b.emoji}</span>
+            <span style={{ fontSize: 11, fontWeight: 900, marginTop: 2 }}>{b.label}</span>
           </button>
         );
       })}

@@ -11,6 +11,7 @@ import { FindAlphabetGame } from "../games/FindAlphabet";
 import { SoundMatchGame } from "../games/SoundMatch";
 import { LetterTest } from "../ui/LetterTest";
 import { LetterEditor } from "../ui/LetterEditor";
+import { AlienEditor } from "../ui/AlienEditor";
 import { isDev } from "../util/isDev";
 
 export function Game() {
@@ -47,7 +48,13 @@ export function Game() {
   // If a non-dev visitor lands on a dev-only screen (e.g. via leftover
   // localStorage state or a stale link), bounce them back to the main menu.
   useEffect(() => {
-    if (!dev && (screen === "letter-test" || screen === "letter-editor" || screen === "sound-match")) {
+    if (
+      !dev &&
+      (screen === "letter-test" ||
+        screen === "letter-editor" ||
+        screen === "alien-editor" ||
+        screen === "sound-match")
+    ) {
       goToMenu();
     }
   }, [dev, screen, goToMenu]);
@@ -63,7 +70,7 @@ export function Game() {
   useEffect(() => {
     if (screen === "menu") {
       void music.play(MENU_TRACK, 0.18);
-    } else if (screen === "letter-test" || screen === "letter-editor") {
+    } else if (screen === "letter-test" || screen === "letter-editor" || screen === "alien-editor") {
       music.stop();
     } else {
       void music.play(pickGameTrack(), 0.16);
@@ -78,6 +85,7 @@ export function Game() {
       {screen === "sound-match" && <SoundMatchGame />}
       {dev && screen === "letter-test" && <LetterTest />}
       {dev && screen === "letter-editor" && <LetterEditor />}
+      {dev && screen === "alien-editor" && <AlienEditor />}
       <VirtualJoystick visible={screen !== "menu"} />
     </div>
   );

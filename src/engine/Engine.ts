@@ -2,6 +2,7 @@ import * as THREE from "three";
 import { buildAvatar, type PlayerHandles } from "./player";
 import type { AvatarKind } from "../state/store";
 import { buildWorld, type Obstacle } from "./world";
+import { getBiome } from "./biomes";
 import { readInput } from "../input/useInput";
 
 const PLAYER_RADIUS = 0.55;
@@ -50,7 +51,20 @@ export class Engine {
     this.actors.delete(actor);
   }
 
-  constructor(canvas: HTMLCanvasElement, events: EngineEvents = {}, avatar: AvatarKind = "kid") {
+  // Cleanup hook the active biome registers via applyScene — runs in
+  // dispose() so removing the engine takes the biome's lights with it.
+  private disposeBiome: (() => void) | null = null;
+  // Optional ground-height sampler from the active biome. When set,
+  // the per-frame loop offsets the player Y by it so e.g. the car
+  // visibly dips into moon craters.
+  private terrainHeight: ((x: number, z: number) => number) | null = null;
+
+  constructor(
+    canvas: HTMLCanvasElement,
+    events: EngineEvents = {},
+    avatar: AvatarKind = "kid",
+    biomeId: string = "meadow"
+  ) {
     this.events = events;
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: false });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -59,38 +73,25 @@ export class Engine {
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
 
     this.scene = new THREE.Scene();
-    this.scene.background = new THREE.Color(0xa8e2ff);
-    this.scene.fog = new THREE.Fog(0xa8e2ff, 60, 160);
 
     this.camera = new THREE.PerspectiveCamera(55, 1, 0.1, 500);
     this.camera.position.copy(this.cameraOffset);
     this.camera.lookAt(0, 1.2, 0);
 
-    // Lights
-    const hemi = new THREE.HemisphereLight(0xfff7d6, 0x86d36a, 0.6);
-    this.scene.add(hemi);
+    // Biome owns sky / fog / lighting. applyScene returns a cleanup
+    // function the engine runs on dispose so swapping biomes between
+    // mounts doesn't leak lights.
+    const biome = getBiome(biomeId);
+    this.disposeBiome = biome.applyScene(this.scene);
 
-    const sun = new THREE.DirectionalLight(0xffffff, 1.4);
-    sun.position.set(15, 25, 10);
-    sun.castShadow = true;
-    // Modest shadow map: kid-game scale doesn't need high-res shadows, and
-    // smaller maps keep the integrated GPU happy on Macs and mobile.
-    sun.shadow.mapSize.set(1024, 1024);
-    sun.shadow.camera.left = -25;
-    sun.shadow.camera.right = 25;
-    sun.shadow.camera.top = 25;
-    sun.shadow.camera.bottom = -25;
-    sun.shadow.camera.near = 1;
-    sun.shadow.camera.far = 70;
-    sun.shadow.bias = -0.0005;
-    this.scene.add(sun);
-
-    const ambient = new THREE.AmbientLight(0xffffff, 0.4);
-    this.scene.add(ambient);
-
-    // World + player
-    const world = buildWorld();
+    // World + player. The biome's tick callbacks may want to read the
+    // player position (e.g. moon aliens that wave when bumped) — pass
+    // a getter so they can null-check during teardown. Biomes that
+    // deform the ground can also register a height sampler we read in
+    // the per-frame loop so the avatar dips into depressions.
+    const world = buildWorld(biome, () => this.player?.group.position ?? null);
     this.scene.add(world.group);
+    this.terrainHeight = world.terrainHeight;
     this.obstacles = world.obstacles;
     this.worldRadius = world.worldRadius;
     // Per-frame world animations (drifting butterflies etc) are
@@ -172,14 +173,23 @@ export class Engine {
         pp.z *= k;
       }
 
+      // Terrain follow — biomes that deform the ground (e.g. moon
+      // craters) register a height sampler. We add the sampled offset
+      // to the player Y AFTER the avatar's own bob so the kid/car
+      // settles into the depression and the rocket dips with it.
+      if (this.terrainHeight) {
+        pp.y += this.terrainHeight(pp.x, pp.z);
+      }
+
       // Smooth follow camera. We follow only the XZ plane — the player's
       // Y oscillates from idle bob, but a camera that bobs with them
       // makes the whole world feel like it's nodding. Anchor Y to the
-      // ground (player.y = 0) so the camera glides flat.
+      // terrain so the camera dips into craters along with the player.
       const pos = this.player.position();
-      this.tmpVec.set(pos.x, 0, pos.z).add(this.cameraOffset);
+      const cameraAnchorY = this.terrainHeight ? this.terrainHeight(pos.x, pos.z) : 0;
+      this.tmpVec.set(pos.x, cameraAnchorY, pos.z).add(this.cameraOffset);
       this.camera.position.lerp(this.tmpVec, 0.08);
-      this.tmpVec.set(pos.x, 0, pos.z).add(this.cameraLookOffset);
+      this.tmpVec.set(pos.x, cameraAnchorY, pos.z).add(this.cameraLookOffset);
       this.camera.lookAt(this.tmpVec);
 
       // Per-actor update first (so collected letters can hide before render).
@@ -208,6 +218,10 @@ export class Engine {
     // Avatars own continuous resources (e.g., the car's motor loop) —
     // give them a chance to tear down before we dispose meshes.
     this.player.dispose?.();
+    // Biomes own scene-level resources (lights, fog, background) —
+    // tear those down so consecutive mounts don't stack lights.
+    this.disposeBiome?.();
+    this.disposeBiome = null;
     this.scene.traverse((obj) => {
       const m = obj as THREE.Mesh;
       if (m.geometry) m.geometry.dispose();

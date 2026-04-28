@@ -1,8 +1,9 @@
 import * as THREE from "three";
+import type { Biome, BiomeContext } from "./biomes/types";
 
 // Deterministic pseudo-random — fed a different seed each session so the
 // world layout shuffles on every reload.
-function mulberry32(seed: number) {
+export function mulberry32(seed: number) {
   return () => {
     seed |= 0;
     seed = (seed + 0x6d2b79f5) | 0;
@@ -16,11 +17,11 @@ function mulberry32(seed: number) {
 // Random uint seed for a new mulberry32 instance. Each prop pool gets
 // its own seed so changing the count of one (e.g. trees) doesn't ripple
 // into the placement of another (e.g. mushrooms).
-function freshSeed(): number {
+export function freshSeed(): number {
   return (Math.random() * 0xffffffff) | 0;
 }
 
-const WORLD_RADIUS = 60;
+export const WORLD_RADIUS = 60;
 
 // An obstacle the player and letters should avoid. We model every world
 // prop as a vertical cylinder (good enough for the round-ish shapes we
@@ -50,7 +51,7 @@ export type WorldHandles = {
 // `obstacles` and `taken`. Returns null if nothing fits — caller can
 // just skip that prop. Stops the world from generating overlapping
 // trees, mushrooms, boulders, etc.
-function findOpenSpot(
+export function findOpenSpot(
   rand: () => number,
   scatterRadius: number,
   selfRadius: number,
@@ -75,15 +76,51 @@ function findOpenSpot(
   return null;
 }
 
-export function buildWorld(): WorldHandles {
+// Builds the world for the supplied biome. The biome owns its props
+// (ground, scenery, sky-furniture); buildWorld is the dispatcher that
+// hands the biome a context to populate. Engine adds the resulting
+// group to the scene and wires the tick callbacks into its actor loop.
+export type WorldBuildResult = WorldHandles & {
+  // Biomes that deform the ground register a sampler via
+  // ctx.setTerrainHeight; we expose it back to the engine here so it
+  // can offset the avatar's Y each frame to follow the surface.
+  terrainHeight: ((x: number, z: number) => number) | null;
+};
+
+export function buildWorld(
+  biome: Biome,
+  getPlayerPosition: () => THREE.Vector3 | null = () => null
+): WorldBuildResult {
   const group = new THREE.Group();
-  group.name = "World";
+  group.name = `World:${biome.id}`;
   const obstacles: Obstacle[] = [];
   const tick: Array<(dt: number, t: number) => void> = [];
+  let terrainHeight: ((x: number, z: number) => number) | null = null;
+  const ctx: BiomeContext = {
+    group,
+    obstacles,
+    tick,
+    worldRadius: WORLD_RADIUS,
+    random: Math.random,
+    getPlayerPosition,
+    setTerrainHeight: (fn) => {
+      terrainHeight = fn;
+    },
+  };
+  biome.buildProps(ctx);
+  return { group, worldRadius: WORLD_RADIUS, obstacles, tick, terrainHeight };
+}
+
+// The original meadow content is now the body of `buildMeadow` so it
+// can be referenced from the biome registry. Keeping it inline here
+// rather than splitting into another file because the prop factories
+// it uses already live in this module.
+export function buildMeadow(ctx: BiomeContext): void {
+  const { group, obstacles, tick, worldRadius } = ctx;
 
   // Ground — large green disc
   const ground = new THREE.Mesh(
-    new THREE.CircleGeometry(WORLD_RADIUS + 30, 64),
+    new THREE.CircleGeometry(worldRadius + 30, 64),
     new THREE.MeshStandardMaterial({ color: 0x86d36a, roughness: 1 })
   );
   ground.rotation.x = -Math.PI / 2;
@@ -92,7 +129,7 @@ export function buildWorld(): WorldHandles {
 
   // Distant skirt — smaller darker disc behind for depth
   const skirt = new THREE.Mesh(
-    new THREE.RingGeometry(WORLD_RADIUS + 30, WORLD_RADIUS + 80, 48),
+    new THREE.RingGeometry(worldRadius + 30, worldRadius + 80, 48),
     new THREE.MeshStandardMaterial({ color: 0x6db854, roughness: 1, side: THREE.DoubleSide })
   );
   skirt.rotation.x = -Math.PI / 2;
@@ -101,7 +138,7 @@ export function buildWorld(): WorldHandles {
   group.add(skirt);
 
   // ── Boundary ring ──────────────────────────────────────────────────────
-  // 26 chunky boulders just inside WORLD_RADIUS. The angle of each rock
+  // 26 chunky boulders just inside worldRadius. The angle of each rock
   // is fixed (every 360/26 degrees) so the boundary always reads as a
   // complete circle, but the size, hue, and small wobble are randomized
   // per session so the boundary doesn't look identical each load.
@@ -110,7 +147,7 @@ export function buildWorld(): WorldHandles {
   for (let i = 0; i < boundaryCount; i++) {
     const a = (i / boundaryCount) * Math.PI * 2;
     const wobble = (boundaryRand() - 0.5) * 1.2;
-    const rDist = WORLD_RADIUS - 1.2 + wobble;
+    const rDist = worldRadius - 1.2 + wobble;
     const x = Math.cos(a) * rDist;
     const z = Math.sin(a) * rDist;
     const size = 1.2 + boundaryRand() * 0.8;
@@ -157,7 +194,7 @@ export function buildWorld(): WorldHandles {
   for (let i = 0; i < 26; i++) {
     const scale = 0.9 + treeRand() * 0.7;
     const radius = 1.4 * scale;
-    const spot = findOpenSpot(treeRand, WORLD_RADIUS - 4, radius, obstacles, { minRadius: 8 });
+    const spot = findOpenSpot(treeRand, worldRadius - 4, radius, obstacles, { minRadius: 8 });
     if (!spot) continue;
     const hue = 100 + treeRand() * 40;
     const tree = makeTree(hue, scale);
@@ -172,7 +209,7 @@ export function buildWorld(): WorldHandles {
   const mushRand = mulberry32(freshSeed());
   for (let i = 0; i < 22; i++) {
     const radius = 0.7;
-    const spot = findOpenSpot(mushRand, WORLD_RADIUS - 4, radius, obstacles, { minRadius: 6 });
+    const spot = findOpenSpot(mushRand, worldRadius - 4, radius, obstacles, { minRadius: 6 });
     if (!spot) continue;
     const hue = mushRand() * 360;
     const m = makeMushroom(hue);
@@ -187,7 +224,7 @@ export function buildWorld(): WorldHandles {
   for (let i = 0; i < 8; i++) {
     const size = 0.9 + boulderRand() * 0.7;
     const radius = size * 0.8;
-    const spot = findOpenSpot(boulderRand, WORLD_RADIUS - 6, radius, obstacles, { minRadius: 6 });
+    const spot = findOpenSpot(boulderRand, worldRadius - 6, radius, obstacles, { minRadius: 6 });
     if (!spot) continue;
     const hue = (boulderRand() * 360) | 0;
     const b = makeBoulder(size, hue);
@@ -202,7 +239,7 @@ export function buildWorld(): WorldHandles {
   // they don't visually merge into props.
   const flowerRand = mulberry32(freshSeed());
   for (let i = 0; i < 60; i++) {
-    const spot = findOpenSpot(flowerRand, WORLD_RADIUS - 3, 0.3, obstacles, { minRadius: 0, pad: 0.1, maxAttempts: 12 });
+    const spot = findOpenSpot(flowerRand, worldRadius - 3, 0.3, obstacles, { minRadius: 0, pad: 0.1, maxAttempts: 12 });
     if (!spot) continue;
     const hue = flowerRand() * 360;
     const f = makeFlower(hue);
@@ -248,7 +285,8 @@ export function buildWorld(): WorldHandles {
     group.add(c);
   }
 
-  return { group, worldRadius: WORLD_RADIUS, obstacles, tick };
+  // buildMeadow doesn't need to return anything — its job is to fill
+  // ctx.group / .obstacles / .tick. The dispatcher wraps it.
 }
 
 // Picks a position within `radius` of (0,0) that's clear of every obstacle
@@ -302,7 +340,7 @@ export function pickClearSpawn(
 // shake-on-bump animation into the engine's actor loop. Foliage lives in
 // its own pivoting sub-group so the trunk stays planted while the leaves
 // wobble.
-function makeTree(hue: number, scale: number) {
+export function makeTree(hue: number, scale: number) {
   const g = new THREE.Group();
   g.scale.setScalar(scale);
   const trunk = new THREE.Mesh(
@@ -361,7 +399,7 @@ function makeTree(hue: number, scale: number) {
   };
 }
 
-function makeMushroom(hue: number) {
+export function makeMushroom(hue: number) {
   const m = new THREE.Group();
   const stem = new THREE.Mesh(
     new THREE.CylinderGeometry(0.18, 0.22, 0.6, 10),
@@ -393,7 +431,7 @@ function makeMushroom(hue: number) {
   return m;
 }
 
-function makeCloud() {
+export function makeCloud() {
   const c = new THREE.Group();
   const mat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 1 });
   const sizes = [
@@ -411,7 +449,7 @@ function makeCloud() {
 }
 
 // Chunky decorative boulder.
-function makeBoulder(size: number, hue: number) {
+export function makeBoulder(size: number, hue: number) {
   const g = new THREE.Group();
   const baseColor = new THREE.Color(`hsl(${hue}, 18%, 56%)`);
   const mat = new THREE.MeshStandardMaterial({ color: baseColor, roughness: 1 });
@@ -432,7 +470,7 @@ function makeBoulder(size: number, hue: number) {
 // and out gently, ripples expand from the fountain, and lily pads bob,
 // rotate, and drift around their anchor so the pond reads as alive
 // instead of a frozen blue disc.
-function makePond() {
+export function makePond() {
   const group = new THREE.Group();
   const radius = 3.4;
 
@@ -659,7 +697,7 @@ function makePond() {
 }
 
 // Cute upright flower — stem + 5 petal-spheres + yellow centre.
-function makeFlower(hue: number) {
+export function makeFlower(hue: number) {
   const g = new THREE.Group();
   const stem = new THREE.Mesh(
     new THREE.CylinderGeometry(0.04, 0.05, 0.4, 6),
@@ -685,7 +723,7 @@ function makeFlower(hue: number) {
 }
 
 // Butterfly — body + two flapping wings.
-function makeButterfly(hue: number) {
+export function makeButterfly(hue: number) {
   const group = new THREE.Group();
   const body = new THREE.Mesh(
     new THREE.CylinderGeometry(0.04, 0.04, 0.18, 6),

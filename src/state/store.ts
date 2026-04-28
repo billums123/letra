@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-export type Screen = "menu" | "spell-word" | "find-alphabet" | "sound-match" | "letter-test" | "letter-editor";
+export type Screen = "menu" | "spell-word" | "find-alphabet" | "sound-match" | "letter-test" | "letter-editor" | "alien-editor";
 
 // The character the kid drives around. "kid" is the default chubby
 // orange capsule character; "car" is a cartoony low-poly buggy;
@@ -32,11 +32,17 @@ type GameState = {
   // /audio/voices.json). null means "use the registry default".
   voiceSlug: string | null;
   setVoiceSlug: (slug: string | null) => void;
+
+  // Active biome id. The biome registry lives in src/engine/biomes;
+  // see getBiome() there for the resolution + fallback.
+  biomeId: string;
+  setBiomeId: (id: string) => void;
 };
 
 const STORAGE_KEY = "letra:collected";
 const AVATAR_KEY = "letra:avatar";
 const VOICE_KEY = "letra:voiceSlug";
+const BIOME_KEY = "letra:biomeId";
 
 function loadAvatar(): AvatarKind {
   try {
@@ -69,6 +75,24 @@ function saveVoiceSlug(slug: string | null) {
   try {
     if (slug) localStorage.setItem(VOICE_KEY, slug);
     else localStorage.removeItem(VOICE_KEY);
+  } catch {
+    // Non-fatal.
+  }
+}
+
+function loadBiomeId(): string {
+  try {
+    const raw = localStorage.getItem(BIOME_KEY);
+    if (raw && raw.length > 0) return raw;
+  } catch {
+    // ignore
+  }
+  return "meadow";
+}
+
+function saveBiomeId(id: string) {
+  try {
+    localStorage.setItem(BIOME_KEY, id);
   } catch {
     // Non-fatal.
   }
@@ -123,5 +147,11 @@ export const useGameStore = create<GameState>((set, get) => ({
   setVoiceSlug: (slug) => {
     saveVoiceSlug(slug);
     set({ voiceSlug: slug });
+  },
+
+  biomeId: loadBiomeId(),
+  setBiomeId: (id) => {
+    saveBiomeId(id);
+    set({ biomeId: id });
   },
 }));

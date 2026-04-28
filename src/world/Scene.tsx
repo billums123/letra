@@ -12,14 +12,15 @@ type SceneProps = {
 export function Scene({ onEngineReady, onPlayerPosition }: SceneProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const engineRef = useRef<Engine | null>(null);
-  // Read once on mount — switching avatar mid-game would require teardown
-  // anyway, and the menu is the only place users can change it. This
-  // makes the engine lifecycle clean: one game session = one avatar.
+  // Read once on mount — switching avatar / biome mid-game would
+  // require engine teardown anyway, and the menu is the only place
+  // users can change them. One game session = one avatar + biome.
   const avatar = useGameStore((s) => s.avatar);
+  const biomeId = useGameStore((s) => s.biomeId);
 
   useEffect(() => {
     if (!canvasRef.current) return;
-    const engine = new Engine(canvasRef.current, { onPlayerPosition }, avatar);
+    const engine = new Engine(canvasRef.current, { onPlayerPosition }, avatar, biomeId);
     engineRef.current = engine;
     if (import.meta.env.DEV) {
       const w = window as unknown as { __letra: Engine; __letraInput: typeof getInputDebugState };
