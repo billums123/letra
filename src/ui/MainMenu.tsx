@@ -798,7 +798,6 @@ function BiomePicker({ compact: _compact }: { compact: boolean }) {
   void _compact;
   const biomeId = useGameStore((s) => s.biomeId);
   const setBiomeId = useGameStore((s) => s.setBiomeId);
-  const setAvatar = useGameStore((s) => s.setAvatar);
   return (
     <div
       style={{
@@ -828,11 +827,11 @@ function BiomePicker({ compact: _compact }: { compact: boolean }) {
             key={b.id}
             type="button"
             onClick={() => {
+              // Pick the world only — never touch the avatar. Earlier
+              // we auto-flipped to a biome's recommendedAvatar (moon
+              // → rocket) but that surprised users who were happy
+              // with their current character.
               setBiomeId(b.id);
-              // Each biome can suggest a "go-with" avatar. Apply it
-              // automatically so picking the moon also flips you to
-              // the rocket — feels right and saves a tap.
-              if (b.recommendedAvatar) setAvatar(b.recommendedAvatar);
             }}
             aria-label={`World: ${b.label}${active ? ", currently selected" : ""}`}
             aria-pressed={active}

@@ -1,0 +1,11 @@
+id,file_path,model,text_to_paste,sounds_like,stability,similarity_boost,style,speaker_boost,status,notes
+prompt-spell-CAT,public/audio/marissa/prompt-spell-CAT.mp3,eleven_multilingual_v2,"Oh no! A cat went missing! Help me find the letters that spell C, A, T to find the cat!",intro for CAT,0.5,0.75,0.4,true,todo,
+reveal-spell-CAT,public/audio/marissa/reveal-spell-CAT.mp3,eleven_multilingual_v2,We found the cat!,reveal for CAT,0.5,0.75,0.4,true,todo,
+prompt-spell-DOG,public/audio/marissa/prompt-spell-DOG.mp3,eleven_multilingual_v2,"Where did our puppy go? Find the letters D, O, G and we will find the dog!",intro for DOG,0.5,0.75,0.4,true,todo,
+reveal-spell-DOG,public/audio/marissa/reveal-spell-DOG.mp3,eleven_multilingual_v2,There is the dog!,reveal for DOG,0.5,0.75,0.4,true,todo,
+prompt-spell-SUN,public/audio/marissa/prompt-spell-SUN.mp3,eleven_multilingual_v2,"It is so cloudy! Help bring back the sun by finding S, U, N!",intro for SUN,0.5,0.75,0.4,true,todo,
+reveal-spell-SUN,public/audio/marissa/reveal-spell-SUN.mp3,eleven_multilingual_v2,"Hooray, the sun is back!",reveal for SUN,0.5,0.75,0.4,true,todo,
+prompt-spell-BUS,public/audio/marissa/prompt-spell-BUS.mp3,eleven_multilingual_v2,"We need to catch the bus! Find the letters B, U, S to bring it!",intro for BUS,0.5,0.75,0.4,true,todo,
+reveal-spell-BUS,public/audio/marissa/reveal-spell-BUS.mp3,eleven_multilingual_v2,All aboard the bus!,reveal for BUS,0.5,0.75,0.4,true,todo,
+prompt-spell-PIG,public/audio/marissa/prompt-spell-PIG.mp3,eleven_multilingual_v2,"Our friend the pig is hiding. Find P, I, G to call them out!",intro for PIG,0.5,0.75,0.4,true,todo,
+reveal-spell-PIG,public/audio/marissa/reveal-spell-PIG.mp3,eleven_multilingual_v2,"Oink oink, the pig is here!",reveal for PIG,0.5,0.75,0.4,true,todo,

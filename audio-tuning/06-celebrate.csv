@@ -1,0 +1,7 @@
+id,file_path,model,text_to_paste,sounds_like,stability,similarity_boost,style,speaker_boost,status,notes
+celebrate-1,public/audio/marissa/celebrate-1.mp3,eleven_multilingual_v2,You did it!,celebrate 1,0.5,0.75,0.4,true,todo,
+celebrate-2,public/audio/marissa/celebrate-2.mp3,eleven_multilingual_v2,Great job!,celebrate 2,0.5,0.75,0.4,true,todo,
+celebrate-3,public/audio/marissa/celebrate-3.mp3,eleven_multilingual_v2,Wonderful!,celebrate 3,0.5,0.75,0.4,true,todo,
+celebrate-4,public/audio/marissa/celebrate-4.mp3,eleven_multilingual_v2,Amazing!,celebrate 4,0.5,0.75,0.4,true,todo,
+celebrate-5,public/audio/marissa/celebrate-5.mp3,eleven_multilingual_v2,You are a star!,celebrate 5,0.5,0.75,0.4,true,todo,
+celebrate-6,public/audio/marissa/celebrate-6.mp3,eleven_multilingual_v2,Way to go!,celebrate 6,0.5,0.75,0.4,true,todo,

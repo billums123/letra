@@ -1,0 +1,6 @@
+id,file_path,model,text_to_paste,sounds_like,stability,similarity_boost,style,speaker_boost,status,notes
+menu-welcome,public/audio/marissa/menu-welcome.mp3,eleven_multilingual_v2,Welcome to Letra! Pick a game to start!,menu welcome,0.5,0.75,0.4,true,todo,
+menu-spell,public/audio/marissa/menu-spell.mp3,eleven_multilingual_v2,Spell the word!,menu spell,0.5,0.75,0.4,true,todo,
+menu-alphabet,public/audio/marissa/menu-alphabet.mp3,eleven_multilingual_v2,Find the alphabet!,menu alphabet,0.5,0.75,0.4,true,todo,
+menu-sounds,public/audio/marissa/menu-sounds.mp3,eleven_multilingual_v2,Match the sound!,menu sounds,0.5,0.75,0.4,true,todo,
+menu-back,public/audio/marissa/menu-back.mp3,eleven_multilingual_v2,Back to the main menu!,menu back,0.5,0.75,0.4,true,todo,
