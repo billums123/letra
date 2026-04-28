@@ -43,7 +43,6 @@ export function SoundMatchGame() {
   const avatar = useGameStore((s) => s.avatar);
   const [round, setRound] = useState(0);
   const [completed, setCompleted] = useState(false);
-  const [target, setTarget] = useState<string | null>(null);
   const engineRef = useRef<Engine | null>(null);
   const lettersRef = useRef<LetterEntry[]>([]);
   const targetRef = useRef<string | null>(null);
@@ -64,7 +63,6 @@ export function SoundMatchGame() {
     const candidates = shuffle([...ALPHABET]).slice(0, choiceCount);
     const targetLetter = candidates[Math.floor(Math.random() * candidates.length)];
     targetRef.current = targetLetter;
-    setTarget(targetLetter);
 
     const minR = 7 + roundIndex * 0.4;
     const maxR = minR + 6;
@@ -194,11 +192,6 @@ export function SoundMatchGame() {
     }
   };
 
-  const onReplayPrompt = () => {
-    audio.stop();
-    if (target) audio.play(audio.letterSound(target));
-  };
-
   useEffect(() => {
     return () => {
       const engine = engineRef.current;
@@ -220,7 +213,6 @@ export function SoundMatchGame() {
       <HUD
         title={completed ? "Great work!" : `Round ${round + 1} of ${ROUNDS_PER_GAME}`}
         prompt={completed ? "You matched them all!" : `Listen, then ${moveVerb(avatar)} to the matching letter.`}
-        onReplayPrompt={onReplayPrompt}
       />
     </div>
   );

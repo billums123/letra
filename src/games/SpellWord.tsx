@@ -148,11 +148,6 @@ function SpellWordRound({
     }
   };
 
-  const onReplayPrompt = () => {
-    if (completed) audio.play(`reveal-spell-${word.word}`);
-    else audio.play(audio.prompt(`spell-${word.word}`));
-  };
-
   useEffect(() => {
     return () => {
       const engine = engineRef.current;
@@ -177,7 +172,6 @@ function SpellWordRound({
         title={`Spell: ${word.word}`}
         prompt={completed ? "🎉 You spelled it!" : `Find the next letter: ${word.word[foundCount]}`}
         targets={targets}
-        onReplayPrompt={onReplayPrompt}
       />
       {completed && (
         <div

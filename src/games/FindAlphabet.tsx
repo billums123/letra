@@ -361,16 +361,6 @@ export function FindAlphabetGame() {
     return () => window.removeEventListener("keydown", onKey);
   }, [collect]);
 
-  const onReplayPrompt = () => {
-    audio.stop();
-    if (completed) audio.play(audio.randomCelebrate());
-    else {
-      const next = lettersRef.current[currentIndex.current];
-      if (next) audio.play(audio.letterName(next.letter));
-      else audio.play(alphabetPromptId(avatar));
-    }
-  };
-
   useEffect(() => {
     return () => {
       const engine = engineRef.current;
@@ -406,7 +396,6 @@ export function FindAlphabetGame() {
         title={completed ? undefined : `Find: ${ALPHABET[foundCount] ?? "🎉"}`}
         prompt={completed ? undefined : `${moveVerb(avatar)} to the next letter!`}
         targets={completed ? undefined : targets}
-        onReplayPrompt={completed ? undefined : onReplayPrompt}
       />
     </div>
   );

@@ -2,9 +2,9 @@ import { useGameStore } from "../state/store";
 import { audio } from "../audio/Player";
 import { useIsCompact } from "../util/useIsCompact";
 
-// In-game heads-up display: title bar, prompt text, back button, replay button.
+// In-game heads-up display: title bar, prompt text, back button.
 // Pre-K kids can't read complicated UI, so we keep buttons huge with universal
-// icons (◀ Home, 🔁 Replay).
+// icons (◀ Home).
 
 // Mirrors the touch check in VirtualJoystick.tsx — used to know whether
 // to reserve room in the bottom-left for the on-screen joystick.
@@ -18,11 +18,9 @@ type HUDProps = {
   // Letters the kid is hunting for, in order. Already-found letters render
   // brighter; the next letter pulses to draw the eye.
   targets?: { letter: string; found: boolean }[];
-  // Callback to replay the latest prompt.
-  onReplayPrompt?: () => void;
 };
 
-export function HUD({ title, prompt, targets, onReplayPrompt }: HUDProps) {
+export function HUD({ title, prompt, targets }: HUDProps) {
   const goToMenu = useGameStore((s) => s.goToMenu);
   const compact = useIsCompact();
 
@@ -93,19 +91,6 @@ export function HUD({ title, prompt, targets, onReplayPrompt }: HUDProps) {
           >
             {title}
           </div>
-        )}
-        {onReplayPrompt && (
-          <button
-            type="button"
-            onClick={() => {
-              audio.stop();
-              onReplayPrompt();
-            }}
-            style={{ ...buttonStyle, background: "#46c2cb" }}
-            aria-label="Replay the prompt"
-          >
-            🔁{compact ? "" : " Hear it"}
-          </button>
         )}
       </div>
 
