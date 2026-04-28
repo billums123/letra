@@ -9,6 +9,12 @@ export type Screen = "menu" | "spell-word" | "find-alphabet" | "sound-match" | "
 // movement model so controls feel identical regardless of choice.
 export type AvatarKind = "kid" | "car" | "rocket";
 
+// Letter case the kid picks before entering Spell the Word or Find the
+// Alphabet. "mixed" is interpreted per-game: for Find the Alphabet each
+// letter rolls its case independently, for Spell the Word each whole
+// word rolls a single case (so a word is never half-cased).
+export type LetterCase = "uppercase" | "lowercase" | "mixed";
+
 type GameState = {
   screen: Screen;
   setScreen: (screen: Screen) => void;
@@ -37,12 +43,17 @@ type GameState = {
   // see getBiome() there for the resolution + fallback.
   biomeId: string;
   setBiomeId: (id: string) => void;
+
+  // Letter-case selection chosen on the case picker before a game.
+  letterCase: LetterCase;
+  setLetterCase: (c: LetterCase) => void;
 };
 
 const STORAGE_KEY = "letra:collected";
 const AVATAR_KEY = "letra:avatar";
 const VOICE_KEY = "letra:voiceSlug";
 const BIOME_KEY = "letra:biomeId";
+const LETTER_CASE_KEY = "letra:letterCase";
 
 function loadAvatar(): AvatarKind {
   try {

@@ -229,7 +229,7 @@ export function MainMenu() {
           alignItems: "stretch",
           gap: compact ? 12 : 28,
           padding: compact ? "12px 14px" : "24px 32px",
-          maxWidth: 1100,
+          maxWidth: 1240,
           width: "100%",
           margin: "0 auto",
           // Push the cards toward the visual centre on tall desktop
@@ -279,25 +279,26 @@ export function MainMenu() {
         )}
       </main>
 
-      <AvatarPicker avatar={avatar} setAvatar={setAvatar} compact={compact} />
-      <BiomePicker compact={compact} />
+      {/* Bottom bar — one tidy flex row containing every control. On
+          desktop the layout is [avatar] [world] | [voice], on phones
+          everything centres + wraps. The previous design had each
+          picker absolutely-positioned at a different corner, which
+          collided with the WASD hint and got messy whenever a
+          third card wrapped or the viewport got narrow. */}
       <footer
         style={{
-          padding: compact ? "10px 14px 18px" : "12px 24px 16px",
+          padding: compact ? "10px 14px 18px" : "16px 24px 16px",
           color: "#3a2a14",
-          fontSize: 14,
-          opacity: 0.7,
           display: "flex",
           flexWrap: "wrap",
-          justifyContent: compact ? "center" : "space-between",
+          justifyContent: "center",
           alignItems: "center",
-          gap: 12,
-          // Preserve safe-area insets so the footer isn't hidden by the
-          // home-bar on iOS.
+          gap: compact ? 10 : 18,
           paddingBottom: `calc(${compact ? 18 : 16}px + env(safe-area-inset-bottom, 0px))`,
         }}
       >
-        {!compact && <span>WASD / arrows / controller / touch joystick</span>}
+        <AvatarPicker avatar={avatar} setAvatar={setAvatar} compact={compact} />
+        <BiomePicker compact={compact} />
         <VoicePicker audioMode={audioMode} />
       </footer>
 
@@ -559,34 +560,20 @@ const AVATAR_OPTIONS: AvatarOption[] = [
 function AvatarPicker({
   avatar,
   setAvatar,
-  compact,
+  compact: _compact,
 }: {
   avatar: "kid" | "car" | "rocket";
   setAvatar: (a: "kid" | "car" | "rocket") => void;
   compact: boolean;
 }) {
+  void _compact;
   return (
     <div
-      style={
-        compact
-          ? {
-              display: "flex",
-              gap: 10,
-              alignItems: "center",
-              justifyContent: "center",
-              padding: "12px 14px 0",
-              flexWrap: "wrap",
-              zIndex: 8,
-            }
-          : {
-              position: "absolute",
-              bottom: 24,
-              left: 24,
-              display: "flex",
-              gap: 10,
-              zIndex: 8,
-            }
-      }
+      style={{
+        display: "flex",
+        gap: 10,
+        alignItems: "center",
+      }}
       aria-label="Pick your character"
     >
       <span
@@ -645,33 +632,18 @@ function AvatarPicker({
 // in src/engine/biomes ships meadow + moon. Selecting one writes
 // to the store; the engine reads it on next mount, so the choice
 // takes effect when the kid enters a game.
-function BiomePicker({ compact }: { compact: boolean }) {
+function BiomePicker({ compact: _compact }: { compact: boolean }) {
+  void _compact;
   const biomeId = useGameStore((s) => s.biomeId);
   const setBiomeId = useGameStore((s) => s.setBiomeId);
   const setAvatar = useGameStore((s) => s.setAvatar);
   return (
     <div
-      style={
-        compact
-          ? {
-              display: "flex",
-              gap: 8,
-              alignItems: "center",
-              justifyContent: "center",
-              padding: "8px 14px 0",
-              flexWrap: "wrap",
-              zIndex: 8,
-            }
-          : {
-              position: "absolute",
-              bottom: 24,
-              right: 24,
-              display: "flex",
-              gap: 8,
-              zIndex: 8,
-              alignItems: "center",
-            }
-      }
+      style={{
+        display: "flex",
+        gap: 8,
+        alignItems: "center",
+      }}
       aria-label="Pick a world"
     >
       <span
