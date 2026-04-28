@@ -145,6 +145,11 @@ function makeSerifI(mat: THREE.Material): LetterShape {
 }
 
 export type LetterCharacter = {
+  // Update the resting Y the idle bob is centered on. Use this when
+  // teleporting a letter to a new ground height (e.g. dance-party
+  // ring on a deformed terrain) so the new position sticks instead of
+  // snapping back to the old baseY.
+  setBaseY: (y: number) => void;
   group: THREE.Group;
   letter: string;
   isCollected: boolean;
@@ -165,6 +170,10 @@ export type LetterOptions = {
   // Some letters look better lowercase (cursive p / d / b shapes); games
   // pass uppercase by default but can opt in to lowercase variants.
   lowercase?: boolean;
+  // Ground height at the spawn (x, z). Used as the base for the idle
+  // bob so letters in a moon crater sit at the crater floor instead of
+  // floating at world Y=0. Defaults to 0 for biomes with flat terrain.
+  baseY?: number;
 };
 
 export function buildLetterCharacter(font: Font, opts: LetterOptions): LetterCharacter {
@@ -178,7 +187,7 @@ export function buildLetterCharacter(font: Font, opts: LetterOptions): LetterCha
   // get its own fixtures later.
   const override = LETTER_OVERRIDES[display];
   if (override) {
-    return buildFromOverride(font, display, upper, override, color);
+    return buildFromOverride(font, display, upper, override, color, opts.baseY ?? 0);
   }
 
   // Outer group: world position + Y-axis billboard.
@@ -315,12 +324,15 @@ export function buildLetterCharacter(font: Font, opts: LetterOptions): LetterCha
   let bobPhase = Math.random() * Math.PI * 2;
   let swayPhase = Math.random() * Math.PI * 2;
   let celebrationT = -1;
-  const baseY = 0;
+  let baseY = opts.baseY ?? 0;
   let isCollected = false;
 
   const character: LetterCharacter = {
     group,
     letter: upper,
+    setBaseY(y) {
+      baseY = y;
+    },
     get isCollected() {
       return isCollected;
     },
@@ -422,7 +434,8 @@ function buildFromOverride(
   display: string,
   upperKey: string,
   parts: EditableParts,
-  color: THREE.Color
+  color: THREE.Color,
+  baseY: number
 ): LetterCharacter {
   const group = new THREE.Group();
   const inner = new THREE.Group();
@@ -587,8 +600,8 @@ function buildFromOverride(
   let bobPhase = Math.random() * Math.PI * 2;
   let swayPhase = Math.random() * Math.PI * 2;
   let celebrationT = -1;
-  const baseY = 0;
   let isCollected = false;
+  let mutableBaseY = baseY;
   const wave = parts.wave ?? DEFAULT_WAVE;
 
   const character: LetterCharacter = {
@@ -596,13 +609,16 @@ function buildFromOverride(
     letter: upperKey,
     get isCollected() { return isCollected; },
     set isCollected(_v) {},
+    setBaseY(y) {
+      mutableBaseY = y;
+    },
     update(dt, _t) {
       bobPhase += dt * 2;
       swayPhase += dt * 1.4;
       // Bob upward only — Math.abs keeps the lower half of the sine wave
       // out of the equation so feet never sink through the ground.
       const baseBob = Math.abs(Math.sin(bobPhase)) * 0.12;
-      group.position.y = baseY + baseBob;
+      group.position.y = mutableBaseY + baseBob;
       inner.rotation.z = Math.sin(swayPhase) * 0.05;
       inner.rotation.y = 0;
 
@@ -617,7 +633,7 @@ function buildFromOverride(
         celebrationT += dt;
         const k = Math.min(celebrationT / 1.6, 1);
         const jump = Math.sin(k * Math.PI) * 1.4;
-        group.position.y = baseY + baseBob + jump;
+        group.position.y = mutableBaseY + baseBob + jump;
         inner.rotation.y = k * Math.PI * 2;
         // Wave both arms using THIS letter's authored wave config —
         // the same motion the editor's preview shows.

@@ -125,13 +125,14 @@ export function FindAlphabetGame() {
       // characters rendered into the world stay in lockstep. Audio and
       // the collected sticker still key on the uppercase glyph.
       const lowercase = displayLetters[i] !== L;
-      const character = buildLetterCharacter(font, { letter: L, lowercase });
       // Try a spiral position first; if obstructed, pickClearSpawn retries.
       const t = i / ALPHABET.length;
       const minR = Math.max(RING_INNER, RING_INNER + t * 4);
       const maxR = Math.min(RING_OUTER, RING_INNER + t * (RING_OUTER - RING_INNER) + 6);
       const spawn = pickClearSpawn(engine.obstacles, taken, { minRadius: minR, maxRadius: maxR }, 1.0, rng);
-      character.group.position.set(spawn.x, 0, spawn.z);
+      const baseY = engine.terrainHeight?.(spawn.x, spawn.z) ?? 0;
+      const character = buildLetterCharacter(font, { letter: L, lowercase, baseY });
+      character.group.position.set(spawn.x, baseY, spawn.z);
       taken.push({ x: spawn.x, z: spawn.z, radius: 1.0 });
       character.faceTowards(engine.camera.position.x, engine.camera.position.z);
       engine.scene.add(character.group);
@@ -226,7 +227,9 @@ export function FindAlphabetGame() {
       const angle = (i / letters.length) * Math.PI * 2;
       const homeX = cx + Math.cos(angle) * DANCE_RING_RADIUS;
       const homeZ = cz + Math.sin(angle) * DANCE_RING_RADIUS;
-      entry.character.group.position.set(homeX, 0, homeZ);
+      const homeY = engine.terrainHeight?.(homeX, homeZ) ?? 0;
+      entry.character.setBaseY(homeY);
+      entry.character.group.position.set(homeX, homeY, homeZ);
       // Reset any rotation/scale from earlier celebrate() calls so the
       // dance starts from a clean baseline.
       entry.character.group.rotation.set(0, 0, 0);

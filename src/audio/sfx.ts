@@ -631,17 +631,15 @@ function playProceduralBurst(c: AudioContext, dest: AudioNode) {
 
 // ─── Alien wave ──────────────────────────────────────────────────────
 // Cute chirpy "hi!" sound when a moon-biome alien waves at the player.
-// Prefers pre-recorded MP3 / OGG clips at /audio/sfx/alien-wave-{1..5}
-// (random rotation + pitch jitter). Falls back to a procedural triangle-
-// wave chirp synth when no clips are loaded yet — covers the case where
-// the ElevenLabs Sound Effects permission isn't enabled and we haven't
-// dropped in user-supplied recordings.
+// Plays one of the user-supplied clips at /audio/sfx/alien-{1..4} with
+// a random pick + pitch jitter so consecutive contacts don't feel
+// mechanical. Falls back to a procedural triangle-wave chirp if the
+// clips haven't loaded yet.
 const ALIEN_WAVE_URLS = [
-  "/audio/sfx/alien-wave-1.mp3",
-  "/audio/sfx/alien-wave-2.mp3",
-  "/audio/sfx/alien-wave-3.mp3",
-  "/audio/sfx/alien-wave-4.mp3",
-  "/audio/sfx/alien-wave-5.mp3",
+  "/audio/sfx/alien-1.mp3",
+  "/audio/sfx/alien-2.mp3",
+  "/audio/sfx/alien-3.mp3",
+  "/audio/sfx/alien-4.mp3",
 ];
 const alienWaveBuffers: (AudioBuffer | null)[] = ALIEN_WAVE_URLS.map(() => null);
 let alienWaveLoadStarted = false;

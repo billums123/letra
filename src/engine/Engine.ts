@@ -56,8 +56,17 @@ export class Engine {
   private disposeBiome: (() => void) | null = null;
   // Optional ground-height sampler from the active biome. When set,
   // the per-frame loop offsets the player Y by it so e.g. the car
-  // visibly dips into moon craters.
-  private terrainHeight: ((x: number, z: number) => number) | null = null;
+  // visibly dips into moon craters. Public so games can place spawn
+  // props (letters, etc.) at the correct height.
+  terrainHeight: ((x: number, z: number) => number) | null = null;
+
+  // Directional lights with castShadow that we move with the player so
+  // the orthographic shadow frustum (typically ~50 units across) always
+  // covers them. Without this the player's shadow gets clipped at a
+  // hard rectangle once they wander past ~25 units from origin.
+  // Each entry caches the original position→target offset so we keep
+  // the sun direction constant while the camera follows.
+  private shadowSuns: { light: THREE.DirectionalLight; offset: THREE.Vector3 }[] = [];
 
   constructor(
     canvas: HTMLCanvasElement,
@@ -102,6 +111,18 @@ export class Engine {
 
     this.player = buildAvatar(avatar);
     this.scene.add(this.player.group);
+
+    // Find every shadow-casting directional light the biome added and
+    // wire it up to follow the player. Targets need to be in the scene
+    // graph so their matrixWorld stays current — three.js doesn't add
+    // a light's default target automatically.
+    this.scene.traverse((obj) => {
+      if (obj instanceof THREE.DirectionalLight && obj.castShadow) {
+        if (!obj.target.parent) this.scene.add(obj.target);
+        const offset = obj.position.clone().sub(obj.target.position);
+        this.shadowSuns.push({ light: obj, offset });
+      }
+    });
 
     this.clock = new THREE.Clock();
 
@@ -179,6 +200,16 @@ export class Engine {
       // settles into the depression and the rocket dips with it.
       if (this.terrainHeight) {
         pp.y += this.terrainHeight(pp.x, pp.z);
+      }
+
+      // Sun follow — keep each shadow camera centered on the player so
+      // the directional-light frustum doesn't clip the player's shadow
+      // once they walk past its bounds. We snap the target to ground
+      // level (y=0) so the angle of the shadow stays consistent.
+      for (const s of this.shadowSuns) {
+        s.light.target.position.set(pp.x, 0, pp.z);
+        s.light.position.copy(s.light.target.position).add(s.offset);
+        s.light.target.updateMatrixWorld();
       }
 
       // Smooth follow camera. We follow only the XZ plane — the player's

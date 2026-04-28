@@ -113,9 +113,10 @@ function SpellWordRound({
       };
     })();
     const letters: LetterEntry[] = word.word.split("").map((L, i) => {
-      const character = buildLetterCharacter(font, { letter: L, lowercase });
       const spawn = pickClearSpawn(engine.obstacles, taken, { minRadius: SPAWN_INNER, maxRadius: SPAWN_OUTER }, 1.0, rng);
-      character.group.position.set(spawn.x, 0, spawn.z);
+      const baseY = engine.terrainHeight?.(spawn.x, spawn.z) ?? 0;
+      const character = buildLetterCharacter(font, { letter: L, lowercase, baseY });
+      character.group.position.set(spawn.x, baseY, spawn.z);
       taken.push({ x: spawn.x, z: spawn.z, radius: 1.0 });
       // Initial face-toward-camera so it's right on first paint.
       character.faceTowards(engine.camera.position.x, engine.camera.position.z);
