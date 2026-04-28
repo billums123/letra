@@ -7,7 +7,7 @@ import { buildMeadow } from "../world";
 // Default biome the kid sees on first launch.
 export const meadowBiome: Biome = {
   id: "meadow",
-  label: "Meadow",
+  label: "Park",
   emoji: "🌳",
   recommendedAvatar: "kid",
   applyScene(scene) {

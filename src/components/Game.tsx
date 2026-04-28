@@ -12,6 +12,7 @@ import { SoundMatchGame } from "../games/SoundMatch";
 import { LetterTest } from "../ui/LetterTest";
 import { LetterEditor } from "../ui/LetterEditor";
 import { AlienEditor } from "../ui/AlienEditor";
+import { QTailEditor } from "../ui/QTailEditor";
 import { isDev } from "../util/isDev";
 
 export function Game() {
@@ -52,7 +53,8 @@ export function Game() {
       !dev &&
       (screen === "letter-test" ||
         screen === "letter-editor" ||
-        screen === "alien-editor")
+        screen === "alien-editor" ||
+        screen === "q-tail-editor")
     ) {
       goToMenu();
     }
@@ -69,7 +71,12 @@ export function Game() {
   useEffect(() => {
     if (screen === "menu") {
       void music.play(MENU_TRACK, 0.18);
-    } else if (screen === "letter-test" || screen === "letter-editor" || screen === "alien-editor") {
+    } else if (
+      screen === "letter-test" ||
+      screen === "letter-editor" ||
+      screen === "alien-editor" ||
+      screen === "q-tail-editor"
+    ) {
       music.stop();
     } else {
       void music.play(pickGameTrack(), 0.16);
@@ -85,6 +92,7 @@ export function Game() {
       {dev && screen === "letter-test" && <LetterTest />}
       {dev && screen === "letter-editor" && <LetterEditor />}
       {dev && screen === "alien-editor" && <AlienEditor />}
+      {dev && screen === "q-tail-editor" && <QTailEditor />}
       <VirtualJoystick visible={screen !== "menu"} />
     </div>
   );

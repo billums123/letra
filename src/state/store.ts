@@ -1,6 +1,14 @@
 import { create } from "zustand";
 
-export type Screen = "menu" | "spell-word" | "find-alphabet" | "sound-match" | "letter-test" | "letter-editor" | "alien-editor";
+export type Screen =
+  | "menu"
+  | "spell-word"
+  | "find-alphabet"
+  | "sound-match"
+  | "letter-test"
+  | "letter-editor"
+  | "alien-editor"
+  | "q-tail-editor";
 
 // The character the kid drives around. "kid" is the default chubby
 // orange capsule character; "car" is a cartoony low-poly buggy;

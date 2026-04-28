@@ -10,11 +10,116 @@ import {
 } from "./letterShapes";
 import letterFixtures from "./letterFixtures.json";
 
-// Authored per-letter overrides exported from the in-app editor. Keys are
-// the case-preserved glyph ("A", "a", …). When an override exists for the
-// glyph we render from the JSON; otherwise we fall through to the
-// procedural builder (used by un-authored letters and any future glyph).
-const LETTER_OVERRIDES = letterFixtures as Record<string, EditableParts>;
+// Authored per-letter overrides exported from the in-app editor. Keys
+// are the case-preserved glyph ("A", "a", …). The bundled JSON is the
+// production source of truth, but the in-app letter editor saves
+// in-progress edits to localStorage at LETTER_OVERRIDES_KEY. We merge
+// localStorage on top of the bundle on EVERY build so live edits show
+// up in every preview (LetterTest, game letters, q-tail editor, etc.)
+// without rebuilding. Once the user is happy, "Export all" in the
+// editor produces a JSON blob to paste into letterFixtures.json so
+// production picks them up.
+const BUNDLED_LETTER_OVERRIDES = letterFixtures as Record<string, EditableParts>;
+const LETTER_OVERRIDES_KEY = "letra:editor:overrides:v2";
+
+function getLetterOverrides(): Record<string, EditableParts> {
+  if (typeof localStorage === "undefined") return BUNDLED_LETTER_OVERRIDES;
+  try {
+    const raw = localStorage.getItem(LETTER_OVERRIDES_KEY);
+    if (!raw) return BUNDLED_LETTER_OVERRIDES;
+    const local = JSON.parse(raw) as Record<string, EditableParts>;
+    // Per-glyph localStorage wins. We don't deep-merge — an authored
+    // glyph in localStorage replaces the bundled one entirely so the
+    // editor's "Reset" semantics line up with what gets shipped.
+    return { ...BUNDLED_LETTER_OVERRIDES, ...local };
+  } catch {
+    return BUNDLED_LETTER_OVERRIDES;
+  }
+}
+
+// ── Lowercase-q tail config ─────────────────────────────────────────
+// The font's lowercase q renders without a foot/curl, so we glue an
+// extruded bezier ribbon onto the descender's bottom. These four
+// constants drive that shape and are exposed so the q-tail editor
+// (src/ui/QTailEditor.tsx) can tune them live with sliders.
+//   thick:     ribbon thickness (~stem width)
+//   reach:     how far right the tail extends
+//   rise:      how high the tip rises above the descender's bottom
+//   alignment: horizontal anchor multiplier — left-edge sits
+//              `thick * alignment` inside the stem's right edge
+//              (larger pulls the tail further left into the stem).
+export type QTailConfig = {
+  thick: number;
+  reach: number;
+  rise: number;
+  alignment: number;
+  // Z-axis rotation in radians applied around the tail's left edge
+  // (the join with the descender). Positive values lift the tip up;
+  // negative values drop it. Small angles only — large rotations
+  // would slice the tail's thickness into the stem.
+  rotation: number;
+};
+
+const DEFAULT_Q_TAIL_CONFIG: QTailConfig = {
+  thick: 0.25,
+  reach: 0.55,
+  rise: 0.1,
+  alignment: 1.45,
+  rotation: -0.06,
+};
+
+const Q_TAIL_KEY = "letra:qTailConfig";
+
+function loadQTailConfig(): QTailConfig {
+  if (typeof localStorage === "undefined") return { ...DEFAULT_Q_TAIL_CONFIG };
+  try {
+    const raw = localStorage.getItem(Q_TAIL_KEY);
+    if (!raw) return { ...DEFAULT_Q_TAIL_CONFIG };
+    const parsed = JSON.parse(raw);
+    return {
+      thick: typeof parsed.thick === "number" ? parsed.thick : DEFAULT_Q_TAIL_CONFIG.thick,
+      reach: typeof parsed.reach === "number" ? parsed.reach : DEFAULT_Q_TAIL_CONFIG.reach,
+      rise: typeof parsed.rise === "number" ? parsed.rise : DEFAULT_Q_TAIL_CONFIG.rise,
+      alignment:
+        typeof parsed.alignment === "number" ? parsed.alignment : DEFAULT_Q_TAIL_CONFIG.alignment,
+      rotation:
+        typeof parsed.rotation === "number" ? parsed.rotation : DEFAULT_Q_TAIL_CONFIG.rotation,
+    };
+  } catch {
+    return { ...DEFAULT_Q_TAIL_CONFIG };
+  }
+}
+
+// Mutable so the editor can poke values in without forcing every
+// caller to read the latest object — the next buildLetterCharacter
+// for "q" will pick up the new numbers.
+export const qTailConfig: QTailConfig = loadQTailConfig();
+
+export function setQTailConfig(next: Partial<QTailConfig>) {
+  Object.assign(qTailConfig, next);
+  if (typeof localStorage !== "undefined") {
+    try {
+      localStorage.setItem(Q_TAIL_KEY, JSON.stringify(qTailConfig));
+    } catch {
+      /* non-fatal */
+    }
+  }
+}
+
+export function resetQTailConfig() {
+  Object.assign(qTailConfig, DEFAULT_Q_TAIL_CONFIG);
+  if (typeof localStorage !== "undefined") {
+    try {
+      localStorage.removeItem(Q_TAIL_KEY);
+    } catch {
+      /* non-fatal */
+    }
+  }
+}
+
+export function getDefaultQTailConfig(): QTailConfig {
+  return { ...DEFAULT_Q_TAIL_CONFIG };
+}
 
 // Cute, walking-around letter characters. Each letter is an extruded glyph from
 // helvetiker_bold, with googly eyes, little arms, feet, and a smile. The
@@ -73,6 +178,10 @@ export type LetterShape = {
 
 export function makeLetterShape(font: Font, display: string, mat: THREE.Material): LetterShape {
   if (display === "I") return makeSerifI(mat);
+  // Lowercase i: the stock font glyph crowds the dot right against
+  // the stem. Build it from scratch so the dot has a clean gap above
+  // the stem and reads as a proper tittle rather than a smudge.
+  if (display === "i") return makeChunkyLowerI(mat);
 
   const geo = new TextGeometry(display, {
     font,
@@ -94,6 +203,57 @@ export function makeLetterShape(font: Font, display: string, mat: THREE.Material
   const mesh = new THREE.Mesh(geo, mat);
   mesh.castShadow = true;
   mesh.receiveShadow = true;
+
+  // Lowercase q: glue a swooping tail onto the descender so it reads
+  // distinct from lowercase p. The shape parameters live in
+  // qTailConfig (mutable, localStorage-backed) so the q-tail editor
+  // can tune them live.
+  if (display === "q") {
+    const group = new THREE.Group();
+    group.add(mesh);
+    const cfg = qTailConfig;
+    const tailShape = new THREE.Shape();
+    tailShape.moveTo(0, 0);
+    tailShape.bezierCurveTo(cfg.reach * 0.35, 0, cfg.reach * 0.7, cfg.rise * 0.4, cfg.reach, cfg.rise);
+    tailShape.lineTo(cfg.reach, cfg.rise + cfg.thick);
+    tailShape.bezierCurveTo(
+      cfg.reach * 0.7,
+      cfg.rise * 0.4 + cfg.thick,
+      cfg.reach * 0.35,
+      cfg.thick,
+      0,
+      cfg.thick,
+    );
+    tailShape.closePath();
+
+    const tailGeo = new THREE.ExtrudeGeometry(tailShape, {
+      depth: 0.55,
+      curveSegments: 8,
+      bevelEnabled: true,
+      bevelThickness: 0.07,
+      bevelSize: 0.05,
+      bevelSegments: 3,
+    });
+    const tailMesh = new THREE.Mesh(tailGeo, mat);
+    tailMesh.castShadow = true;
+    tailMesh.receiveShadow = true;
+    tailMesh.position.set(size.x / 2 - cfg.thick * cfg.alignment, 0, 0);
+    // Rotate around the tail's left edge (its local origin) so the
+    // join with the descender stays put while the tip swings.
+    tailMesh.rotation.z = cfg.rotation;
+    group.add(tailMesh);
+
+    return {
+      object: group,
+      width: size.x + cfg.reach,
+      height: size.y,
+      dispose: () => {
+        geo.dispose();
+        tailGeo.dispose();
+      },
+    };
+  }
+
   return {
     object: mesh,
     width: size.x,
@@ -144,6 +304,46 @@ function makeSerifI(mat: THREE.Material): LetterShape {
   };
 }
 
+// Chunky lowercase i — stem + tittle (the dot) with an explicit gap
+// between them. The font's stock i renders these touching, which reads
+// like a single fused glyph at game scale.
+function makeChunkyLowerI(mat: THREE.Material): LetterShape {
+  const STEM_W = 0.36;
+  const STEM_H = 1.0;
+  const DOT_W = 0.36;
+  const DOT_H = 0.34;
+  const GAP = 0.26;
+  const DEPTH = 0.55;
+  const totalH = STEM_H + GAP + DOT_H;
+  const totalW = Math.max(STEM_W, DOT_W);
+
+  const group = new THREE.Group();
+
+  const stemGeo = new THREE.BoxGeometry(STEM_W, STEM_H, DEPTH);
+  const stem = new THREE.Mesh(stemGeo, mat);
+  stem.position.y = STEM_H / 2;
+  stem.castShadow = true;
+  stem.receiveShadow = true;
+  group.add(stem);
+
+  const dotGeo = new THREE.BoxGeometry(DOT_W, DOT_H, DEPTH);
+  const dot = new THREE.Mesh(dotGeo, mat);
+  dot.position.y = STEM_H + GAP + DOT_H / 2;
+  dot.castShadow = true;
+  dot.receiveShadow = true;
+  group.add(dot);
+
+  return {
+    object: group,
+    width: totalW,
+    height: totalH,
+    dispose: () => {
+      stemGeo.dispose();
+      dotGeo.dispose();
+    },
+  };
+}
+
 export type LetterCharacter = {
   // Update the resting Y the idle bob is centered on. Use this when
   // teleporting a letter to a new ground height (e.g. dance-party
@@ -185,7 +385,7 @@ export function buildLetterCharacter(font: Font, opts: LetterOptions): LetterCha
   // from that. We key by the displayed character so 'A' and 'a' have
   // independent layouts — uppercase forms ship today; lowercase will
   // get its own fixtures later.
-  const override = LETTER_OVERRIDES[display];
+  const override = getLetterOverrides()[display];
   if (override) {
     return buildFromOverride(font, display, upper, override, color, opts.baseY ?? 0);
   }

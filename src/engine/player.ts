@@ -40,12 +40,17 @@ function buildKid(): PlayerHandles {
   body.castShadow = true;
   group.add(body);
 
-  // Belly
+  // Belly — a flattened oval patch on the body surface rather than a
+  // protruding hemisphere. From the side the original sphere read as
+  // a stuck-on blob; the squashed Z scale hugs the capsule curve.
   const belly = new THREE.Mesh(
-    new THREE.SphereGeometry(0.3, 12, 10),
+    new THREE.SphereGeometry(0.3, 16, 12),
     new THREE.MeshStandardMaterial({ color: 0xffd56b, roughness: 0.8 })
   );
-  belly.position.set(0, 0.45, 0.32);
+  belly.scale.set(1.05, 0.95, 0.35);
+  // Drop the patch below the smile (smile sits at y=0.78) so the
+  // tummy and the mouth don't merge into one shape from the front.
+  belly.position.set(0, 0.32, 0.42);
   group.add(belly);
 
   // Eyes
@@ -66,7 +71,9 @@ function buildKid(): PlayerHandles {
     new THREE.MeshStandardMaterial({ color: 0xa13b1b })
   );
   smile.position.set(0, 0.78, 0.46);
-  smile.rotation.x = Math.PI / 2;
+  // Rotate the half-torus so it faces the camera as an upward-opening
+  // "smile" (⌣) instead of lying flat in the XZ plane.
+  smile.rotation.x = Math.PI;
   group.add(smile);
 
   // Feet

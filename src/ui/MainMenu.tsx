@@ -1,15 +1,16 @@
 import { useEffect, useRef, useState } from "react";
+import * as THREE from "three";
 import { useGameStore, type LetterCase } from "../state/store";
 import { audio } from "../audio/Player";
 import { StickerBook } from "./StickerBook";
 import { ALPHABET } from "../audio/types";
+import { buildLetterCharacter, loadFont } from "../engine/letters";
 import { isDev } from "../util/isDev";
 import { useIsCompact } from "../util/useIsCompact";
 import { BIOMES } from "../engine/biomes";
 
-// Cards that route through the case picker before launching. Match the
-// Sound is audio-only so it bypasses this.
-type CasedScreen = "spell-word" | "find-alphabet";
+// Cards that route through the case picker before launching.
+type CasedScreen = "spell-word" | "find-alphabet" | "sound-match";
 
 // Picture-based main menu. Designed for ages 3-6: huge buttons, big icons,
 // audio narration on hover, no required reading. Pre-readers can navigate
@@ -20,6 +21,12 @@ type CasedScreen = "spell-word" | "find-alphabet";
 // simplicity; flip this to true to surface the picker again. The
 // VoicePicker component itself stays in this file regardless.
 const SHOW_VOICE_PICKER = false;
+
+// Feature flag for the trophy / sticker book. Flip to true once the
+// reward design is more polished and we want collected letters to be
+// surfaced again. Underlying state (collected set, persistence) keeps
+// running so flipping back on doesn't lose existing progress.
+const SHOW_TROPHIES = false;
 
 type GameCardProps = {
   // Either an emoji glyph or a URL for a PNG icon. PNG wins when both
@@ -261,7 +268,7 @@ export function MainMenu() {
           title="Match the Sound"
           color="#ff8aaa"
           voiceClipId={audio.menu("sounds")}
-          onSelect={() => setScreen("sound-match")}
+          onSelect={() => setPickingFor("sound-match")}
           ariaLabel="Match the sound to the letter"
           compact={compact}
         />
@@ -281,7 +288,11 @@ export function MainMenu() {
           flexWrap: "wrap",
           justifyContent: "center",
           alignItems: "center",
-          gap: compact ? 10 : 18,
+          // Larger gap between the avatar picker and the world picker
+          // so the two groups read as distinct controls instead of one
+          // long row of chips. Internal chip spacing is owned by each
+          // picker's own gap, so this only affects the seam.
+          gap: compact ? 22 : 56,
           paddingBottom: `calc(${compact ? 18 : 16}px + env(safe-area-inset-bottom, 0px))`,
         }}
       >
@@ -322,51 +333,62 @@ export function MainMenu() {
           >
             {compact ? "👽" : "👽 Alien"}
           </button>
+          <button
+            type="button"
+            onClick={() => setScreen("q-tail-editor")}
+            aria-label="Open the q-tail tuner"
+            style={compact ? compactCornerBtn : cornerBtn}
+          >
+            {compact ? "q" : "q tail"}
+          </button>
         </div>
       )}
 
-      <button
-        type="button"
-        onClick={() => setShowStickers(true)}
-        aria-label={`Sticker book — ${collected.size} of ${ALPHABET.length} letters mastered`}
-        style={{
-          position: "absolute",
-          top: compact ? 12 : 24,
-          right: compact ? 12 : 24,
-          appearance: "none",
-          border: compact ? "4px solid white" : "5px solid white",
-          background: "#ff8aaa",
-          color: "white",
-          borderRadius: "50%",
-          width: compact ? 56 : 84,
-          height: compact ? 56 : 84,
-          fontSize: compact ? 24 : 36,
-          fontWeight: 900,
-          cursor: "pointer",
-          boxShadow: "0 6px 0 rgba(0,0,0,0.18)",
-          display: "grid",
-          placeItems: "center",
-        }}
-      >
-        🏅
-        <span
-          style={{
-            position: "absolute",
-            bottom: -6,
-            right: -6,
-            background: "#3a2a14",
-            color: "white",
-            fontSize: compact ? 12 : 16,
-            borderRadius: 12,
-            padding: compact ? "1px 6px" : "2px 8px",
-            border: "3px solid white",
-          }}
-        >
-          {collected.size}
-        </span>
-      </button>
-
-      <StickerBook open={showStickers} onClose={() => setShowStickers(false)} />
+      {SHOW_TROPHIES && (
+        <>
+          <button
+            type="button"
+            onClick={() => setShowStickers(true)}
+            aria-label={`Sticker book — ${collected.size} of ${ALPHABET.length} letters mastered`}
+            style={{
+              position: "absolute",
+              top: compact ? 12 : 24,
+              right: compact ? 12 : 24,
+              appearance: "none",
+              border: compact ? "4px solid white" : "5px solid white",
+              background: "#ff8aaa",
+              color: "white",
+              borderRadius: "50%",
+              width: compact ? 56 : 84,
+              height: compact ? 56 : 84,
+              fontSize: compact ? 24 : 36,
+              fontWeight: 900,
+              cursor: "pointer",
+              boxShadow: "0 6px 0 rgba(0,0,0,0.18)",
+              display: "grid",
+              placeItems: "center",
+            }}
+          >
+            🏅
+            <span
+              style={{
+                position: "absolute",
+                bottom: -6,
+                right: -6,
+                background: "#3a2a14",
+                color: "white",
+                fontSize: compact ? 12 : 16,
+                borderRadius: 12,
+                padding: compact ? "1px 6px" : "2px 8px",
+                border: "3px solid white",
+              }}
+            >
+              {collected.size}
+            </span>
+          </button>
+          <StickerBook open={showStickers} onClose={() => setShowStickers(false)} />
+        </>
+      )}
       <CasePicker
         screen={pickingFor}
         onCancel={() => setPickingFor(null)}
@@ -402,11 +424,19 @@ function CasePicker({ screen, onCancel, onPick }: CasePickerProps) {
     return () => document.removeEventListener("keydown", onKey);
   }, [screen, onCancel]);
   if (!screen) return null;
-  const heading = screen === "spell-word" ? "Spell the Word" : "Find the Alphabet";
-  const options: { id: LetterCase; label: string; sample: string; color: string }[] = [
-    { id: "uppercase", label: "Uppercase", sample: "ABC", color: "#ffd56b" },
-    { id: "lowercase", label: "Lowercase", sample: "abc", color: "#9bdc4a" },
-    { id: "mixed", label: "Mixed", sample: "AbC", color: "#7e9bff" },
+  const heading =
+    screen === "spell-word"
+      ? "Spell the Word"
+      : screen === "find-alphabet"
+        ? "Find the Alphabet"
+        : "Match the Sound";
+  // Pre-readers can't read "Uppercase" / "Lowercase" / "Mixed" — show
+  // the actual 3D letter characters in each case so the visual itself
+  // tells them what they'll see in the world.
+  const options: { id: LetterCase; label: string; chars: string[]; color: string }[] = [
+    { id: "uppercase", label: "Uppercase", chars: ["A", "B", "C", "D"], color: "#ffd56b" },
+    { id: "lowercase", label: "Lowercase", chars: ["a", "b", "c", "d"], color: "#9bdc4a" },
+    { id: "mixed", label: "Mixed", chars: ["a", "B", "c", "D"], color: "#7e9bff" },
   ];
   return (
     <div
@@ -431,24 +461,24 @@ function CasePicker({ screen, onCancel, onPick }: CasePickerProps) {
           background: "linear-gradient(180deg, #fff7d6, #ffd56b)",
           border: "8px solid white",
           borderRadius: 32,
-          padding: compact ? 22 : 32,
-          maxWidth: 720,
+          padding: compact ? 26 : 40,
+          maxWidth: 980,
           width: "100%",
           boxShadow: "0 18px 0 rgba(0,0,0,0.18), 0 30px 60px rgba(0,0,0,0.3)",
           color: "#3a2a14",
           textAlign: "center",
         }}
       >
-        <div style={{ fontSize: compact ? 30 : 42, fontWeight: 900 }}>{heading}</div>
-        <div style={{ marginTop: 6, fontWeight: 800, fontSize: compact ? 16 : 20 }}>
+        <div style={{ fontSize: compact ? 32 : 48, fontWeight: 900 }}>{heading}</div>
+        <div style={{ marginTop: 8, fontWeight: 800, fontSize: compact ? 18 : 22 }}>
           Pick your letters
         </div>
         <div
           style={{
-            marginTop: compact ? 18 : 24,
+            marginTop: compact ? 22 : 30,
             display: "grid",
             gridTemplateColumns: compact ? "1fr" : "repeat(3, 1fr)",
-            gap: compact ? 12 : 18,
+            gap: compact ? 16 : 24,
           }}
         >
           {options.map((opt) => (
@@ -456,28 +486,36 @@ function CasePicker({ screen, onCancel, onPick }: CasePickerProps) {
               key={opt.id}
               type="button"
               onClick={() => onPick(opt.id)}
-              aria-label={`${opt.label} letters — example ${opt.sample}`}
+              aria-label={`${opt.label} letters — ${opt.chars.join("")}`}
               style={{
                 appearance: "none",
                 border: "6px solid white",
                 background: opt.color,
                 color: "#3a2a14",
-                borderRadius: 24,
-                padding: compact ? "16px 12px" : "22px 16px",
+                borderRadius: 26,
+                padding: compact ? "16px 14px 14px" : "22px 18px 18px",
                 cursor: "pointer",
-                boxShadow: "0 10px 0 rgba(0,0,0,0.18), 0 14px 24px rgba(0,0,0,0.18)",
+                boxShadow: "0 12px 0 rgba(0,0,0,0.18), 0 16px 28px rgba(0,0,0,0.18)",
                 display: "flex",
                 flexDirection: "column",
                 alignItems: "center",
-                gap: 4,
+                gap: compact ? 10 : 14,
               }}
             >
-              <span style={{ fontSize: compact ? 44 : 60, fontWeight: 900, lineHeight: 1 }} aria-hidden>
-                {opt.sample}
-              </span>
-              <span style={{ fontSize: compact ? 18 : 22, fontWeight: 900, marginTop: 6 }}>
-                {opt.label}
-              </span>
+              {/* White card behind the letters keeps the colored
+                  glyphs readable on every option's coloured tile. */}
+              <div
+                style={{
+                  width: "100%",
+                  background: "#fff7d6",
+                  borderRadius: 18,
+                  padding: compact ? "10px 8px" : "14px 12px",
+                  boxShadow: "inset 0 -4px 0 rgba(0,0,0,0.06)",
+                }}
+              >
+                <CaseSampleStrip chars={opt.chars} height={compact ? 110 : 150} />
+              </div>
+              <span style={{ fontSize: compact ? 22 : 30, fontWeight: 900 }}>{opt.label}</span>
             </button>
           ))}
         </div>
@@ -502,6 +540,96 @@ function CasePicker({ screen, onCancel, onPick }: CasePickerProps) {
       </div>
     </div>
   );
+}
+
+// Inline 3D row of letter characters used inside the case-picker.
+// Renders each glyph statically (no idle bob) using the same
+// buildLetterCharacter the game uses, so any tweaks to letterforms
+// (q-tail, i-tittle, editor overrides) flow through automatically.
+function CaseSampleStrip({ chars, height }: { chars: string[]; height: number }) {
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (!container) return;
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    container.appendChild(renderer.domElement);
+    renderer.domElement.style.width = "100%";
+    renderer.domElement.style.height = "100%";
+    renderer.domElement.style.display = "block";
+
+    const scene = new THREE.Scene();
+    scene.add(new THREE.HemisphereLight(0xfff7d6, 0xddddff, 0.75));
+    const dir = new THREE.DirectionalLight(0xffffff, 1.1);
+    dir.position.set(3, 5, 4);
+    scene.add(dir);
+    scene.add(new THREE.AmbientLight(0xffffff, 0.4));
+
+    // Frame the camera so all 4 letters AND their swung-out arms fit
+    // horizontally — the previous distance clipped the leftmost
+    // letter's left arm and the rightmost letter's right arm at the
+    // canvas edge.
+    const camera = new THREE.PerspectiveCamera(28, 1, 0.1, 50);
+    camera.position.set(0, 1.4, 14);
+    camera.lookAt(0, 1.2, 0);
+
+    let disposed = false;
+    const characters: ReturnType<typeof buildLetterCharacter>[] = [];
+    let raf = 0;
+
+    const render = () => {
+      const w = container.clientWidth;
+      const h = container.clientHeight;
+      if (w > 0 && h > 0) {
+        renderer.setSize(w, h, false);
+        camera.aspect = w / h;
+        camera.updateProjectionMatrix();
+      }
+      renderer.render(scene, camera);
+    };
+
+    void (async () => {
+      const font = await loadFont();
+      if (disposed) return;
+      const SPACING = 1.7;
+      const startX = -((chars.length - 1) * SPACING) / 2;
+      chars.forEach((c, i) => {
+        const lowercase = c === c.toLowerCase() && c !== c.toUpperCase();
+        const character = buildLetterCharacter(font, { letter: c, lowercase });
+        character.group.position.set(startX + i * SPACING, 0, 0);
+        character.faceTowards(camera.position.x, camera.position.z);
+        scene.add(character.group);
+        characters.push(character);
+      });
+      render();
+      // One loose render after a tick so any deferred font glyph
+      // bevel work settles in.
+      raf = requestAnimationFrame(render);
+    })();
+
+    const observer = new ResizeObserver(render);
+    observer.observe(container);
+
+    return () => {
+      disposed = true;
+      cancelAnimationFrame(raf);
+      observer.disconnect();
+      for (const c of characters) {
+        const dispose = c.group.userData.dispose as (() => void) | undefined;
+        dispose?.();
+        scene.remove(c.group);
+      }
+      renderer.dispose();
+      if (renderer.domElement.parentElement) {
+        renderer.domElement.parentElement.removeChild(renderer.domElement);
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chars.join("")]);
+
+  return <div ref={containerRef} style={{ width: "100%", height }} />;
 }
 
 // Footer-right voice picker. Shows "Voice: <name>" plus a select if more

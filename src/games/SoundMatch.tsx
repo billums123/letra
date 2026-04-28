@@ -83,6 +83,7 @@ type LetterEntry = {
 
 export function SoundMatchGame() {
   const collect = useGameStore((s) => s.collect);
+  const letterCase = useGameStore((s) => s.letterCase);
   const [round, setRound] = useState(1);
   const engineRef = useRef<Engine | null>(null);
   const lettersRef = useRef<LetterEntry[]>([]);
@@ -167,7 +168,12 @@ export function SoundMatchGame() {
     candidates.forEach((L, i) => {
       const spawn = pickClearSpawn(engine.obstacles, taken, { minRadius: minR, maxRadius: maxR }, 1.0, rng);
       const baseY = engine.terrainHeight?.(spawn.x, spawn.z) ?? 0;
-      const character = buildLetterCharacter(font, { letter: L, baseY });
+      // Apply the kid's case selection. Mixed rolls per-letter so the
+      // round can show e.g. "A b c" — same as Find the Alphabet.
+      const lowercase =
+        letterCase === "lowercase" ||
+        (letterCase === "mixed" && Math.random() < 0.5);
+      const character = buildLetterCharacter(font, { letter: L, lowercase, baseY });
       character.group.position.set(spawn.x, baseY, spawn.z);
       taken.push({ x: spawn.x, z: spawn.z, radius: 1.0 });
       character.faceTowards(engine.camera.position.x, engine.camera.position.z);
