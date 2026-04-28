@@ -22,7 +22,18 @@ class AudioPlayer {
   activeVoice: VoiceRegistryEntry | null = null;
   // Subscribers receive notifications when init/voice changes complete.
   private listeners = new Set<() => void>();
+  // Single, reused HTMLAudioElement for every voice clip. iOS only
+  // unlocks an element when its FIRST .play() is called inside a
+  // user gesture; previously we created a new Audio per clip, which
+  // meant only the first letter played and subsequent ones stayed
+  // silent on iOS. Reusing the same element means the one-time
+  // unlock applies forever — every later play() just swaps the src.
+  private audioEl: HTMLAudioElement | null = null;
   private current: HTMLAudioElement | null = null;
+  // True once we've successfully started a play on the audio element
+  // inside a user gesture. Subsequent setTimeout-deferred play()s
+  // (which lose their gesture context on iOS) work after this point.
+  private unlocked = false;
   // The resolver of the in-flight play() promise, so stop() can resolve
   // it instead of leaving the caller hanging forever (which used to break
   // .then() chains for letter name → letter sound).
@@ -45,6 +56,49 @@ class AudioPlayer {
 
   setPreferredVoice(slug: string | null): void {
     this.preferredSlug = slug;
+  }
+
+  // Lazily create + cache the single audio element. Setting playsinline
+  // attrs prevents iOS from hijacking the page into fullscreen on play.
+  private getAudioEl(): HTMLAudioElement {
+    if (this.audioEl) return this.audioEl;
+    const a = new Audio();
+    a.preload = "auto";
+    a.setAttribute("playsinline", "");
+    a.setAttribute("webkit-playsinline", "");
+    // Voice clips shouldn't be airplayed — keeps clips local to the
+    // device.
+    a.setAttribute("x-webkit-airplay", "deny");
+    this.audioEl = a;
+    // Wire a one-time unlock attempt on the first user gesture so a
+    // setTimeout-deferred play() (e.g. our 250ms intro prompt) works
+    // even though it has lost its gesture context. The unlock fires
+    // a play() on a silent file from a real gesture, which marks
+    // the element "unlocked" for all future plays on iOS.
+    if (typeof document !== "undefined" && !this.unlocked) {
+      const unlock = () => {
+        if (this.unlocked || !this.audioEl) return;
+        const el = this.audioEl;
+        const prevSrc = el.src;
+        el.src = "/audio/silent.mp3";
+        const onReady = () => {
+          this.unlocked = true;
+          // Restore whatever src was set (probably empty) so a
+          // subsequent play(id) doesn't accidentally play the
+          // silent placeholder.
+          if (prevSrc) el.src = prevSrc;
+          else el.removeAttribute("src");
+        };
+        el.play().then(onReady).catch(() => {
+          // Failed to unlock — try again on the next gesture.
+          el.src = prevSrc;
+        });
+      };
+      document.addEventListener("touchend", unlock, { passive: true });
+      document.addEventListener("click", unlock);
+      document.addEventListener("keydown", unlock);
+    }
+    return a;
   }
 
   subscribe(listener: () => void): () => void {
@@ -215,18 +269,31 @@ class AudioPlayer {
     if (opts.interrupt !== false) this.stop();
     if (this.mode === "elevenlabs") {
       return new Promise((resolve) => {
-        const a = new Audio(this.clipUrl(id));
+        const a = this.getAudioEl();
+        // Swap the src on the cached element rather than creating a
+        // new Audio — keeps the iOS unlock state intact across plays.
+        a.src = this.clipUrl(id);
+        // Fast-forward to start in case the element was paused
+        // mid-clip by a previous stop().
+        try { a.currentTime = 0; } catch { /* not always settable until loadedmetadata */ }
         this.current = a;
         const finish = () => {
-          // Only clear the resolver pointer if it still points at us;
-          // a later play() may have already replaced it.
           if (this.currentResolver === resolve) this.currentResolver = null;
+          a.removeEventListener("ended", finish);
+          a.removeEventListener("error", finish);
           resolve();
         };
         this.currentResolver = resolve;
         a.addEventListener("ended", finish);
         a.addEventListener("error", finish);
-        a.play().catch(finish);
+        a.play()
+          .then(() => {
+            // First successful play() inside any user gesture path
+            // counts as our unlock — flips the flag so future
+            // setTimeout-deferred plays don't try to re-unlock.
+            this.unlocked = true;
+          })
+          .catch(finish);
       });
     }
     // Speech fallback: derive the natural-language text from the id.
