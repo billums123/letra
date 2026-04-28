@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
+import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { useGameStore } from "../state/store";
 import {
   ALIEN_FIELD_GROUPS,
@@ -10,7 +11,7 @@ import {
   loadAlienGeometry,
   saveAlienGeometry,
 } from "../engine/biomes/alienConfig";
-import { makeAlien } from "../engine/biomes/moon";
+import { type AlienHandles, makeAlien } from "../engine/biomes/moon";
 
 // Alien geometry editor — a stripped-down workbench for tweaking the
 // moon-biome aliens. No gizmos / undo / animation; just a numeric
@@ -26,6 +27,12 @@ export function AlienEditor() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [geometry, setGeometry] = useState<AlienGeometry>(() => loadAlienGeometry());
   const [exportOpen, setExportOpen] = useState(false);
+  const [paused, setPaused] = useState(false);
+  // Refs mirror the play/pause state so the render loop closure can
+  // read the latest value without re-creating the loop on every
+  // toggle.
+  const pausedRef = useRef(false);
+  pausedRef.current = paused;
 
   // ── Three.js preview, mounted once ──────────────────────────────
   // We hold the alien as a single mutable group rebuilt whenever
@@ -33,7 +40,8 @@ export function AlienEditor() {
   const sceneRef = useRef<THREE.Scene | null>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
-  const alienRef = useRef<{ group: THREE.Group; tick: (dt: number, t: number) => void } | null>(null);
+  const controlsRef = useRef<OrbitControls | null>(null);
+  const alienRef = useRef<AlienHandles | null>(null);
   const rafRef = useRef<number>(0);
 
   // Mount renderer + scene once.
@@ -48,9 +56,23 @@ export function AlienEditor() {
     scene.background = new THREE.Color(0x202635);
     sceneRef.current = scene;
     const camera = new THREE.PerspectiveCamera(38, 1, 0.05, 50);
-    camera.position.set(2.2, 1.6, 2.6);
+    camera.position.set(2.5, 1.6, 2.7);
     camera.lookAt(0, 0.95, 0);
     cameraRef.current = camera;
+
+    // Orbit controls — drag to rotate, right-drag to pan, scroll to
+    // zoom. Auto-rotate kicks in only while playing so paused editing
+    // gives the user full manual control.
+    const controls = new OrbitControls(camera, canvas);
+    controls.target.set(0, 0.95, 0);
+    controls.minDistance = 0.6;
+    controls.maxDistance = 10;
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.08;
+    controls.autoRotate = true;
+    controls.autoRotateSpeed = 1.4;
+    controls.update();
+    controlsRef.current = controls;
 
     // Lights — match the moon biome roughly so the preview looks
     // like the alien actually does in-game.
@@ -81,22 +103,24 @@ export function AlienEditor() {
     const ro = new ResizeObserver(resize);
     if (canvas.parentElement) ro.observe(canvas.parentElement);
 
-    // Render loop. The alien's tick advances animations; we feed
-    // wall-clock time so wave / blink / antennae sway continue.
-    const start = performance.now();
-    let last = start;
+    // Render loop. When paused, we skip the alien's tick and
+    // disable auto-rotate so the user has full manual control of
+    // the camera; OrbitControls itself stays live so dragging /
+    // zooming still works in either state. `t` advances only while
+    // playing so unpause continues from the same animation phase.
+    const startMs = performance.now();
+    let last = startMs;
+    let elapsed = 0;
     const loop = () => {
       const now = performance.now();
       const dt = Math.min(0.05, (now - last) / 1000);
       last = now;
-      const t = (now - start) / 1000;
-      alienRef.current?.tick(dt, t);
-      // Slowly orbit the camera so we can see the alien from all angles.
-      const ang = t * 0.25;
-      camera.position.x = Math.cos(ang) * 2.7;
-      camera.position.z = Math.sin(ang) * 2.7;
-      camera.position.y = 1.5;
-      camera.lookAt(0, 0.95, 0);
+      if (!pausedRef.current) {
+        elapsed += dt;
+        alienRef.current?.tick(dt, elapsed);
+      }
+      controls.autoRotate = !pausedRef.current;
+      controls.update();
       renderer.render(scene, camera);
       rafRef.current = requestAnimationFrame(loop);
     };
@@ -105,6 +129,7 @@ export function AlienEditor() {
     return () => {
       cancelAnimationFrame(rafRef.current);
       ro.disconnect();
+      controls.dispose();
       renderer.dispose();
     };
   }, []);
@@ -153,6 +178,17 @@ export function AlienEditor() {
       /* clipboard might be denied — non-fatal */
     });
   };
+  const onWave = () => {
+    alienRef.current?.triggerWave();
+  };
+  const onResetCamera = () => {
+    const cam = cameraRef.current;
+    const controls = controlsRef.current;
+    if (!cam || !controls) return;
+    cam.position.set(2.5, 1.6, 2.7);
+    controls.target.set(0, 0.95, 0);
+    controls.update();
+  };
 
   return (
     <div
@@ -186,6 +222,30 @@ export function AlienEditor() {
           </h1>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
+          <button
+            type="button"
+            onClick={() => setPaused((p) => !p)}
+            style={navBtn(paused ? "#ffd56b" : "#9bdc4a")}
+            aria-label={paused ? "Play preview" : "Pause preview"}
+          >
+            {paused ? "▶ Play" : "⏸ Pause"}
+          </button>
+          <button
+            type="button"
+            onClick={onWave}
+            style={navBtn("#b886ff")}
+            aria-label="Trigger wave animation"
+          >
+            👋 Wave
+          </button>
+          <button
+            type="button"
+            onClick={onResetCamera}
+            style={navBtn("#7e9bff")}
+            aria-label="Reset camera"
+          >
+            🎥 Center
+          </button>
           <button type="button" onClick={onSave} style={navBtn("#4caf50")}>💾 Save</button>
           <button type="button" onClick={() => setExportOpen((v) => !v)} style={navBtn("#46c2cb")}>
             📋 Export

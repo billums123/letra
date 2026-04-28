@@ -468,6 +468,13 @@ function makeCraterRimDebris(
 // is the gameplay reaction.
 // Exported so the AlienEditor can build its preview from the same
 // factory the moon biome uses.
+export type AlienHandles = {
+  group: THREE.Group;
+  tick: (dt: number, t: number) => void;
+  // Manual wave trigger — used by the AlienEditor "Wave" button to
+  // preview the animation without needing a player to walk in.
+  triggerWave: () => void;
+};
 export function makeAlien(
   hue: number,
   homeX: number,
@@ -475,7 +482,7 @@ export function makeAlien(
   getPlayerPosition: () => THREE.Vector3 | null,
   sampleGround: (x: number, z: number) => number,
   geometry: AlienGeometry = DEFAULT_ALIEN_GEOMETRY
-): { group: THREE.Group; tick: (dt: number, t: number) => void } {
+): AlienHandles {
   const G = geometry;
   const group = new THREE.Group();
   group.position.set(homeX, sampleGround(homeX, homeZ), homeZ);
@@ -659,6 +666,10 @@ export function makeAlien(
     pivot.add(hand);
   }
 
+  // Capture references to each foot so the tick can animate them
+  // alternating up + down to read as a real walking gait. Index 0 =
+  // left foot, 1 = right.
+  const feet: THREE.Mesh[] = [];
   const footMat = new THREE.MeshStandardMaterial({ color: bodyColor.clone().multiplyScalar(0.6), roughness: 0.7 });
   for (const side of [-1, 1] as const) {
     const foot = new THREE.Mesh(new THREE.SphereGeometry(G.footRadius, 12, 8), footMat);
@@ -666,6 +677,7 @@ export function makeAlien(
     foot.position.set(side * G.footX, G.footY, G.footZ);
     foot.castShadow = true;
     bob.add(foot);
+    feet.push(foot);
   }
 
   // ── Per-instance state ──────────────────────────────────────────
@@ -802,14 +814,48 @@ export function makeAlien(
       } else {
         // Walking arm swing — both arms oscillate, mirrored.
         const swing = walking ? Math.sin(t * 4 + phase) * 0.35 : 0;
-        armPivots[0].rotation.z = 0.25 + swing;
+        armPivots[0].rotation.z = G.armRestTilt + swing;
         armPivots[0].rotation.x = swing * 0.4;
         armPivots[0].rotation.y = 0;
-        armPivots[1].rotation.z = -0.25 - swing;
+        armPivots[1].rotation.z = -G.armRestTilt - swing;
         armPivots[1].rotation.x = -swing * 0.4;
         armPivots[1].rotation.y = 0;
         waveCooldown = Math.max(0, waveCooldown - dt);
       }
+
+      // ── Walk cycle ────────────────────────────────────────────
+      // Alternating foot lift synced to the same step phase as the
+      // arm swing so they look like one coherent gait. When idle
+      // (waving or stopped), feet ease back to rest.
+      if (walking) {
+        const stepPhase = t * 4 + phase;
+        const lift = 0.18;
+        // sin half-wave for each foot — only positive half lifts the
+        // foot, then it rests on the ground. Phase-shifted by π so
+        // left and right alternate.
+        const leftLift = Math.max(0, Math.sin(stepPhase)) * lift;
+        const rightLift = Math.max(0, Math.sin(stepPhase + Math.PI)) * lift;
+        feet[0].position.y = G.footY + leftLift;
+        feet[1].position.y = G.footY + rightLift;
+        // Tiny forward tilt on each foot when it's lifted — sells the
+        // step push-off rather than a vertical hover.
+        feet[0].rotation.x = Math.max(0, Math.sin(stepPhase)) * 0.4;
+        feet[1].rotation.x = Math.max(0, Math.sin(stepPhase + Math.PI)) * 0.4;
+      } else {
+        feet[0].position.y = G.footY;
+        feet[1].position.y = G.footY;
+        feet[0].rotation.x = 0;
+        feet[1].rotation.x = 0;
+      }
+    },
+    // Manual wave trigger — used by the AlienEditor "Wave" button.
+    // Skips the proximity check and ignores the cooldown so the
+    // editor can preview the animation on demand.
+    triggerWave: () => {
+      waveT = waveDuration;
+      walking = false;
+      waveCooldown = 0;
+      playAlienWave();
     },
   };
 }

@@ -294,6 +294,9 @@ export function buildLetterCharacter(font: Font, opts: LetterOptions): LetterCha
   }
 
   // Soft glow disc on the ground — sized to the letter footprint.
+  // Lives on the OUTER group (not the bobbing inner one) so the
+  // glow stays planted on the ground while the letter idle-bobs
+  // and celebrates above it.
   const glow = new THREE.Mesh(
     new THREE.CircleGeometry(Math.max(width * 0.7, 0.9), 24),
     new THREE.MeshBasicMaterial({
@@ -306,7 +309,7 @@ export function buildLetterCharacter(font: Font, opts: LetterOptions): LetterCha
   );
   glow.rotation.x = -Math.PI / 2;
   glow.position.y = 0.02;
-  inner.add(glow);
+  group.add(glow);
 
   // Animation state
   let bobPhase = Math.random() * Math.PI * 2;
@@ -563,7 +566,9 @@ function buildFromOverride(
   }
 
   // Soft glow disc on the ground. Uses the glyph's actual width so it
-  // hugs the letter even when the user shrunk other features.
+  // hugs the letter even when the user shrunk other features. Sits
+  // on the OUTER group (root) so the glow stays planted on the
+  // ground while the letter's inner sub-group idle-bobs above it.
   const glow = new THREE.Mesh(
     new THREE.CircleGeometry(Math.max(shape.width * 0.7, 0.9), 24),
     new THREE.MeshBasicMaterial({
@@ -576,7 +581,7 @@ function buildFromOverride(
   );
   glow.rotation.x = -Math.PI / 2;
   glow.position.y = 0.02;
-  inner.add(glow);
+  group.add(glow);
 
   // Animation state
   let bobPhase = Math.random() * Math.PI * 2;
