@@ -12,7 +12,7 @@
 //   and tail. That gives a click-free join without the energy mush of
 //   a crossfade.
 
-import { getMusicCtx } from "./audioCtx";
+import { getMusicCtx, onAudioContextStateChange } from "./audioCtx";
 
 export type Track = {
   id: string;
@@ -34,9 +34,27 @@ class MusicPlayer {
   // AudioBuffers are loop-trimmed once and re-used for the rest of the
   // session — decoding + scanning is expensive enough that we cache.
   private bufferCache = new Map<string, Promise<AudioBuffer | null>>();
+  // Last-requested track + volume. We keep these around so the iOS
+  // resume handler can re-play the same track after a long
+  // interruption (lock screen, app switch, scroll suspend).
+  private intendedTrack: Track | null = null;
+  private intendedVolume = 0.18;
+  // Set true when the context goes suspended/interrupted; on the
+  // next return-to-running we know to re-trigger playback because
+  // the source node may have been killed.
+  private interrupted = false;
+  // Watchdog timer that re-arms music if the context is supposed to
+  // be running but isn't — covers the rare iOS case where neither
+  // a state change event nor a user gesture fires.
+  private watchdog: number | null = null;
+  // Wired once on first play().
+  private resumeWired = false;
 
   async play(track: Track, volume = 0.18): Promise<void> {
-    if (this.active && this.active.track.id === track.id) {
+    this.wireResumeHandlers();
+    this.intendedTrack = track;
+    this.intendedVolume = volume;
+    if (this.active && this.active.track.id === track.id && !this.interrupted) {
       this.fadeTo(volume);
       return;
     }
@@ -46,6 +64,10 @@ class MusicPlayer {
     const buffer = await this.loadBuffer(c, track.url);
     if (!buffer) return;
     if (this.loadingUrl !== track.url) return;
+    // The decode may have settled while a resume was in-flight; clear
+    // the interrupted flag once we're actually about to schedule a new
+    // source so the watchdog doesn't immediately re-trigger.
+    this.interrupted = false;
 
     // Sequence the transition entirely on the audio clock so the old
     // track is fully silent before the new one starts. Two tracks
@@ -78,6 +100,62 @@ class MusicPlayer {
       this.active = null;
     }
     this.loadingUrl = null;
+    // Drop the intended track too — explicit stop means "we're done";
+    // the iOS resume handler must not re-trigger a track the user
+    // navigated away from.
+    this.intendedTrack = null;
+  }
+
+  // Wire context resume handlers + start a watchdog the first time
+  // music is requested. Listens for state changes (the audioCtx
+  // module installs gesture/visibility listeners separately); when
+  // the context comes back to "running" after an interruption and we
+  // had an intended track, re-trigger playback because the iOS
+  // suspension may have killed the buffer source.
+  private wireResumeHandlers(): void {
+    if (this.resumeWired) return;
+    this.resumeWired = true;
+    onAudioContextStateChange(() => this.handleStateChange());
+    // Watchdog — covers the rare case where neither state change
+    // events nor user gestures fire (for example, scroll-induced
+    // suspension on some iOS versions). Every 1.5s we sanity-check
+    // that the context is running and the active track is alive;
+    // if we have an intended track and don't, restart.
+    if (typeof window !== "undefined") {
+      this.watchdog = window.setInterval(() => this.handleStateChange(), 1500);
+    }
+  }
+
+  private handleStateChange(): void {
+    const c = getMusicCtx();
+    if (!c) return;
+    const state = c.state as string;
+    if (state !== "running") {
+      // Mark interrupted so that when we come back to running we
+      // know to re-trigger playback (the iOS source may be dead).
+      this.interrupted = true;
+      // Belt-and-suspenders resume — audioCtx also tries.
+      void c.resume().catch(() => undefined);
+      return;
+    }
+    // Running. Only re-trigger if we KNOW we were interrupted —
+    // don't restart on every routine state-change tick from the
+    // watchdog timer.
+    if (!this.intendedTrack || !this.interrupted) return;
+    // If a play is already loading the right track (decode in
+    // flight), don't double-trigger; the in-flight play() will
+    // schedule the new source on its own.
+    if (this.loadingUrl === this.intendedTrack.url) {
+      this.interrupted = false;
+      return;
+    }
+    this.interrupted = false;
+    const track = this.intendedTrack;
+    const volume = this.intendedVolume;
+    // Drop active so play() takes the swap path (it bails early if
+    // active.track.id matches the requested track).
+    this.active = null;
+    void this.play(track, volume);
   }
 
   fadeTo(volume: number): void {
