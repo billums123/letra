@@ -217,17 +217,16 @@ export function MainMenu() {
         <h1
           style={{
             margin: 0,
-            fontSize: compact ? 52 : 84,
-            color: "#3a2a14",
-            textShadow: "0 6px 0 rgba(255,255,255,0.6)",
-            letterSpacing: 2,
+            display: "flex",
+            justifyContent: "center",
             // Reserve room on the right for the absolutely-positioned
             // sticker badge so the title doesn't slide under it.
             paddingRight: compact ? 64 : 0,
             paddingLeft: compact ? (isDev() ? 64 : 0) : 0,
           }}
+          aria-label="Letra"
         >
-          Letra
+          <LetraWordmark compact={compact} />
         </h1>
         <p style={{ marginTop: 4, fontSize: compact ? 16 : 20, color: "#3a2a14", fontWeight: 800 }}>
           Pick a game!
@@ -858,6 +857,72 @@ function BiomePicker({ compact: _compact }: { compact: boolean }) {
         );
       })}
     </div>
+  );
+}
+
+// Hand-built "Letra" wordmark. Each letter borrows a colour from the 3D
+// alphabet palette (engine/letters.ts) and wears the same chunky white
+// outline + dark "extrusion" drop the in-game letters do. A tiny tilt
+// per letter sells the bouncy, alive feeling of the 3D characters.
+function LetraWordmark({ compact }: { compact: boolean }) {
+  // Viewbox holds the wordmark; height scales the visible size.
+  const height = compact ? 80 : 132;
+  const colours = ["#ff5e7e", "#ffa64d", "#ffd83b", "#9bdc4a", "#46c2cb"];
+  const letters = [
+    { ch: "L", x: 110, rot: -7 },
+    { ch: "e", x: 245, rot: 5 },
+    { ch: "t", x: 360, rot: -4 },
+    { ch: "r", x: 470, rot: 6 },
+    { ch: "a", x: 600, rot: -3 },
+  ];
+  return (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      viewBox="0 0 720 240"
+      role="img"
+      aria-label="Letra"
+      height={height}
+      style={{ display: "block", maxWidth: "100%", overflow: "visible" }}
+    >
+      <defs>
+        <filter id="letra-soft" x="-5%" y="-5%" width="115%" height="125%">
+          <feDropShadow dx="0" dy="6" stdDeviation="7" floodColor="#000" floodOpacity="0.22" />
+        </filter>
+      </defs>
+      <g
+        fontFamily="'Lilita One','Fredoka','Comic Sans MS',system-ui,sans-serif"
+        fontSize="200"
+        textAnchor="middle"
+        paintOrder="stroke fill"
+        strokeLinejoin="round"
+        filter="url(#letra-soft)"
+      >
+        <g fill="#3a2a14" stroke="#3a2a14" strokeWidth="16" opacity="0.55">
+          {letters.map((l) => (
+            <text key={`b-${l.ch}`} x={l.x} y={200} transform={`rotate(${l.rot} ${l.x} 170)`}>
+              {l.ch}
+            </text>
+          ))}
+        </g>
+        <g stroke="#ffffff" strokeWidth="16" transform="translate(0 -10)">
+          {letters.map((l, i) => (
+            <text
+              key={`f-${l.ch}`}
+              x={l.x}
+              y={200}
+              fill={colours[i]}
+              transform={`rotate(${l.rot} ${l.x} 170)`}
+            >
+              {l.ch}
+            </text>
+          ))}
+        </g>
+      </g>
+      <g stroke="#3a2a14" strokeWidth="4" strokeLinejoin="round">
+        <path d="M48 70 l9 18 18 9 -18 9 -9 18 -9 -18 -18 -9 18 -9 z" fill="#fff06a" />
+        <path d="M678 38 l7 14 14 7 -14 7 -7 14 -7 -14 -14 -7 14 -7 z" fill="#fff06a" />
+      </g>
+    </svg>
   );
 }
 
