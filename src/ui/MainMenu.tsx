@@ -7,8 +7,8 @@ import { isDev } from "../util/isDev";
 import { useIsCompact } from "../util/useIsCompact";
 import { BIOMES } from "../engine/biomes";
 
-// Cards that route through the case picker before launching. The third
-// game (Match the Sound, dev-gated) is audio-only so it bypasses this.
+// Cards that route through the case picker before launching. Match the
+// Sound is audio-only so it bypasses this.
 type CasedScreen = "spell-word" | "find-alphabet";
 
 // Picture-based main menu. Designed for ages 3-6: huge buttons, big icons,
@@ -278,23 +278,17 @@ export function MainMenu() {
           ariaLabel="Find the alphabet from A to Z"
           compact={compact}
         />
-        {/* Match the Sound is dev-gated for now while we keep iterating
-            on the audio match heuristics — kid users only see Spell
-            the Word and Find the Alphabet. Drop the isDev() wrapper to
-            re-enable it. */}
-        {isDev() && (
-          <GameCard
-            iconUrl="/icons/match-sound.png"
-            emoji="👂"
-            title="Match the Sound"
-            subtitle="Hear it, find it"
-            color="#ff8aaa"
-            voiceClipId={audio.menu("sounds")}
-            onSelect={() => setScreen("sound-match")}
-            ariaLabel="Match the sound to the letter"
-            compact={compact}
-          />
-        )}
+        <GameCard
+          iconUrl="/icons/match-sound.png"
+          emoji="👂"
+          title="Match the Sound"
+          subtitle="Hear it, find it"
+          color="#ff8aaa"
+          voiceClipId={audio.menu("sounds")}
+          onSelect={() => setScreen("sound-match")}
+          ariaLabel="Match the sound to the letter"
+          compact={compact}
+        />
       </main>
 
       {/* Bottom bar — one tidy flex row containing every control. On

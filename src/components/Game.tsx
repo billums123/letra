@@ -52,8 +52,7 @@ export function Game() {
       !dev &&
       (screen === "letter-test" ||
         screen === "letter-editor" ||
-        screen === "alien-editor" ||
-        screen === "sound-match")
+        screen === "alien-editor")
     ) {
       goToMenu();
     }
