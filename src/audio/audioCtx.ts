@@ -4,6 +4,8 @@
 // the context as a module-level singleton avoids the "creating two
 // AudioContexts" warning Chrome emits when a page does it more than
 // once per session.
+
+import { installIOSKeepalive } from "./iosKeepalive";
 //
 // iOS Safari is aggressive about suspending the context when the
 // page is backgrounded, the device locks, the user pulls down
@@ -27,6 +29,10 @@ export function getMusicCtx(): AudioContext | null {
     if (!Ctor) return null;
     ctx = new Ctor();
     installResumeHandler(ctx);
+    // The silent-audio + MediaSession trick — keeps iOS from
+    // suspending the audio session out from under us. See
+    // src/audio/iosKeepalive.ts for the why and the references.
+    installIOSKeepalive();
   }
   if (ctx.state === "suspended") void ctx.resume().catch(() => undefined);
   return ctx;
