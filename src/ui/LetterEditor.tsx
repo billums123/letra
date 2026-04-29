@@ -5,6 +5,7 @@ import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
 import { TransformControls } from "three/examples/jsm/controls/TransformControls.js";
 import { ALPHABET } from "../audio/types";
 import { colorFor, loadFont, makeLetterShape } from "../engine/letters";
+import letterFixtures from "../engine/letterFixtures.json";
 import {
   type EditableParts as SharedEditableParts,
   type MouthShape as SharedMouthShape,
@@ -271,6 +272,25 @@ function loadOverrides(): Record<string, EditableParts> {
     return {};
   }
 }
+
+// Bundled per-glyph overrides shipped with the build (the production
+// source of truth — same JSON that the engine merges in
+// engine/letters.ts:getLetterOverrides). The editor falls back to
+// these when the user has no localStorage override for a letter so a
+// fresh device sees the authored fixtures instead of bare defaults.
+//
+// Run every bundle entry through the same migrate() pass we use for
+// localStorage so any older shapes still in the JSON normalize the
+// same way. Computed once at module load.
+const BUNDLED_LETTER_FIXTURES: Record<string, EditableParts> = (() => {
+  const out: Record<string, EditableParts> = {};
+  const raw = letterFixtures as Record<string, unknown>;
+  for (const [k, v] of Object.entries(raw)) {
+    const m = migrate(v);
+    if (m) out[k] = m;
+  }
+  return out;
+})();
 
 function saveOverrides(o: Record<string, EditableParts>) {
   try {
@@ -559,9 +579,13 @@ export function LetterEditor() {
   }, []);
 
   // When letter changes, load saved override or compute defaults.
+  // Lookup order: localStorage user-edit > bundled fixture > generic
+  // defaults. The bundled-fixture fallback is what makes the editor
+  // open with the same glyph appearance the game ships, even on a
+  // fresh device with no localStorage entries.
   useEffect(() => {
     if (!font) return;
-    const existing = overrides[letter];
+    const existing = overrides[letter] ?? BUNDLED_LETTER_FIXTURES[letter];
     if (existing) {
       setParts(existing);
     } else {
@@ -574,7 +598,7 @@ export function LetterEditor() {
     // Seed the per-letter undo stack with the current state.
     setHistory((h) => {
       if (h[letter]) return h;
-      const seed = overrides[letter] ?? null;
+      const seed = overrides[letter] ?? BUNDLED_LETTER_FIXTURES[letter] ?? null;
       if (!seed) return h;
       return { ...h, [letter]: { stack: [seed], index: 0 } };
     });
@@ -1083,17 +1107,26 @@ export function LetterEditor() {
 
   const onResetLetter = () => {
     if (!font) return;
-    const probe = buildEditableLetter(font, letter, defaultParts(1.4, 1.6));
-    const def = defaultParts(probe.size.width, probe.size.height);
-    probe.dispose();
-    setParts(def);
+    // Drop any localStorage user-edit. The new baseline is the bundled
+    // fixture if one exists (so "Reset" returns to the production
+    // source of truth, not bare defaults), otherwise generic defaults.
     setOverrides((prev) => {
       const merged = { ...prev };
       delete merged[letter];
       saveOverrides(merged);
       return merged;
     });
-    pushHistory(letter, def);
+    const bundled = BUNDLED_LETTER_FIXTURES[letter];
+    if (bundled) {
+      setParts(bundled);
+      pushHistory(letter, bundled);
+    } else {
+      const probe = buildEditableLetter(font, letter, defaultParts(1.4, 1.6));
+      const def = defaultParts(probe.size.width, probe.size.height);
+      probe.dispose();
+      setParts(def);
+      pushHistory(letter, def);
+    }
   };
 
   // Camera snap presets — orthogonal-style framings centred on the letter.
