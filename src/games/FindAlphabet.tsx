@@ -103,6 +103,14 @@ export function FindAlphabetGame() {
   const danceModeRef = useRef(false);
   const danceStartRef = useRef(0);
   const fontRef = useRef<Awaited<ReturnType<typeof loadFont>> | null>(null);
+  // Pending trophy award — held in a timer so it fires *after* the
+  // dance-party finale has had time to land. If the kid navigates away
+  // before the timer fires, we award the trophy synchronously on
+  // unmount so they don't lose their celebration.
+  const trophyTimerRef = useRef<number | null>(null);
+  const pendingTrophyIdRef = useRef<
+    "alphabet-upper" | "alphabet-lower" | "alphabet-mixed" | null
+  >(null);
 
   // We can't pre-compute spawn positions without the engine's obstacle list,
   // so they're chosen during bootstrap. The spiral is then used as a *seed*
@@ -248,16 +256,27 @@ export function FindAlphabetGame() {
     if (currentIndex.current >= ALPHABET.length) {
       setCompleted(true);
       playWoo();
-      // Award the case-specific alphabet trophy. The earned-modal will
-      // pop over the dance party, which is fine — the kid taps "Yay!"
-      // and is dropped right back into the celebration.
+      // Hold the trophy id in a ref and award it AFTER the dance
+      // party has had time to play. If the kid leaves before the
+      // delay fires, the unmount cleanup forces the award so they
+      // never lose progress.
       const trophyId =
         letterCase === "lowercase"
           ? "alphabet-lower"
           : letterCase === "mixed"
             ? "alphabet-mixed"
             : "alphabet-upper";
-      useGameStore.getState().awardTrophy(trophyId);
+      pendingTrophyIdRef.current = trophyId;
+      // 700ms (dance kickoff) + ~8s of dance = trophy lands ~9s after
+      // the final letter. Long enough to enjoy the celebration; short
+      // enough that a kid bouncing in their seat hasn't moved on yet.
+      trophyTimerRef.current = window.setTimeout(() => {
+        if (pendingTrophyIdRef.current) {
+          useGameStore.getState().awardTrophy(pendingTrophyIdRef.current);
+          pendingTrophyIdRef.current = null;
+        }
+        trophyTimerRef.current = null;
+      }, 9000);
       // Brief pause so the player hears the final letter name + woo
       // before the dance music takes over.
       setTimeout(() => startDanceParty(engine), 700);
@@ -447,6 +466,17 @@ export function FindAlphabetGame() {
 
   useEffect(() => {
     return () => {
+      // Pending trophy: fire it now if the kid bailed during the
+      // dance party before the delay-timer landed. Modal will pop on
+      // whichever screen they navigate to next (usually the menu).
+      if (trophyTimerRef.current !== null) {
+        clearTimeout(trophyTimerRef.current);
+        trophyTimerRef.current = null;
+      }
+      if (pendingTrophyIdRef.current) {
+        useGameStore.getState().awardTrophy(pendingTrophyIdRef.current);
+        pendingTrophyIdRef.current = null;
+      }
       const engine = engineRef.current;
       // Restore in-game music if we were in dance mode when the kid bailed.
       if (danceModeRef.current) {
