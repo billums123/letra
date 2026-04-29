@@ -36,7 +36,7 @@ export type PendingEarn = {
 // "rocket" hovers a couple of units off the ground and tilts in the
 // direction it's flying. All three share the same omnidirectional
 // movement model so controls feel identical regardless of choice.
-export type AvatarKind = "kid" | "car" | "rocket" | "potato";
+export type AvatarKind = "kid" | "car" | "rocket";
 
 // Letter case the kid picks before entering Spell the Word or Find the
 // Alphabet. "mixed" is interpreted per-game: for Find the Alphabet each

@@ -52,7 +52,6 @@ type LetterEntry = {
 function alphabetPromptId(avatar: AvatarKind): string {
   if (avatar === "car") return "prompt-find-alphabet-drive";
   if (avatar === "rocket") return "prompt-find-alphabet-fly";
-  // Kid + potato share the walking prompt — the potato just walks.
   return "prompt-find-alphabet";
 }
 function moveVerb(avatar: AvatarKind): string {

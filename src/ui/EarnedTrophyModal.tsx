@@ -3,6 +3,7 @@ import { useGameStore } from "../state/store";
 import { getTrophy } from "../state/trophies";
 import { audio } from "../audio/Player";
 import { playWoo } from "../audio/sfx";
+import { setInputFrozen } from "../input/useInput";
 
 // Modal that fires whenever the kid earns a trophy. Watches the head of
 // the pendingEarns queue in the store and renders an animated celebration
@@ -23,6 +24,15 @@ export function EarnedTrophyModal() {
   // Track the earn we're currently animating. When the head of the queue
   // changes (after dismiss + animation finishes), we restart from "enter".
   const lastEarnIdRef = useRef<string | null>(null);
+
+  // Freeze player input the entire time at least one earn event is
+  // queued — the modal covers the screen, so a kid who was holding W
+  // when the trophy popped would otherwise sprint off into the world
+  // while the popup is up. Lift the freeze when the queue empties.
+  useEffect(() => {
+    setInputFrozen(earn !== null);
+    return () => setInputFrozen(false);
+  }, [earn]);
 
   useEffect(() => {
     if (!earn) {

@@ -17,6 +17,13 @@ const state: InputState = {
 
 const keys = new Set<string>();
 
+// While true, readInput() returns a zero vector regardless of what the
+// kid's hands or controllers are doing. Used by full-screen overlays
+// (e.g. the trophy-earned modal) so a held-down key or an unreleased
+// virtual-joystick touch doesn't drive the player around in the
+// background while the kid is reading the popup.
+let inputFrozen = false;
+
 function refreshFromKeyboard() {
   let x = 0;
   let y = 0;
@@ -90,11 +97,37 @@ export function startInput() {
 }
 
 export function readInput(): InputState {
+  if (inputFrozen) {
+    // Return a clean zero vector. We deliberately don't poll keyboard
+    // / gamepad / joystick here — any held inputs are intentionally
+    // ignored until the freeze is lifted.
+    state.move.x = 0;
+    state.move.y = 0;
+    state.action = false;
+    return state;
+  }
   refreshFromKeyboard();
   pollGamepad();
   applyJoystick();
   clamp();
   return state;
+}
+
+// Freeze / unfreeze player input. When freezing we also flush the
+// stale input state so a held key (kid pressing W when the modal
+// appears) doesn't reactivate the moment we unfreeze without a fresh
+// keyup. Caller is responsible for unfreezing.
+export function setInputFrozen(frozen: boolean) {
+  inputFrozen = frozen;
+  if (frozen) {
+    keys.clear();
+    state.move.x = 0;
+    state.move.y = 0;
+    state.action = false;
+    state.joystick.x = 0;
+    state.joystick.y = 0;
+    state.joystick.active = false;
+  }
 }
 
 export function getInputDebugState() {
