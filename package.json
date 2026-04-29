@@ -19,6 +19,9 @@
     "icons:generate": "node --import tsx scripts/generate-icons.ts",
     "icons:generate-force": "node --import tsx scripts/generate-icons.ts --force",
     "icons:list": "node --import tsx scripts/generate-icons.ts --list",
+    "logo:generate": "node --import tsx scripts/generate-logo.ts",
+    "logo:generate-force": "node --import tsx scripts/generate-logo.ts --force",
+    "logo:list": "node --import tsx scripts/generate-logo.ts --list",
     "sfx:generate": "node --import tsx scripts/generate-sfx.ts",
     "sfx:generate-force": "node --import tsx scripts/generate-sfx.ts --force",
     "sfx:list": "node --import tsx scripts/generate-sfx.ts --list"

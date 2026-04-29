@@ -1,12 +1,11 @@
 import { useEffect, useRef, useState } from "react";
-import * as THREE from "three";
 import { useGameStore, type LetterCase } from "../state/store";
 import { audio } from "../audio/Player";
 import { StickerBook } from "./StickerBook";
 import { ALPHABET } from "../audio/types";
-import { buildLetterCharacter, loadFont } from "../engine/letters";
 import { isDev } from "../util/isDev";
 import { useIsCompact } from "../util/useIsCompact";
+import { useIsShort } from "../util/useIsShort";
 import { BIOMES } from "../engine/biomes";
 
 // Cards that route through the case picker before launching.
@@ -40,7 +39,7 @@ type GameCardProps = {
   ariaLabel: string;
 };
 
-function GameCard({ emoji, iconUrl, title, color, voiceClipId, onSelect, ariaLabel, compact }: GameCardProps & { compact: boolean }) {
+function GameCard({ emoji, iconUrl, title, color, voiceClipId, onSelect, ariaLabel, compact, short }: GameCardProps & { compact: boolean; short: boolean }) {
   const lastSpoken = useRef(0);
   const [hover, setHover] = useState(false);
   const [pressed, setPressed] = useState(false);
@@ -51,7 +50,7 @@ function GameCard({ emoji, iconUrl, title, color, voiceClipId, onSelect, ariaLab
     lastSpoken.current = now;
     audio.play(voiceClipId);
   };
-  const iconSize = compact ? 120 : 180;
+  const iconSize = compact ? 120 : short ? 130 : 180;
   // Compose the card transform from press / hover state. Pressed wins
   // (drops the card 4px) but hover gives a small lift + tilt that
   // reads as "this is alive, you can tap me".
@@ -89,7 +88,7 @@ function GameCard({ emoji, iconUrl, title, color, voiceClipId, onSelect, ariaLab
         // longer title wraps to two lines. Desktop sits a bit shorter
         // than wide (~360 max width) so the cards read as squares
         // rather than tall rectangles with empty space below the art.
-        minHeight: compact ? 240 : 290,
+        minHeight: compact ? 240 : short ? 220 : 290,
         cursor: "pointer",
         boxShadow: pressed
           ? "0 4px 0 rgba(0,0,0,0.18), 0 6px 12px rgba(0,0,0,0.15)"
@@ -175,6 +174,10 @@ export function MainMenu() {
   // picker is closed.
   const [pickingFor, setPickingFor] = useState<CasedScreen | null>(null);
   const compact = useIsCompact();
+  // iPad landscape, laptop browsers with chrome, etc — viewports too
+  // short for the full desktop hero. We trim the title and card
+  // heights so the menu fits in one screenful without scrolling.
+  const short = useIsShort();
 
   // Stop any leftover voice clip if we land on the menu mid-utterance,
   // but don't auto-play a welcome line — the menu music carries the vibe.
@@ -199,7 +202,12 @@ export function MainMenu() {
         WebkitOverflowScrolling: "touch",
       }}
     >
-      <header style={{ padding: compact ? "16px 16px 0" : "28px 24px 0", textAlign: "center" }}>
+      <header
+        style={{
+          padding: compact ? "16px 16px 0" : short ? "12px 24px 0" : "28px 24px 0",
+          textAlign: "center",
+        }}
+      >
         <h1
           style={{
             margin: 0,
@@ -212,11 +220,21 @@ export function MainMenu() {
           }}
           aria-label="Letra"
         >
-          <LetraWordmark compact={compact} />
+          <img
+            src="/letra-title.png"
+            alt="Letra"
+            style={{
+              display: "block",
+              maxWidth: "100%",
+              height: compact ? 150 : short ? 150 : 260,
+              width: "auto",
+              objectFit: "contain",
+              filter: "drop-shadow(0 6px 12px rgba(0,0,0,0.18))",
+              userSelect: "none",
+            }}
+            draggable={false}
+          />
         </h1>
-        <p style={{ marginTop: 4, fontSize: compact ? 16 : 20, color: "#3a2a14", fontWeight: 800 }}>
-          Pick a game!
-        </p>
       </header>
       <main
         style={{
@@ -228,17 +246,28 @@ export function MainMenu() {
           // centred with healthy breathing room on big screens.
           gridTemplateColumns: compact
             ? "repeat(auto-fit, minmax(240px, 1fr))"
-            : "repeat(auto-fit, minmax(280px, 360px))",
+            : short
+              // Force 3 equal columns on short viewports so iPad
+              // landscape doesn't drop to a 2+1 layout that pushes
+              // the third card off-screen. The minmax in the regular
+              // case was wrapping at 280×3 + gaps > common landscape
+              // viewport widths.
+              ? "repeat(3, minmax(0, 1fr))"
+              : "repeat(auto-fit, minmax(280px, 360px))",
           justifyContent: "center",
           alignItems: "stretch",
-          gap: compact ? 12 : 28,
-          padding: compact ? "12px 14px" : "24px 32px",
+          gap: compact ? 12 : short ? 18 : 28,
+          padding: compact ? "12px 14px" : short ? "10px 32px" : "24px 32px",
           maxWidth: 1240,
           width: "100%",
           margin: "0 auto",
           // Push the cards toward the visual centre on tall desktop
           // viewports rather than letting them sit at the very top.
-          flex: compact ? "0 0 auto" : "1 1 auto",
+          // On short viewports we want the cards to size to their
+          // content (otherwise alignItems:stretch + flex-grow makes
+          // them swell to fill the leftover space and push the
+          // footer off-screen).
+          flex: compact || short ? "0 0 auto" : "1 1 auto",
           alignSelf: "center",
         }}
       >
@@ -251,6 +280,7 @@ export function MainMenu() {
           onSelect={() => setPickingFor("spell-word")}
           ariaLabel="Spell the Word — find the letters that spell missing animals"
           compact={compact}
+          short={short}
         />
         <GameCard
           iconUrl="/icons/find-alphabet.png"
@@ -261,6 +291,7 @@ export function MainMenu() {
           onSelect={() => setPickingFor("find-alphabet")}
           ariaLabel="Find the alphabet from A to Z"
           compact={compact}
+          short={short}
         />
         <GameCard
           iconUrl="/icons/match-sound.png"
@@ -271,6 +302,7 @@ export function MainMenu() {
           onSelect={() => setPickingFor("sound-match")}
           ariaLabel="Match the sound to the letter"
           compact={compact}
+          short={short}
         />
       </main>
 
@@ -433,10 +465,10 @@ function CasePicker({ screen, onCancel, onPick }: CasePickerProps) {
   // Pre-readers can't read "Uppercase" / "Lowercase" / "Mixed" — show
   // the actual 3D letter characters in each case so the visual itself
   // tells them what they'll see in the world.
-  const options: { id: LetterCase; label: string; chars: string[]; color: string }[] = [
-    { id: "uppercase", label: "Uppercase", chars: ["A", "B", "C", "D"], color: "#ffd56b" },
-    { id: "lowercase", label: "Lowercase", chars: ["a", "b", "c", "d"], color: "#9bdc4a" },
-    { id: "mixed", label: "Mixed", chars: ["a", "B", "c", "D"], color: "#7e9bff" },
+  const options: { id: LetterCase; label: string; image: string; chars: string[]; color: string }[] = [
+    { id: "uppercase", label: "Uppercase", image: "/case-uppercase.png", chars: ["A", "B", "C", "D"], color: "#ffd56b" },
+    { id: "lowercase", label: "Lowercase", image: "/case-lowercase.png", chars: ["a", "b", "c", "d"], color: "#9bdc4a" },
+    { id: "mixed", label: "Mixed", image: "/case-mixed.png", chars: ["a", "B", "c", "D"], color: "#7e9bff" },
   ];
   return (
     <div
@@ -502,7 +534,7 @@ function CasePicker({ screen, onCancel, onPick }: CasePickerProps) {
                 gap: compact ? 10 : 14,
               }}
             >
-              {/* White card behind the letters keeps the colored
+              {/* Cream card behind the letters keeps the AI-rendered
                   glyphs readable on every option's coloured tile. */}
               <div
                 style={{
@@ -513,7 +545,18 @@ function CasePicker({ screen, onCancel, onPick }: CasePickerProps) {
                   boxShadow: "inset 0 -4px 0 rgba(0,0,0,0.06)",
                 }}
               >
-                <CaseSampleStrip chars={opt.chars} height={compact ? 110 : 150} />
+                <img
+                  src={opt.image}
+                  alt={opt.chars.join("")}
+                  style={{
+                    display: "block",
+                    width: "100%",
+                    height: compact ? 110 : 150,
+                    objectFit: "contain",
+                    userSelect: "none",
+                  }}
+                  draggable={false}
+                />
               </div>
               <span style={{ fontSize: compact ? 22 : 30, fontWeight: 900 }}>{opt.label}</span>
             </button>
@@ -540,96 +583,6 @@ function CasePicker({ screen, onCancel, onPick }: CasePickerProps) {
       </div>
     </div>
   );
-}
-
-// Inline 3D row of letter characters used inside the case-picker.
-// Renders each glyph statically (no idle bob) using the same
-// buildLetterCharacter the game uses, so any tweaks to letterforms
-// (q-tail, i-tittle, editor overrides) flow through automatically.
-function CaseSampleStrip({ chars, height }: { chars: string[]; height: number }) {
-  const containerRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const container = containerRef.current;
-    if (!container) return;
-    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-    renderer.outputColorSpace = THREE.SRGBColorSpace;
-    container.appendChild(renderer.domElement);
-    renderer.domElement.style.width = "100%";
-    renderer.domElement.style.height = "100%";
-    renderer.domElement.style.display = "block";
-
-    const scene = new THREE.Scene();
-    scene.add(new THREE.HemisphereLight(0xfff7d6, 0xddddff, 0.75));
-    const dir = new THREE.DirectionalLight(0xffffff, 1.1);
-    dir.position.set(3, 5, 4);
-    scene.add(dir);
-    scene.add(new THREE.AmbientLight(0xffffff, 0.4));
-
-    // Frame the camera so all 4 letters AND their swung-out arms fit
-    // horizontally — the previous distance clipped the leftmost
-    // letter's left arm and the rightmost letter's right arm at the
-    // canvas edge.
-    const camera = new THREE.PerspectiveCamera(28, 1, 0.1, 50);
-    camera.position.set(0, 1.4, 14);
-    camera.lookAt(0, 1.2, 0);
-
-    let disposed = false;
-    const characters: ReturnType<typeof buildLetterCharacter>[] = [];
-    let raf = 0;
-
-    const render = () => {
-      const w = container.clientWidth;
-      const h = container.clientHeight;
-      if (w > 0 && h > 0) {
-        renderer.setSize(w, h, false);
-        camera.aspect = w / h;
-        camera.updateProjectionMatrix();
-      }
-      renderer.render(scene, camera);
-    };
-
-    void (async () => {
-      const font = await loadFont();
-      if (disposed) return;
-      const SPACING = 1.7;
-      const startX = -((chars.length - 1) * SPACING) / 2;
-      chars.forEach((c, i) => {
-        const lowercase = c === c.toLowerCase() && c !== c.toUpperCase();
-        const character = buildLetterCharacter(font, { letter: c, lowercase });
-        character.group.position.set(startX + i * SPACING, 0, 0);
-        character.faceTowards(camera.position.x, camera.position.z);
-        scene.add(character.group);
-        characters.push(character);
-      });
-      render();
-      // One loose render after a tick so any deferred font glyph
-      // bevel work settles in.
-      raf = requestAnimationFrame(render);
-    })();
-
-    const observer = new ResizeObserver(render);
-    observer.observe(container);
-
-    return () => {
-      disposed = true;
-      cancelAnimationFrame(raf);
-      observer.disconnect();
-      for (const c of characters) {
-        const dispose = c.group.userData.dispose as (() => void) | undefined;
-        dispose?.();
-        scene.remove(c.group);
-      }
-      renderer.dispose();
-      if (renderer.domElement.parentElement) {
-        renderer.domElement.parentElement.removeChild(renderer.domElement);
-      }
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chars.join("")]);
-
-  return <div ref={containerRef} style={{ width: "100%", height }} />;
 }
 
 // Footer-right voice picker. Shows "Voice: <name>" plus a select if more
@@ -958,10 +911,12 @@ function BiomePicker({ compact: _compact }: { compact: boolean }) {
   );
 }
 
-// Hand-built "Letra" wordmark. Each letter borrows a colour from the 3D
-// alphabet palette (engine/letters.ts) and wears the same chunky white
-// outline + dark "extrusion" drop the in-game letters do. A tiny tilt
-// per letter sells the bouncy, alive feeling of the 3D characters.
+// Hand-built "Letra" wordmark. Currently unused — the menu renders
+// /letra-title.png (an AI-generated 3D-character version) instead.
+// Kept here as a fallback so we can revert with one edit if the
+// raster title ever breaks. A snapshot of the rendered SVG lives at
+// public/letra-title-v1.svg too.
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
 function LetraWordmark({ compact }: { compact: boolean }) {
   // Viewbox holds the wordmark; height scales the visible size.
   const height = compact ? 80 : 132;

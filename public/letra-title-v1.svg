@@ -1,0 +1,32 @@
+<!--
+  Snapshot of the original SVG-based Letra wordmark (LetraWordmark
+  component in src/ui/MainMenu.tsx as of commit a82ca78). Kept here so
+  we can fall back to it if the AI-generated PNG title doesn't land.
+-->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 240" role="img" aria-label="Letra" style="display:block;max-width:100%;overflow:visible">
+  <defs>
+    <filter id="letra-soft" x="-5%" y="-5%" width="115%" height="125%">
+      <feDropShadow dx="0" dy="6" stdDeviation="7" flood-color="#000" flood-opacity="0.22"/>
+    </filter>
+  </defs>
+  <g font-family="'Lilita One','Fredoka','Comic Sans MS',system-ui,sans-serif" font-size="200" text-anchor="middle" paint-order="stroke fill" stroke-linejoin="round" filter="url(#letra-soft)">
+    <g fill="#3a2a14" stroke="#3a2a14" stroke-width="16" opacity="0.55">
+      <text x="110" y="200" transform="rotate(-7 110 170)">L</text>
+      <text x="245" y="200" transform="rotate(5 245 170)">e</text>
+      <text x="360" y="200" transform="rotate(-4 360 170)">t</text>
+      <text x="470" y="200" transform="rotate(6 470 170)">r</text>
+      <text x="600" y="200" transform="rotate(-3 600 170)">a</text>
+    </g>
+    <g stroke="#ffffff" stroke-width="16" transform="translate(0 -10)">
+      <text x="110" y="200" fill="#ff5e7e" transform="rotate(-7 110 170)">L</text>
+      <text x="245" y="200" fill="#ffa64d" transform="rotate(5 245 170)">e</text>
+      <text x="360" y="200" fill="#ffd83b" transform="rotate(-4 360 170)">t</text>
+      <text x="470" y="200" fill="#9bdc4a" transform="rotate(6 470 170)">r</text>
+      <text x="600" y="200" fill="#46c2cb" transform="rotate(-3 600 170)">a</text>
+    </g>
+  </g>
+  <g stroke="#3a2a14" stroke-width="4" stroke-linejoin="round">
+    <path d="M48 70 l9 18 18 9 -18 9 -9 18 -9 -18 -18 -9 18 -9 z" fill="#fff06a"/>
+    <path d="M678 38 l7 14 14 7 -14 7 -7 14 -7 -14 -14 -7 14 -7 z" fill="#fff06a"/>
+  </g>
+</svg>
