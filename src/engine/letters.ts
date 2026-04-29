@@ -178,10 +178,17 @@ export type LetterShape = {
 
 export function makeLetterShape(font: Font, display: string, mat: THREE.Material): LetterShape {
   if (display === "I") return makeSerifI(mat);
-  // Lowercase i: the stock font glyph crowds the dot right against
-  // the stem. Build it from scratch so the dot has a clean gap above
-  // the stem and reads as a proper tittle rather than a smudge.
+  // Lowercase i renders with the dot crowding the stem in the stock
+  // font; build it from scratch so the tittle has an explicit gap.
   if (display === "i") return makeChunkyLowerI(mat);
+  // Lowercase j keeps the stock glyph (so the descender hook still
+  // looks like the font's other glyphs) but we translate the
+  // separate "tittle" shape up before extruding so the gap is
+  // visibly wider. font.generateShapes() returns the j as multiple
+  // Shape objects — the smaller, topmost one is the dot.
+  if (display === "j") {
+    return makeLowercaseJ(font, mat);
+  }
 
   const geo = new TextGeometry(display, {
     font,
@@ -342,6 +349,90 @@ function makeChunkyLowerI(mat: THREE.Material): LetterShape {
       dotGeo.dispose();
     },
   };
+}
+
+// Lowercase j: keep the font's own glyph (so the stem + descender
+// hook match every other letter's curves) but lift the tittle so the
+// dot has a visible gap above the stem. The font supplies "j" as
+// TWO Shape objects — a stem-with-hook and a small isolated dot. We
+// identify the dot by picking the shape with the highest centroid,
+// translate ITS path points upward, then extrude both shapes
+// together with the same bevel params as the other letters.
+function makeLowercaseJ(font: Font, mat: THREE.Material): LetterShape {
+  const SIZE = 1.6;
+  const EXTRA_GAP = 0.22;
+  const shapes = font.generateShapes("j", SIZE);
+
+  // Pick the shape with the highest mean Y — that's the tittle.
+  let topShape: THREE.Shape | null = null;
+  let topMeanY = -Infinity;
+  for (const s of shapes) {
+    const pts = s.getPoints(8);
+    if (pts.length === 0) continue;
+    let sum = 0;
+    for (const p of pts) sum += p.y;
+    const mean = sum / pts.length;
+    if (mean > topMeanY) {
+      topMeanY = mean;
+      topShape = s;
+    }
+  }
+
+  // Build the final shape list with the dot lifted.
+  const finalShapes = shapes.map((s) =>
+    s === topShape ? translateShapeY(s, EXTRA_GAP) : s,
+  );
+
+  const geo = new THREE.ExtrudeGeometry(finalShapes, {
+    depth: 0.55,
+    curveSegments: 6,
+    bevelEnabled: true,
+    bevelThickness: 0.07,
+    bevelSize: 0.05,
+    bevelSegments: 3,
+  });
+  geo.computeBoundingBox();
+  const bb = geo.boundingBox!;
+  const cx = (bb.min.x + bb.max.x) / 2;
+  geo.translate(-cx, -bb.min.y, 0);
+  geo.computeBoundingBox();
+  const size = new THREE.Vector3();
+  geo.boundingBox!.getSize(size);
+  const mesh = new THREE.Mesh(geo, mat);
+  mesh.castShadow = true;
+  mesh.receiveShadow = true;
+  return {
+    object: mesh,
+    width: size.x,
+    height: size.y,
+    dispose: () => geo.dispose(),
+  };
+}
+
+// Build a new Shape whose path points (and hole points) are
+// translated upward by `dy`. The original Shape's curves are
+// approximated by straight segments via getPoints() — fine for a
+// small dot that's nearly circular, since the bevel softens any
+// segmentation artefacts at the kid-facing scale.
+function translateShapeY(shape: THREE.Shape, dy: number): THREE.Shape {
+  const out = new THREE.Shape();
+  const pts = shape.getPoints(12);
+  for (let i = 0; i < pts.length; i++) {
+    const p = pts[i];
+    if (i === 0) out.moveTo(p.x, p.y + dy);
+    else out.lineTo(p.x, p.y + dy);
+  }
+  for (const hole of shape.holes) {
+    const newHole = new THREE.Path();
+    const hpts = hole.getPoints(12);
+    for (let i = 0; i < hpts.length; i++) {
+      const p = hpts[i];
+      if (i === 0) newHole.moveTo(p.x, p.y + dy);
+      else newHole.lineTo(p.x, p.y + dy);
+    }
+    out.holes.push(newHole);
+  }
+  return out;
 }
 
 export type LetterCharacter = {
