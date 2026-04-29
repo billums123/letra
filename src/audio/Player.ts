@@ -11,7 +11,7 @@
 // back to the legacy flat layout (/audio/<id>.mp3) for backward compat.
 
 import type { AudioManifest, VoicesRegistry, VoiceRegistryEntry } from "./types";
-import { ALPHABET, LETTER_NAME_TEXT, LETTER_SOUND_TEXT, getHintIds } from "./types";
+import { ALPHABET, LETTER_NAME_TEXT, LETTER_SOUND_TEXT, getHintIds, getWrongNudgeIds } from "./types";
 
 type Mode = "elevenlabs" | "speech" | "muted";
 
@@ -391,6 +391,11 @@ class AudioPlayer {
     return ids[(Math.random() * ids.length) | 0];
   }
 
+  randomWrongNudge(): string {
+    const ids = getWrongNudgeIds(this.manifest ?? undefined);
+    return ids[(Math.random() * ids.length) | 0];
+  }
+
   menu(key: string): string {
     return this.manifest?.menu[key] ?? `menu-${key}`;
   }
@@ -434,6 +439,11 @@ function textForId(id: string): string {
     "hint-i-believe": "I believe in you!",
     "hint-where-could-it-be": "Where could it be?",
     "hint-keep-going": "Keep going, you're doing great!",
+    "wrong-close": "You're close, maybe try a different letter!",
+    "wrong-almost": "Almost! Try another one!",
+    "wrong-keep-looking": "Oops, keep looking!",
+    "wrong-different": "Hmm, not that one. Let's keep going!",
+    "wrong-try-again": "Not this letter, try a different one!",
     "menu-welcome": "Welcome to Letra! Pick a game to start.",
     "menu-spell": "Spell the word.",
     "menu-alphabet": "Find the alphabet.",

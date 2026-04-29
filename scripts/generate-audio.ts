@@ -163,6 +163,13 @@ function buildManifest(voiceId: string, modelId: string): AudioManifest {
       "hint-where-could-it-be",
       "hint-keep-going",
     ],
+    wrongNudge: [
+      "wrong-close",
+      "wrong-almost",
+      "wrong-keep-looking",
+      "wrong-different",
+      "wrong-try-again",
+    ],
     menu: {
       welcome: "menu-welcome",
       spell: "menu-spell",

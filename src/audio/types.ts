@@ -14,6 +14,10 @@ export type AudioManifest = {
   prompts: Record<string, string>;
   celebrate: string[];
   hints: string[];
+  // Gentle "not that letter" nudges for Find the Alphabet. Pool is
+  // shuffled each contact so kids hear variety. Keeps the tone
+  // upbeat — nothing reads as scolding.
+  wrongNudge: string[];
   menu: Record<string, string>;
 };
 
@@ -272,6 +276,16 @@ export function buildEntries(): AudioEntry[] {
   entries.push({ id: "hint-where-could-it-be", text: "Where could it be?" });
   entries.push({ id: "hint-keep-going", text: "Keep going, you're doing great!" });
 
+  // Wrong-letter nudges. Played in Find the Alphabet right after the
+  // bumped letter's name when a kid drives onto a non-target letter.
+  // Tone stays positive — every line treats the wrong tap as part of
+  // the adventure, never a reprimand.
+  entries.push({ id: "wrong-close", text: "You're close, maybe try a different letter!" });
+  entries.push({ id: "wrong-almost", text: "Almost! Try another one!" });
+  entries.push({ id: "wrong-keep-looking", text: "Oops, keep looking!" });
+  entries.push({ id: "wrong-different", text: "Hmm, not that one. Let's keep going!" });
+  entries.push({ id: "wrong-try-again", text: "Not this letter, try a different one!" });
+
   // Menu
   entries.push({ id: "menu-welcome", text: "Welcome to Letra! Pick a game to start!" });
   entries.push({ id: "menu-spell", text: "Spell the word!" });
@@ -290,4 +304,15 @@ export function getCelebrateIds(manifest?: AudioManifest): string[] {
 export function getHintIds(manifest?: AudioManifest): string[] {
   if (manifest && manifest.hints.length > 0) return manifest.hints;
   return ["hint-keep-looking", "hint-look-around"];
+}
+
+export function getWrongNudgeIds(manifest?: AudioManifest): string[] {
+  if (manifest && manifest.wrongNudge && manifest.wrongNudge.length > 0) return manifest.wrongNudge;
+  return [
+    "wrong-close",
+    "wrong-almost",
+    "wrong-keep-looking",
+    "wrong-different",
+    "wrong-try-again",
+  ];
 }

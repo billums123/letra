@@ -19,6 +19,7 @@ const TURN_LERP = 0.18;
 export function buildAvatar(kind: AvatarKind): PlayerHandles {
   if (kind === "car") return buildCar();
   if (kind === "rocket") return buildRocket();
+  if (kind === "potato") return buildPotato();
   return buildKid();
 }
 
@@ -34,7 +35,7 @@ function buildKid(): PlayerHandles {
   // Body
   const body = new THREE.Mesh(
     new THREE.CapsuleGeometry(0.45, 0.6, 6, 12),
-    new THREE.MeshStandardMaterial({ color: 0xff8c4a, roughness: 0.7 })
+    new THREE.MeshStandardMaterial({ color: 0xff8c4a, roughness: 0.7 }),
   );
   body.position.y = 0.55;
   body.castShadow = true;
@@ -45,7 +46,7 @@ function buildKid(): PlayerHandles {
   // a stuck-on blob; the squashed Z scale hugs the capsule curve.
   const belly = new THREE.Mesh(
     new THREE.SphereGeometry(0.3, 16, 12),
-    new THREE.MeshStandardMaterial({ color: 0xffd56b, roughness: 0.8 })
+    new THREE.MeshStandardMaterial({ color: 0xffd56b, roughness: 0.8 }),
   );
   belly.scale.set(1.05, 0.95, 0.35);
   // Drop the patch below the smile (smile sits at y=0.78) so the
@@ -57,10 +58,16 @@ function buildKid(): PlayerHandles {
   const whiteMat = new THREE.MeshStandardMaterial({ color: 0xffffff });
   const pupilMat = new THREE.MeshStandardMaterial({ color: 0x222222 });
   for (const x of [-0.18, 0.18]) {
-    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.13, 12, 10), whiteMat);
+    const eye = new THREE.Mesh(
+      new THREE.SphereGeometry(0.13, 12, 10),
+      whiteMat,
+    );
     eye.position.set(x, 0.92, 0.34);
     group.add(eye);
-    const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.06, 10, 8), pupilMat);
+    const pupil = new THREE.Mesh(
+      new THREE.SphereGeometry(0.06, 10, 8),
+      pupilMat,
+    );
     pupil.position.set(x, 0.92, 0.44);
     group.add(pupil);
   }
@@ -68,7 +75,7 @@ function buildKid(): PlayerHandles {
   // Smile
   const smile = new THREE.Mesh(
     new THREE.TorusGeometry(0.08, 0.025, 8, 12, Math.PI),
-    new THREE.MeshStandardMaterial({ color: 0xa13b1b })
+    new THREE.MeshStandardMaterial({ color: 0xa13b1b }),
   );
   smile.position.set(0, 0.78, 0.46);
   // Rotate the half-torus so it faces the camera as an upward-opening
@@ -78,11 +85,17 @@ function buildKid(): PlayerHandles {
 
   // Feet
   const footMat = new THREE.MeshStandardMaterial({ color: 0x5c3a1a });
-  const leftFoot = new THREE.Mesh(new THREE.SphereGeometry(0.18, 10, 8), footMat);
+  const leftFoot = new THREE.Mesh(
+    new THREE.SphereGeometry(0.18, 10, 8),
+    footMat,
+  );
   leftFoot.position.set(-0.2, 0.05, 0.05);
   leftFoot.castShadow = true;
   group.add(leftFoot);
-  const rightFoot = new THREE.Mesh(new THREE.SphereGeometry(0.18, 10, 8), footMat);
+  const rightFoot = new THREE.Mesh(
+    new THREE.SphereGeometry(0.18, 10, 8),
+    footMat,
+  );
   rightFoot.position.set(0.2, 0.05, 0.05);
   rightFoot.castShadow = true;
   group.add(rightFoot);
@@ -132,7 +145,7 @@ function buildKid(): PlayerHandles {
   };
 }
 
-// ─── Car avatar ─────────────────────────────────────────────────────────
+// ─── Car avatar ──────────────────────────────────────────────────────────────
 // A cartoony low-poly buggy. Exposes the same PlayerHandles shape as the
 // kid so the engine treats it identically. The body and cabin are
 // rounded boxes; the wheels rotate based on travelled distance, and the
@@ -154,8 +167,15 @@ function buildCar(): PlayerHandles {
   // Chassis: a rounded box (BoxGeometry with bevel-ish look via slight
   // separate shapes). For pre-K simplicity we use a single BoxGeometry
   // and rely on the cute proportions + face to read as cartoony.
-  const bodyMat = new THREE.MeshStandardMaterial({ color: CAR_COLOR, roughness: 0.5, metalness: 0.05 });
-  const accentMat = new THREE.MeshStandardMaterial({ color: CAR_ACCENT, roughness: 0.7 });
+  const bodyMat = new THREE.MeshStandardMaterial({
+    color: CAR_COLOR,
+    roughness: 0.5,
+    metalness: 0.05,
+  });
+  const accentMat = new THREE.MeshStandardMaterial({
+    color: CAR_ACCENT,
+    roughness: 0.7,
+  });
 
   const body = new THREE.Mesh(new THREE.BoxGeometry(1.4, 0.5, 1.9), bodyMat);
   body.position.y = 0.45;
@@ -176,7 +196,10 @@ function buildCar(): PlayerHandles {
 
   // Cabin roof topper — a lighter cream stripe so the cabin reads
   // visually distinct from the body even on small screens.
-  const roof = new THREE.Mesh(new THREE.BoxGeometry(1.0, 0.08, 0.85), accentMat);
+  const roof = new THREE.Mesh(
+    new THREE.BoxGeometry(1.0, 0.08, 0.85),
+    accentMat,
+  );
   roof.position.set(0, 1.27, -0.15);
   group.add(roof);
 
@@ -184,7 +207,13 @@ function buildCar(): PlayerHandles {
   // as glass rather than another solid panel.
   const windshield = new THREE.Mesh(
     new THREE.BoxGeometry(1.05, 0.45, 0.08),
-    new THREE.MeshStandardMaterial({ color: 0x2a4a6a, roughness: 0.2, metalness: 0.4, transparent: true, opacity: 0.8 })
+    new THREE.MeshStandardMaterial({
+      color: 0x2a4a6a,
+      roughness: 0.2,
+      metalness: 0.4,
+      transparent: true,
+      opacity: 0.8,
+    }),
   );
   windshield.position.set(0, 0.97, 0.34);
   windshield.rotation.x = -Math.PI / 12;
@@ -192,13 +221,27 @@ function buildCar(): PlayerHandles {
 
   // Headlight "eyes" — big white spheres so the kid recognises which
   // way the car is facing.
-  const whiteMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.3, emissive: 0xfff8c2, emissiveIntensity: 0.25 });
-  const pupilMat = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.4 });
+  const whiteMat = new THREE.MeshStandardMaterial({
+    color: 0xffffff,
+    roughness: 0.3,
+    emissive: 0xfff8c2,
+    emissiveIntensity: 0.25,
+  });
+  const pupilMat = new THREE.MeshStandardMaterial({
+    color: 0x111111,
+    roughness: 0.4,
+  });
   for (const dx of [-0.42, 0.42]) {
-    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.16, 14, 12), whiteMat);
+    const eye = new THREE.Mesh(
+      new THREE.SphereGeometry(0.16, 14, 12),
+      whiteMat,
+    );
     eye.position.set(dx, 0.6, 0.92);
     group.add(eye);
-    const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.07, 10, 8), pupilMat);
+    const pupil = new THREE.Mesh(
+      new THREE.SphereGeometry(0.07, 10, 8),
+      pupilMat,
+    );
     pupil.position.set(dx, 0.6, 1.05);
     group.add(pupil);
   }
@@ -211,7 +254,7 @@ function buildCar(): PlayerHandles {
   // front — which is what the screenshot showed.
   const smile = new THREE.Mesh(
     new THREE.TorusGeometry(0.18, 0.04, 8, 16, Math.PI),
-    new THREE.MeshStandardMaterial({ color: 0x3a1c10 })
+    new THREE.MeshStandardMaterial({ color: 0x3a1c10 }),
   );
   smile.position.set(0, 0.34, 0.97);
   smile.rotation.z = Math.PI;
@@ -219,8 +262,14 @@ function buildCar(): PlayerHandles {
 
   // Wheels — 4 cylinders, capped on each side so the rim shows from any
   // angle. Stored so the update loop can spin them with travel speed.
-  const wheelMat = new THREE.MeshStandardMaterial({ color: CAR_TIRE, roughness: 0.9 });
-  const rimMat = new THREE.MeshStandardMaterial({ color: CAR_RIM, roughness: 0.6 });
+  const wheelMat = new THREE.MeshStandardMaterial({
+    color: CAR_TIRE,
+    roughness: 0.9,
+  });
+  const rimMat = new THREE.MeshStandardMaterial({
+    color: CAR_RIM,
+    roughness: 0.6,
+  });
   const wheels: THREE.Group[] = [];
   const wheelGeo = new THREE.CylinderGeometry(0.3, 0.3, 0.22, 18);
   const rimGeo = new THREE.CylinderGeometry(0.16, 0.16, 0.24, 12);
@@ -326,7 +375,11 @@ function buildRocket(): PlayerHandles {
   // Main fuselage — a tall rounded cylinder.
   const fuselage = new THREE.Mesh(
     new THREE.CylinderGeometry(0.4, 0.5, 1.2, 16),
-    new THREE.MeshStandardMaterial({ color: 0xf5f5f7, roughness: 0.55, metalness: 0.1 })
+    new THREE.MeshStandardMaterial({
+      color: 0xf5f5f7,
+      roughness: 0.55,
+      metalness: 0.1,
+    }),
   );
   fuselage.position.y = 0;
   fuselage.castShadow = true;
@@ -335,7 +388,7 @@ function buildRocket(): PlayerHandles {
   // Red accent stripe near the top.
   const stripe = new THREE.Mesh(
     new THREE.CylinderGeometry(0.405, 0.405, 0.18, 16),
-    new THREE.MeshStandardMaterial({ color: 0xff5e5e, roughness: 0.5 })
+    new THREE.MeshStandardMaterial({ color: 0xff5e5e, roughness: 0.5 }),
   );
   stripe.position.y = 0.32;
   body.add(stripe);
@@ -343,7 +396,7 @@ function buildRocket(): PlayerHandles {
   // Nose cone.
   const nose = new THREE.Mesh(
     new THREE.ConeGeometry(0.4, 0.7, 16),
-    new THREE.MeshStandardMaterial({ color: 0xff5e5e, roughness: 0.45 })
+    new THREE.MeshStandardMaterial({ color: 0xff5e5e, roughness: 0.45 }),
   );
   nose.position.y = 0.95;
   nose.castShadow = true;
@@ -352,7 +405,7 @@ function buildRocket(): PlayerHandles {
   // Round window with a friendly cyan tint and a tiny shine.
   const windowFrame = new THREE.Mesh(
     new THREE.SphereGeometry(0.18, 16, 12),
-    new THREE.MeshStandardMaterial({ color: 0x3a2a14, roughness: 0.6 })
+    new THREE.MeshStandardMaterial({ color: 0x3a2a14, roughness: 0.6 }),
   );
   windowFrame.position.set(0, 0.18, 0.42);
   windowFrame.scale.z = 0.4;
@@ -365,28 +418,34 @@ function buildRocket(): PlayerHandles {
       metalness: 0.2,
       emissive: 0x4ab0e8,
       emissiveIntensity: 0.2,
-    })
+    }),
   );
   windowGlass.position.set(0, 0.18, 0.46);
   windowGlass.scale.z = 0.4;
   body.add(windowGlass);
   const windowShine = new THREE.Mesh(
     new THREE.SphereGeometry(0.04, 8, 8),
-    new THREE.MeshBasicMaterial({ color: 0xffffff })
+    new THREE.MeshBasicMaterial({ color: 0xffffff }),
   );
   windowShine.position.set(-0.05, 0.23, 0.5);
   windowShine.scale.z = 0.4;
   body.add(windowShine);
 
   // Four fins around the base.
-  const finMat = new THREE.MeshStandardMaterial({ color: 0xff5e5e, roughness: 0.5 });
+  const finMat = new THREE.MeshStandardMaterial({
+    color: 0xff5e5e,
+    roughness: 0.5,
+  });
   const finShape = new THREE.Shape();
   finShape.moveTo(0, 0);
   finShape.lineTo(0.45, -0.1);
   finShape.lineTo(0.45, -0.3);
   finShape.lineTo(0, -0.4);
   finShape.lineTo(0, 0);
-  const finGeo = new THREE.ExtrudeGeometry(finShape, { depth: 0.04, bevelEnabled: false });
+  const finGeo = new THREE.ExtrudeGeometry(finShape, {
+    depth: 0.04,
+    bevelEnabled: false,
+  });
   for (let i = 0; i < 4; i++) {
     const fin = new THREE.Mesh(finGeo, finMat);
     fin.position.y = -0.5;
@@ -420,7 +479,10 @@ function buildRocket(): PlayerHandles {
     blending: THREE.AdditiveBlending,
     depthWrite: false,
   });
-  const flameCore = new THREE.Mesh(new THREE.ConeGeometry(0.18, 0.45, 12), flameCoreMat);
+  const flameCore = new THREE.Mesh(
+    new THREE.ConeGeometry(0.18, 0.45, 12),
+    flameCoreMat,
+  );
   flameCore.position.y = -0.85;
   flameCore.rotation.x = Math.PI;
   body.add(flameCore);
@@ -485,6 +547,187 @@ function buildRocket(): PlayerHandles {
     },
     dispose() {
       thrust.stop();
+    },
+  };
+}
+
+// ─── Potato avatar ───────────────────────────────────────────────────────────
+// A chubby, lumpy potato with stubby arms, googly eyes, a big goofy smile,
+// and little green sprouts on top. Shares the same omnidirectional movement
+// model as the kid so controls feel identical.
+function buildPotato(): PlayerHandles {
+  const group = new THREE.Group();
+  group.name = "Player";
+
+  // ── Body — squashed potato sphere ──────────────────────────────────────
+  const skinMat = new THREE.MeshStandardMaterial({
+    color: 0xc89a50,
+    roughness: 0.9,
+  });
+  const body = new THREE.Mesh(new THREE.SphereGeometry(0.5, 16, 12), skinMat);
+  // Squash slightly to read as a plump potato rather than a ball.
+  body.scale.set(1.15, 1.0, 0.95);
+  body.position.y = 0.55;
+  body.castShadow = true;
+  group.add(body);
+
+  // Slightly darker belly patch for depth.
+  const bellyMat = new THREE.MeshStandardMaterial({
+    color: 0xb07d30,
+    roughness: 0.95,
+  });
+  const belly = new THREE.Mesh(
+    new THREE.SphereGeometry(0.28, 12, 10),
+    bellyMat,
+  );
+  belly.scale.set(1.0, 0.85, 0.35);
+  belly.position.set(0, 0.42, 0.46);
+  group.add(belly);
+
+  // ── Googly eyes ────────────────────────────────────────────────────────
+  const whiteMat = new THREE.MeshStandardMaterial({ color: 0xffffff });
+  const pupilMat = new THREE.MeshStandardMaterial({ color: 0x111111 });
+  const shineMat = new THREE.MeshStandardMaterial({
+    color: 0xffffff,
+    emissive: 0xffffff,
+    emissiveIntensity: 1.2,
+  });
+  for (const x of [-0.2, 0.2]) {
+    // Outer white — slightly larger than normal for the classic googly look.
+    const eye = new THREE.Mesh(
+      new THREE.SphereGeometry(0.13, 12, 10),
+      whiteMat,
+    );
+    eye.position.set(x, 0.72, 0.46);
+    group.add(eye);
+    // Pupil offset slightly sideways so it looks like it's glancing.
+    const pupil = new THREE.Mesh(
+      new THREE.SphereGeometry(0.065, 10, 8),
+      pupilMat,
+    );
+    pupil.position.set(x + 0.03, 0.72, 0.56);
+    group.add(pupil);
+    // Tiny specular highlight dot.
+    const shine = new THREE.Mesh(
+      new THREE.SphereGeometry(0.025, 8, 6),
+      shineMat,
+    );
+    shine.position.set(x + 0.06, 0.75, 0.585);
+    group.add(shine);
+  }
+
+  // ── Wide goofy smile ───────────────────────────────────────────────────
+  const smileMat = new THREE.MeshStandardMaterial({ color: 0x7a3a10 });
+  const smile = new THREE.Mesh(
+    new THREE.TorusGeometry(0.1, 0.028, 8, 14, Math.PI),
+    smileMat,
+  );
+  smile.scale.set(1.3, 1.0, 1.0); // wider = goofier
+  smile.position.set(0, 0.55, 0.48);
+  smile.rotation.x = Math.PI;
+  group.add(smile);
+
+  // ── Stubby arms ────────────────────────────────────────────────────────
+  const armMat = new THREE.MeshStandardMaterial({
+    color: 0xba8840,
+    roughness: 0.9,
+  });
+  for (const [xSign, zRot] of [
+    [-1, 0.8],
+    [1, -0.8],
+  ] as [number, number][]) {
+    const arm = new THREE.Mesh(
+      new THREE.CapsuleGeometry(0.09, 0.22, 4, 8),
+      armMat,
+    );
+    arm.position.set(xSign * 0.62, 0.55, 0.0);
+    arm.rotation.z = zRot; // angle outward
+    arm.castShadow = true;
+    group.add(arm);
+  }
+
+  // ── Nubby feet ─────────────────────────────────────────────────────────
+  const footMat = new THREE.MeshStandardMaterial({ color: 0x8b5a1a });
+  for (const xSign of [-1, 1]) {
+    const foot = new THREE.Mesh(new THREE.SphereGeometry(0.15, 10, 8), footMat);
+    foot.scale.set(1.0, 0.7, 1.2);
+    foot.position.set(xSign * 0.2, 0.1, 0.05);
+    foot.castShadow = true;
+    group.add(foot);
+  }
+
+  // ── Green sprouts on top ───────────────────────────────────────────────
+  const sproutMat = new THREE.MeshStandardMaterial({
+    color: 0x4aaa30,
+    roughness: 0.8,
+  });
+  const sproutPositions: [number, number, number, number][] = [
+    // [x, y, z, rotation-z]
+    [-0.12, 1.02, 0.0, -0.35],
+    [0.05, 1.06, 0.05, 0.15],
+    [0.18, 1.0, -0.05, 0.45],
+  ];
+  for (const [sx, sy, sz, rz] of sproutPositions) {
+    const sprout = new THREE.Mesh(
+      new THREE.CapsuleGeometry(0.035, 0.2, 4, 6),
+      sproutMat,
+    );
+    sprout.position.set(sx, sy, sz);
+    sprout.rotation.z = rz;
+    group.add(sprout);
+  }
+
+  // ── Skin blemish spots (potato freckles) ───────────────────────────────
+  const spotMat = new THREE.MeshStandardMaterial({
+    color: 0x7a5020,
+    roughness: 1.0,
+  });
+  const spotPositions: [number, number, number][] = [
+    [0.4, 0.55, 0.3],
+    [-0.42, 0.6, 0.25],
+    [0.1, 0.3, 0.48],
+  ];
+  for (const [sx, sy, sz] of spotPositions) {
+    const spot = new THREE.Mesh(new THREE.SphereGeometry(0.04, 6, 5), spotMat);
+    spot.position.set(sx, sy, sz);
+    group.add(spot);
+  }
+
+  let facing = 0;
+  let bob = 0;
+  let prevBobAbs = 0;
+
+  return {
+    group,
+    update(dt, input) {
+      const isMoving = Math.hypot(input.x, input.y) > 0.05;
+      if (isMoving) {
+        const speed = SPEED * dt;
+        group.position.x += input.x * speed;
+        group.position.z += input.y * speed;
+        const targetYaw = Math.atan2(input.x, input.y);
+        let delta = targetYaw - facing;
+        while (delta > Math.PI) delta -= Math.PI * 2;
+        while (delta < -Math.PI) delta += Math.PI * 2;
+        facing += delta * TURN_LERP;
+        group.rotation.y = facing;
+        bob += dt * 10;
+      } else {
+        bob += dt * 2.5;
+      }
+      // Heavier bob to sell the potato's chunkiness.
+      const bobAmt = isMoving ? 0.1 : 0.04;
+      const curBobAbs = Math.abs(Math.sin(bob));
+      group.position.y = curBobAbs * bobAmt;
+      // Gentle side-wobble adds extra goofiness while moving.
+      group.rotation.z = isMoving ? Math.sin(bob * 0.5) * 0.07 : 0;
+      if (isMoving && prevBobAbs > 0.92 && curBobAbs < prevBobAbs) {
+        playKidStep();
+      }
+      prevBobAbs = curBobAbs;
+    },
+    position() {
+      return group.position;
     },
   };
 }

@@ -13,6 +13,8 @@ import { LetterTest } from "../ui/LetterTest";
 import { LetterEditor } from "../ui/LetterEditor";
 import { AlienEditor } from "../ui/AlienEditor";
 import { QTailEditor } from "../ui/QTailEditor";
+import { TrophyLab } from "../ui/TrophyLab";
+import { EarnedTrophyModal } from "../ui/EarnedTrophyModal";
 import { isDev } from "../util/isDev";
 
 export function Game() {
@@ -54,7 +56,8 @@ export function Game() {
       (screen === "letter-test" ||
         screen === "letter-editor" ||
         screen === "alien-editor" ||
-        screen === "q-tail-editor")
+        screen === "q-tail-editor" ||
+        screen === "trophy-lab")
     ) {
       goToMenu();
     }
@@ -75,7 +78,8 @@ export function Game() {
       screen === "letter-test" ||
       screen === "letter-editor" ||
       screen === "alien-editor" ||
-      screen === "q-tail-editor"
+      screen === "q-tail-editor" ||
+      screen === "trophy-lab"
     ) {
       music.stop();
     } else {
@@ -93,7 +97,11 @@ export function Game() {
       {dev && screen === "letter-editor" && <LetterEditor />}
       {dev && screen === "alien-editor" && <AlienEditor />}
       {dev && screen === "q-tail-editor" && <QTailEditor />}
-      <VirtualJoystick visible={screen !== "menu"} />
+      {dev && screen === "trophy-lab" && <TrophyLab />}
+      <VirtualJoystick visible={screen !== "menu" && screen !== "trophy-lab"} />
+      {/* Mounted at the app root so trophy-earn celebrations fire over
+          any screen — gameplay, menu, or the trophy lab itself. */}
+      <EarnedTrophyModal />
     </div>
   );
 }

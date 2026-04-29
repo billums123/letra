@@ -24,7 +24,10 @@
     "logo:list": "node --import tsx scripts/generate-logo.ts --list",
     "sfx:generate": "node --import tsx scripts/generate-sfx.ts",
     "sfx:generate-force": "node --import tsx scripts/generate-sfx.ts --force",
-    "sfx:list": "node --import tsx scripts/generate-sfx.ts --list"
+    "sfx:list": "node --import tsx scripts/generate-sfx.ts --list",
+    "trophies:generate": "node --import tsx scripts/generate-trophies.ts",
+    "trophies:generate-force": "node --import tsx scripts/generate-trophies.ts --force",
+    "trophies:list": "node --import tsx scripts/generate-trophies.ts --list"
   },
   "dependencies": {
     "nipplejs": "^0.10.2",

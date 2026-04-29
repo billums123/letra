@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from "react";
 import { useGameStore, type LetterCase } from "../state/store";
 import { audio } from "../audio/Player";
 import { StickerBook } from "./StickerBook";
+import { TrophyShelf } from "./TrophyShelf";
+import { TROPHIES } from "../state/trophies";
 import { ALPHABET } from "../audio/types";
 import { isDev } from "../util/isDev";
 import { useIsCompact } from "../util/useIsCompact";
@@ -39,7 +41,17 @@ type GameCardProps = {
   ariaLabel: string;
 };
 
-function GameCard({ emoji, iconUrl, title, color, voiceClipId, onSelect, ariaLabel, compact, short }: GameCardProps & { compact: boolean; short: boolean }) {
+function GameCard({
+  emoji,
+  iconUrl,
+  title,
+  color,
+  voiceClipId,
+  onSelect,
+  ariaLabel,
+  compact,
+  short,
+}: GameCardProps & { compact: boolean; short: boolean }) {
   const lastSpoken = useRef(0);
   const [hover, setHover] = useState(false);
   const [pressed, setPressed] = useState(false);
@@ -66,11 +78,23 @@ function GameCard({ emoji, iconUrl, title, color, voiceClipId, onSelect, ariaLab
   return (
     <button
       type="button"
-      onMouseEnter={() => { setHover(true); speak(); }}
-      onMouseLeave={() => { setHover(false); setPressed(false); }}
-      onFocus={() => { setHover(true); speak(); }}
+      onMouseEnter={() => {
+        setHover(true);
+        speak();
+      }}
+      onMouseLeave={() => {
+        setHover(false);
+        setPressed(false);
+      }}
+      onFocus={() => {
+        setHover(true);
+        speak();
+      }}
       onBlur={() => setHover(false)}
-      onTouchStart={() => { setPressed(true); speak(); }}
+      onTouchStart={() => {
+        setPressed(true);
+        speak();
+      }}
       onTouchEnd={() => setPressed(false)}
       onMouseDown={() => setPressed(true)}
       onMouseUp={() => setPressed(false)}
@@ -99,7 +123,8 @@ function GameCard({ emoji, iconUrl, title, color, voiceClipId, onSelect, ariaLab
         font: "inherit",
         textAlign: "center",
         transform,
-        transition: "transform 0.18s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.18s ease",
+        transition:
+          "transform 0.18s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.18s ease",
         outlineOffset: 4,
         display: "flex",
         flexDirection: "column",
@@ -135,12 +160,15 @@ function GameCard({ emoji, iconUrl, title, color, voiceClipId, onSelect, ariaLab
               width: iconSize,
               height: iconSize,
               objectFit: "contain",
-              filter: "drop-shadow(0 8px 0 rgba(0,0,0,0.14)) drop-shadow(0 4px 10px rgba(0,0,0,0.18))",
+              filter:
+                "drop-shadow(0 8px 0 rgba(0,0,0,0.14)) drop-shadow(0 4px 10px rgba(0,0,0,0.18))",
             }}
             draggable={false}
           />
         ) : (
-          <div style={{ fontSize: compact ? 88 : 108, lineHeight: 1 }}>{emoji}</div>
+          <div style={{ fontSize: compact ? 88 : 108, lineHeight: 1 }}>
+            {emoji}
+          </div>
         )}
       </div>
       <div
@@ -170,6 +198,11 @@ export function MainMenu() {
   const setAvatar = useGameStore((s) => s.setAvatar);
   const setLetterCase = useGameStore((s) => s.setLetterCase);
   const [showStickers, setShowStickers] = useState(false);
+  const [showTrophyShelf, setShowTrophyShelf] = useState(false);
+  const trophies = useGameStore((s) => s.trophies);
+  const earnedTrophyCount = TROPHIES.filter(
+    (t) => (trophies[t.id] ?? 0) > 0,
+  ).length;
   // Pending screen waiting on a case-picker decision. null when the
   // picker is closed.
   const [pickingFor, setPickingFor] = useState<CasedScreen | null>(null);
@@ -204,7 +237,11 @@ export function MainMenu() {
     >
       <header
         style={{
-          padding: compact ? "16px 16px 0" : short ? "12px 24px 0" : "28px 24px 0",
+          padding: compact
+            ? "16px 16px 0"
+            : short
+              ? "12px 24px 0"
+              : "28px 24px 0",
           textAlign: "center",
         }}
       >
@@ -247,12 +284,12 @@ export function MainMenu() {
           gridTemplateColumns: compact
             ? "repeat(auto-fit, minmax(240px, 1fr))"
             : short
-              // Force 3 equal columns on short viewports so iPad
-              // landscape doesn't drop to a 2+1 layout that pushes
-              // the third card off-screen. The minmax in the regular
-              // case was wrapping at 280×3 + gaps > common landscape
-              // viewport widths.
-              ? "repeat(3, minmax(0, 1fr))"
+              ? // Force 3 equal columns on short viewports so iPad
+                // landscape doesn't drop to a 2+1 layout that pushes
+                // the third card off-screen. The minmax in the regular
+                // case was wrapping at 280×3 + gaps > common landscape
+                // viewport widths.
+                "repeat(3, minmax(0, 1fr))"
               : "repeat(auto-fit, minmax(280px, 360px))",
           justifyContent: "center",
           alignItems: "stretch",
@@ -340,7 +377,15 @@ export function MainMenu() {
       {/* Authoring tools — only mounted on localhost / dev builds, never
           shown to actual kid users. See src/util/isDev.ts. */}
       {isDev() && (
-        <div style={{ position: "absolute", top: compact ? 12 : 24, left: compact ? 12 : 24, display: "flex", gap: 8 }}>
+        <div
+          style={{
+            position: "absolute",
+            top: compact ? 12 : 24,
+            left: compact ? 12 : 24,
+            display: "flex",
+            gap: 8,
+          }}
+        >
           <button
             type="button"
             onClick={() => setScreen("letter-test")}
@@ -373,8 +418,66 @@ export function MainMenu() {
           >
             {compact ? "q" : "q tail"}
           </button>
+          <button
+            type="button"
+            onClick={() => setScreen("trophy-lab")}
+            aria-label="Open the trophy lab (dev tools)"
+            style={compact ? compactCornerBtn : cornerBtn}
+          >
+            {compact ? "🧪" : "🧪 Trophy lab"}
+          </button>
         </div>
       )}
+
+      {/* Trophy-shelf button — top-right corner of the menu. Always
+          visible (the shelf displays locked silhouettes for unearned
+          trophies, so even a brand-new player has something to look
+          at). The little count badge advertises how many they've won. */}
+      <button
+        type="button"
+        onClick={() => setShowTrophyShelf(true)}
+        aria-label={`Trophy shelf — ${earnedTrophyCount} of ${TROPHIES.length} trophies won`}
+        style={{
+          position: "absolute",
+          top: compact ? 12 : 24,
+          right: compact ? 12 : 24,
+          appearance: "none",
+          border: compact ? "4px solid white" : "5px solid white",
+          background: "#ffd56b",
+          color: "#5a3a00",
+          borderRadius: "50%",
+          width: compact ? 56 : 84,
+          height: compact ? 56 : 84,
+          fontSize: compact ? 26 : 40,
+          cursor: "pointer",
+          boxShadow: "0 6px 0 rgba(0,0,0,0.18), 0 8px 14px rgba(0,0,0,0.18)",
+          display: "grid",
+          placeItems: "center",
+        }}
+      >
+        🏆
+        <span
+          aria-hidden
+          style={{
+            position: "absolute",
+            bottom: -6,
+            right: -6,
+            background: "#3a2a14",
+            color: "white",
+            fontSize: compact ? 12 : 16,
+            fontWeight: 900,
+            borderRadius: 12,
+            padding: compact ? "1px 6px" : "2px 8px",
+            border: "3px solid white",
+          }}
+        >
+          {earnedTrophyCount}
+        </span>
+      </button>
+      <TrophyShelf
+        open={showTrophyShelf}
+        onClose={() => setShowTrophyShelf(false)}
+      />
 
       {SHOW_TROPHIES && (
         <>
@@ -418,7 +521,10 @@ export function MainMenu() {
               {collected.size}
             </span>
           </button>
-          <StickerBook open={showStickers} onClose={() => setShowStickers(false)} />
+          <StickerBook
+            open={showStickers}
+            onClose={() => setShowStickers(false)}
+          />
         </>
       )}
       <CasePicker
@@ -451,7 +557,9 @@ function CasePicker({ screen, onCancel, onPick }: CasePickerProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!screen) return;
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onCancel(); };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onCancel();
+    };
     document.addEventListener("keydown", onKey);
     return () => document.removeEventListener("keydown", onKey);
   }, [screen, onCancel]);
@@ -465,17 +573,42 @@ function CasePicker({ screen, onCancel, onPick }: CasePickerProps) {
   // Pre-readers can't read "Uppercase" / "Lowercase" / "Mixed" — show
   // the actual 3D letter characters in each case so the visual itself
   // tells them what they'll see in the world.
-  const options: { id: LetterCase; label: string; image: string; chars: string[]; color: string }[] = [
-    { id: "uppercase", label: "Uppercase", image: "/case-uppercase.png", chars: ["A", "B", "C", "D"], color: "#ffd56b" },
-    { id: "lowercase", label: "Lowercase", image: "/case-lowercase.png", chars: ["a", "b", "c", "d"], color: "#9bdc4a" },
-    { id: "mixed", label: "Mixed", image: "/case-mixed.png", chars: ["a", "B", "c", "D"], color: "#7e9bff" },
+  const options: {
+    id: LetterCase;
+    label: string;
+    image: string;
+    chars: string[];
+    color: string;
+  }[] = [
+    {
+      id: "uppercase",
+      label: "Uppercase",
+      image: "/case-uppercase.png",
+      chars: ["A", "B", "C", "D"],
+      color: "#ffd56b",
+    },
+    {
+      id: "lowercase",
+      label: "Lowercase",
+      image: "/case-lowercase.png",
+      chars: ["a", "b", "c", "d"],
+      color: "#9bdc4a",
+    },
+    {
+      id: "mixed",
+      label: "Mixed",
+      image: "/case-mixed.png",
+      chars: ["a", "B", "c", "D"],
+      color: "#7e9bff",
+    },
   ];
   return (
     <div
       role="dialog"
       aria-label={`Pick letter case for ${heading}`}
       onClick={(e) => {
-        if (dialogRef.current && !dialogRef.current.contains(e.target as Node)) onCancel();
+        if (dialogRef.current && !dialogRef.current.contains(e.target as Node))
+          onCancel();
       }}
       style={{
         position: "absolute",
@@ -501,8 +634,12 @@ function CasePicker({ screen, onCancel, onPick }: CasePickerProps) {
           textAlign: "center",
         }}
       >
-        <div style={{ fontSize: compact ? 32 : 48, fontWeight: 900 }}>{heading}</div>
-        <div style={{ marginTop: 8, fontWeight: 800, fontSize: compact ? 18 : 22 }}>
+        <div style={{ fontSize: compact ? 32 : 48, fontWeight: 900 }}>
+          {heading}
+        </div>
+        <div
+          style={{ marginTop: 8, fontWeight: 800, fontSize: compact ? 18 : 22 }}
+        >
           Pick your letters
         </div>
         <div
@@ -527,7 +664,8 @@ function CasePicker({ screen, onCancel, onPick }: CasePickerProps) {
                 borderRadius: 26,
                 padding: compact ? "16px 14px 14px" : "22px 18px 18px",
                 cursor: "pointer",
-                boxShadow: "0 12px 0 rgba(0,0,0,0.18), 0 16px 28px rgba(0,0,0,0.18)",
+                boxShadow:
+                  "0 12px 0 rgba(0,0,0,0.18), 0 16px 28px rgba(0,0,0,0.18)",
                 display: "flex",
                 flexDirection: "column",
                 alignItems: "center",
@@ -558,7 +696,9 @@ function CasePicker({ screen, onCancel, onPick }: CasePickerProps) {
                   draggable={false}
                 />
               </div>
-              <span style={{ fontSize: compact ? 22 : 30, fontWeight: 900 }}>{opt.label}</span>
+              <span style={{ fontSize: compact ? 22 : 30, fontWeight: 900 }}>
+                {opt.label}
+              </span>
             </button>
           ))}
         </div>
@@ -594,12 +734,18 @@ function CasePicker({ screen, onCancel, onPick }: CasePickerProps) {
 // hit with a thumb. This rolls its own popover: a chunky pill button
 // shows the current voice; tapping opens a vertical card of styled
 // voice chips. Closes on outside click or Escape.
-function VoicePicker({ audioMode }: { audioMode: "elevenlabs" | "speech" | "muted" }) {
+function VoicePicker({
+  audioMode,
+}: {
+  audioMode: "elevenlabs" | "speech" | "muted";
+}) {
   const voiceSlug = useGameStore((s) => s.voiceSlug);
   const setVoiceSlug = useGameStore((s) => s.setVoiceSlug);
   // Subscribe to the AudioPlayer so the picker updates after init / setVoice.
   const [voices, setVoices] = useState(audio.voices);
-  const [activeSlug, setActiveSlug] = useState<string | null>(audio.activeVoice?.slug ?? null);
+  const [activeSlug, setActiveSlug] = useState<string | null>(
+    audio.activeVoice?.slug ?? null,
+  );
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
 
@@ -617,9 +763,12 @@ function VoicePicker({ audioMode }: { audioMode: "elevenlabs" | "speech" | "mute
   useEffect(() => {
     if (!open) return;
     const onDoc = (e: MouseEvent | TouchEvent) => {
-      if (rootRef.current && !rootRef.current.contains(e.target as Node)) setOpen(false);
+      if (rootRef.current && !rootRef.current.contains(e.target as Node))
+        setOpen(false);
     };
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") setOpen(false); };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
     document.addEventListener("mousedown", onDoc);
     document.addEventListener("touchstart", onDoc);
     document.addEventListener("keydown", onKey);
@@ -637,20 +786,28 @@ function VoicePicker({ audioMode }: { audioMode: "elevenlabs" | "speech" | "mute
       ? "Off"
       : audioMode === "speech"
         ? "Browser"
-        : audio.activeVoice?.name ?? "ElevenLabs";
+        : (audio.activeVoice?.name ?? "ElevenLabs");
 
   // Single voice or non-ElevenLabs mode: render a static read-only pill.
   if (!canPick) {
     return (
-      <span style={voiceTriggerStyle(false)} aria-label={`Current voice: ${currentName}`}>
-        <span aria-hidden style={{ fontSize: 18 }}>🎤</span>
+      <span
+        style={voiceTriggerStyle(false)}
+        aria-label={`Current voice: ${currentName}`}
+      >
+        <span aria-hidden style={{ fontSize: 18 }}>
+          🎤
+        </span>
         <span>{currentName}</span>
       </span>
     );
   }
 
   return (
-    <div ref={rootRef} style={{ position: "relative", display: "inline-block" }}>
+    <div
+      ref={rootRef}
+      style={{ position: "relative", display: "inline-block" }}
+    >
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
@@ -659,9 +816,21 @@ function VoicePicker({ audioMode }: { audioMode: "elevenlabs" | "speech" | "mute
         aria-label={`Voice: ${currentName}. Tap to change.`}
         style={voiceTriggerStyle(open)}
       >
-        <span aria-hidden style={{ fontSize: 18 }}>🎤</span>
+        <span aria-hidden style={{ fontSize: 18 }}>
+          🎤
+        </span>
         <span>{currentName}</span>
-        <span aria-hidden style={{ fontSize: 12, opacity: 0.7, transform: open ? "rotate(180deg)" : "none", transition: "transform 0.12s ease" }}>▼</span>
+        <span
+          aria-hidden
+          style={{
+            fontSize: 12,
+            opacity: 0.7,
+            transform: open ? "rotate(180deg)" : "none",
+            transition: "transform 0.12s ease",
+          }}
+        >
+          ▼
+        </span>
       </button>
       {open && (
         <div
@@ -699,7 +868,9 @@ function VoicePicker({ audioMode }: { audioMode: "elevenlabs" | "speech" | "mute
                 }}
                 style={{
                   appearance: "none",
-                  border: active ? "3px solid #3a2a14" : "3px solid transparent",
+                  border: active
+                    ? "3px solid #3a2a14"
+                    : "3px solid transparent",
                   background: active ? "#ffd56b" : "rgba(0,0,0,0.04)",
                   color: "#3a2a14",
                   borderRadius: 14,
@@ -716,9 +887,15 @@ function VoicePicker({ audioMode }: { audioMode: "elevenlabs" | "speech" | "mute
                   minHeight: 44,
                 }}
               >
-                <span aria-hidden style={{ fontSize: 18 }}>{active ? "🎙️" : "🎤"}</span>
+                <span aria-hidden style={{ fontSize: 18 }}>
+                  {active ? "🎙️" : "🎤"}
+                </span>
                 <span style={{ flex: 1 }}>{v.name}</span>
-                {active && <span aria-hidden style={{ fontSize: 16 }}>✓</span>}
+                {active && (
+                  <span aria-hidden style={{ fontSize: 16 }}>
+                    ✓
+                  </span>
+                )}
               </button>
             );
           })}
@@ -748,11 +925,17 @@ function voiceTriggerStyle(open: boolean): React.CSSProperties {
   };
 }
 
-type AvatarOption = { kind: "kid" | "car" | "rocket"; label: string; emoji: string; color: string };
+type AvatarOption = {
+  kind: "kid" | "car" | "rocket" | "potato";
+  label: string;
+  emoji: string;
+  color: string;
+};
 const AVATAR_OPTIONS: AvatarOption[] = [
   { kind: "kid", label: "Kid", emoji: "🧒", color: "#ff8c4a" },
   { kind: "car", label: "Car", emoji: "🚗", color: "#ff5555" },
   { kind: "rocket", label: "Rocket", emoji: "🚀", color: "#7e9bff" },
+  { kind: "potato", label: "Potato", emoji: "🥔", color: "#c89a50" },
 ];
 
 // Two cartoony cards floating along the bottom-left of the menu so kids
@@ -768,8 +951,8 @@ function AvatarPicker({
   setAvatar,
   compact: _compact,
 }: {
-  avatar: "kid" | "car" | "rocket";
-  setAvatar: (a: "kid" | "car" | "rocket") => void;
+  avatar: "kid" | "car" | "rocket" | "potato";
+  setAvatar: (a: "kid" | "car" | "rocket" | "potato") => void;
   compact: boolean;
 }) {
   void _compact;
@@ -821,7 +1004,9 @@ function AvatarPicker({
               borderRadius: 18,
               padding: "8px 12px 6px",
               cursor: "pointer",
-              boxShadow: active ? "0 6px 0 rgba(0,0,0,0.18)" : "0 4px 0 rgba(0,0,0,0.12)",
+              boxShadow: active
+                ? "0 6px 0 rgba(0,0,0,0.18)"
+                : "0 4px 0 rgba(0,0,0,0.12)",
               minWidth: 64,
               transform: active ? "translateY(-2px)" : "none",
               transition: "transform 0.12s ease",
@@ -830,8 +1015,12 @@ function AvatarPicker({
               alignItems: "center",
             }}
           >
-            <span aria-hidden style={{ fontSize: 22, lineHeight: 1 }}>{opt.emoji}</span>
-            <span style={{ fontSize: 11, fontWeight: 900, marginTop: 2 }}>{opt.label}</span>
+            <span aria-hidden style={{ fontSize: 22, lineHeight: 1 }}>
+              {opt.emoji}
+            </span>
+            <span style={{ fontSize: 11, fontWeight: 900, marginTop: 2 }}>
+              {opt.label}
+            </span>
           </button>
         );
       })}
@@ -893,7 +1082,9 @@ function BiomePicker({ compact: _compact }: { compact: boolean }) {
               borderRadius: 18,
               padding: "8px 12px 6px",
               cursor: "pointer",
-              boxShadow: active ? "0 6px 0 rgba(0,0,0,0.18)" : "0 4px 0 rgba(0,0,0,0.12)",
+              boxShadow: active
+                ? "0 6px 0 rgba(0,0,0,0.18)"
+                : "0 4px 0 rgba(0,0,0,0.12)",
               minWidth: 64,
               transform: active ? "translateY(-2px)" : "none",
               transition: "transform 0.12s ease",
@@ -902,8 +1093,12 @@ function BiomePicker({ compact: _compact }: { compact: boolean }) {
               alignItems: "center",
             }}
           >
-            <span aria-hidden style={{ fontSize: 22, lineHeight: 1 }}>{b.emoji}</span>
-            <span style={{ fontSize: 11, fontWeight: 900, marginTop: 2 }}>{b.label}</span>
+            <span aria-hidden style={{ fontSize: 22, lineHeight: 1 }}>
+              {b.emoji}
+            </span>
+            <span style={{ fontSize: 11, fontWeight: 900, marginTop: 2 }}>
+              {b.label}
+            </span>
           </button>
         );
       })}
@@ -939,7 +1134,13 @@ function LetraWordmark({ compact }: { compact: boolean }) {
     >
       <defs>
         <filter id="letra-soft" x="-5%" y="-5%" width="115%" height="125%">
-          <feDropShadow dx="0" dy="6" stdDeviation="7" floodColor="#000" floodOpacity="0.22" />
+          <feDropShadow
+            dx="0"
+            dy="6"
+            stdDeviation="7"
+            floodColor="#000"
+            floodOpacity="0.22"
+          />
         </filter>
       </defs>
       <g
@@ -952,7 +1153,12 @@ function LetraWordmark({ compact }: { compact: boolean }) {
       >
         <g fill="#3a2a14" stroke="#3a2a14" strokeWidth="16" opacity="0.55">
           {letters.map((l) => (
-            <text key={`b-${l.ch}`} x={l.x} y={200} transform={`rotate(${l.rot} ${l.x} 170)`}>
+            <text
+              key={`b-${l.ch}`}
+              x={l.x}
+              y={200}
+              transform={`rotate(${l.rot} ${l.x} 170)`}
+            >
               {l.ch}
             </text>
           ))}
@@ -972,8 +1178,14 @@ function LetraWordmark({ compact }: { compact: boolean }) {
         </g>
       </g>
       <g stroke="#3a2a14" strokeWidth="4" strokeLinejoin="round">
-        <path d="M48 70 l9 18 18 9 -18 9 -9 18 -9 -18 -18 -9 18 -9 z" fill="#fff06a" />
-        <path d="M678 38 l7 14 14 7 -14 7 -7 14 -7 -14 -14 -7 14 -7 z" fill="#fff06a" />
+        <path
+          d="M48 70 l9 18 18 9 -18 9 -9 18 -9 -18 -18 -9 18 -9 z"
+          fill="#fff06a"
+        />
+        <path
+          d="M678 38 l7 14 14 7 -14 7 -7 14 -7 -14 -14 -7 14 -7 z"
+          fill="#fff06a"
+        />
       </g>
     </svg>
   );

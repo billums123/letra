@@ -169,9 +169,14 @@ export class Engine {
         const minDist = o.radius + PLAYER_RADIUS;
         if (dist < minDist && dist > 0.0001) {
           overlap.add(o);
-          const push = (minDist - dist) / dist;
-          pp.x += dx * push;
-          pp.z += dz * push;
+          // Soft obstacles (e.g. flowers) just trigger onBump without
+          // physically pushing the player out — the kid drives right
+          // through but the prop still gets to react.
+          if (o.solid !== false) {
+            const push = (minDist - dist) / dist;
+            pp.x += dx * push;
+            pp.z += dz * push;
+          }
           if (!this.prevOverlap.has(o)) {
             // Intensity scales with how deeply the player drove into the
             // obstacle — light grazes shouldn't shake a tree as hard as

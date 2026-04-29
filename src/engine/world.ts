@@ -21,7 +21,7 @@ export function freshSeed(): number {
   return (Math.random() * 0xffffffff) | 0;
 }
 
-export const WORLD_RADIUS = 60;
+export const WORLD_RADIUS = 50;
 
 // An obstacle the player and letters should avoid. We model every world
 // prop as a vertical cylinder (good enough for the round-ish shapes we
@@ -34,6 +34,10 @@ export type Obstacle = {
   z: number;
   radius: number;
   onBump?: (intensity: number) => void;
+  // When false, the obstacle doesn't push the player out — it just
+  // fires onBump while overlapping. Used for soft props like flowers
+  // that should wiggle when driven over but never block the kid.
+  solid?: boolean;
 };
 
 export type WorldHandles = {
@@ -137,26 +141,9 @@ export function buildMeadow(ctx: BiomeContext): void {
   skirt.receiveShadow = true;
   group.add(skirt);
 
-  // ── Boundary ring ──────────────────────────────────────────────────────
-  // 26 chunky boulders just inside worldRadius. The angle of each rock
-  // is fixed (every 360/26 degrees) so the boundary always reads as a
-  // complete circle, but the size, hue, and small wobble are randomized
-  // per session so the boundary doesn't look identical each load.
-  const boundaryCount = 26;
-  const boundaryRand = mulberry32(freshSeed());
-  for (let i = 0; i < boundaryCount; i++) {
-    const a = (i / boundaryCount) * Math.PI * 2;
-    const wobble = (boundaryRand() - 0.5) * 1.2;
-    const rDist = worldRadius - 1.2 + wobble;
-    const x = Math.cos(a) * rDist;
-    const z = Math.sin(a) * rDist;
-    const size = 1.2 + boundaryRand() * 0.8;
-    const rock = makeBoulder(size, boundaryRand() * 360);
-    rock.position.set(x, 0, z);
-    rock.rotation.y = a + boundaryRand() * 0.6;
-    group.add(rock);
-    obstacles.push({ x, z, radius: size * 0.85 });
-  }
+  // (No perimeter ring of boulders — the world clamp + green disc
+  // alone form the edge. Earlier versions ringed the play area in
+  // boulders, which read as a fence around the meadow.)
 
   // ── Pond ────────────────────────────────────────────────────────────────
   // Off-centre lily pond with a fountain. Always lives at a fixed
@@ -168,14 +155,23 @@ export function buildMeadow(ctx: BiomeContext): void {
   obstacles.push({ x: pondPos.x, z: pondPos.z, radius: pond.radius });
   tick.push(pond.tick);
 
-  // Hills — soft spheres in the distance. Sit beyond the boundary ring
-  // (>40 units from origin) so they're scenery only, no collision needed.
+  // Hills — soft spheres in the distance. We push them fully outside
+  // the play area (inner edge ≥ WORLD_RADIUS + 4) so the kid can't
+  // bump up against them at all and props don't need to spawn-check
+  // around them. Sample box is enlarged to give the rejection filter
+  // enough viable positions for the bigger hills.
   const hillRand = mulberry32(freshSeed());
-  for (let i = 0; i < 18; i++) {
+  let hillsPlaced = 0;
+  let hillAttempts = 0;
+  while (hillsPlaced < 18 && hillAttempts < 240) {
+    hillAttempts++;
     const r = 8 + hillRand() * 14;
-    const x = (hillRand() - 0.5) * 130;
-    const z = (hillRand() - 0.5) * 130;
-    if (Math.hypot(x, z) < 40) continue;
+    const x = (hillRand() - 0.5) * 200;
+    const z = (hillRand() - 0.5) * 200;
+    // Require the hill's INNER edge to sit beyond the play area.
+    // Math.hypot − r is the closest the hill's visible mass gets to
+    // the origin; we want that to clear WORLD_RADIUS by a small pad.
+    if (Math.hypot(x, z) - r < WORLD_RADIUS + 4) continue;
     const hue = 95 + hillRand() * 35;
     const hill = new THREE.Mesh(
       new THREE.SphereGeometry(r, 16, 12),
@@ -185,6 +181,7 @@ export function buildMeadow(ctx: BiomeContext): void {
     hill.castShadow = false;
     hill.receiveShadow = true;
     group.add(hill);
+    hillsPlaced++;
   }
 
   // Trees — packed inside the boundary ring. Each one wraps its foliage
@@ -205,7 +202,7 @@ export function buildMeadow(ctx: BiomeContext): void {
     tick.push(tree.update);
   }
 
-  // Mushrooms
+  // Mushrooms — wiggle like trees when a kid bumps into them.
   const mushRand = mulberry32(freshSeed());
   for (let i = 0; i < 22; i++) {
     const radius = 0.7;
@@ -213,15 +210,18 @@ export function buildMeadow(ctx: BiomeContext): void {
     if (!spot) continue;
     const hue = mushRand() * 360;
     const m = makeMushroom(hue);
-    m.position.set(spot.x, 0, spot.z);
-    m.rotation.y = mushRand() * Math.PI * 2;
-    group.add(m);
-    obstacles.push({ x: spot.x, z: spot.z, radius });
+    m.group.position.set(spot.x, 0, spot.z);
+    m.group.rotation.y = mushRand() * Math.PI * 2;
+    group.add(m.group);
+    obstacles.push({ x: spot.x, z: spot.z, radius, onBump: m.shake });
+    tick.push(m.update);
   }
 
   // Boulders — chunky scattered rocks for visual variety + collision.
+  // Bumped from 8 to 16 since the perimeter ring of boulders is gone
+  // and we want the meadow to still feel populated with rocks.
   const boulderRand = mulberry32(freshSeed());
-  for (let i = 0; i < 8; i++) {
+  for (let i = 0; i < 16; i++) {
     const size = 0.9 + boulderRand() * 0.7;
     const radius = size * 0.8;
     const spot = findOpenSpot(boulderRand, worldRadius - 6, radius, obstacles, { minRadius: 6 });
@@ -234,18 +234,20 @@ export function buildMeadow(ctx: BiomeContext): void {
     obstacles.push({ x: spot.x, z: spot.z, radius });
   }
 
-  // Flowers — purely decorative (no collision). Kids can drive over
-  // them. We still avoid stacking them on top of trees / boulders so
-  // they don't visually merge into props.
+  // Flowers — soft contact: the kid drives right over them (solid:
+  // false on the obstacle skips the position push) but the flower
+  // head wobbles when bumped, just like trees and mushrooms.
   const flowerRand = mulberry32(freshSeed());
   for (let i = 0; i < 60; i++) {
     const spot = findOpenSpot(flowerRand, worldRadius - 3, 0.3, obstacles, { minRadius: 0, pad: 0.1, maxAttempts: 12 });
     if (!spot) continue;
     const hue = flowerRand() * 360;
     const f = makeFlower(hue);
-    f.position.set(spot.x, 0, spot.z);
-    f.rotation.y = flowerRand() * Math.PI * 2;
-    group.add(f);
+    f.group.position.set(spot.x, 0, spot.z);
+    f.group.rotation.y = flowerRand() * Math.PI * 2;
+    group.add(f.group);
+    obstacles.push({ x: spot.x, z: spot.z, radius: 0.32, onBump: f.shake, solid: false });
+    tick.push(f.update);
   }
 
   // Butterflies — drift in lazy arcs above the play zone.
@@ -266,9 +268,12 @@ export function buildMeadow(ctx: BiomeContext): void {
       b.group.position.z = cz + Math.sin(ang) * orbitR;
       b.group.position.y = baseY + Math.sin(t * 2 + phase) * 0.4;
       b.group.rotation.y = ang + Math.PI / 2;
-      const flap = Math.sin(t * 18 + phase) * 0.55;
-      b.wingL.rotation.y = -flap;
-      b.wingR.rotation.y = flap;
+      // Flap on Z, not Y — Y was rotating the wings around the
+      // butterfly's vertical axis, which read as the wings sliding
+      // horizontally instead of flapping up and down.
+      const flap = Math.sin(t * 18 + phase) * 0.9;
+      b.wingL.rotation.set(0, 0, flap);
+      b.wingR.rotation.set(0, 0, -flap);
     });
   }
 
@@ -409,13 +414,30 @@ export function makeMushroom(hue: number) {
   stem.castShadow = true;
   m.add(stem);
 
+  // Cap + spots live in a pivot sub-group anchored at the top of the
+  // stem so a player bump tilts the cap (like a tree's foliage)
+  // without uprooting the stem.
+  const capPivot = new THREE.Group();
+  capPivot.position.y = 0.6;
+  m.add(capPivot);
+
+  const capMat = new THREE.MeshStandardMaterial({
+    color: new THREE.Color(`hsl(${hue}, 80%, 55%)`),
+    roughness: 0.7,
+  });
+  // The cap geometry is an OPEN hemisphere (no underside face). With
+  // the default FrontSide shadowSide the depth pass sees a hollow
+  // shell and casts a thin ring instead of a solid dome shadow.
+  // DoubleSide on the shadow pass closes the shell for shadow
+  // mapping while keeping the regular render unchanged.
+  capMat.shadowSide = THREE.DoubleSide;
   const cap = new THREE.Mesh(
     new THREE.SphereGeometry(0.5, 14, 10, 0, Math.PI * 2, 0, Math.PI / 2),
-    new THREE.MeshStandardMaterial({ color: new THREE.Color(`hsl(${hue}, 80%, 55%)`), roughness: 0.7 })
+    capMat
   );
-  cap.position.y = 0.75;
+  cap.position.y = 0.15;
   cap.castShadow = true;
-  m.add(cap);
+  capPivot.add(cap);
 
   // Spots
   const spotMat = new THREE.MeshStandardMaterial({ color: 0xf6f1d6 });
@@ -423,12 +445,37 @@ export function makeMushroom(hue: number) {
     const s = new THREE.Mesh(new THREE.SphereGeometry(0.07, 8, 8), spotMat);
     s.position.set(
       Math.cos(i * 2.3) * 0.28,
-      0.85,
+      0.25,
       Math.sin(i * 2.3) * 0.28
     );
-    m.add(s);
+    capPivot.add(s);
   }
-  return m;
+
+  // Same shake mechanic as makeTree but punchier — bigger amplitude
+  // and a slightly longer decay so a kid bumping a mushroom sees a
+  // proper boingy wobble.
+  let shakeT = 0;
+  let amp = 0;
+  return {
+    group: m,
+    shake: (intensity: number = 1) => {
+      shakeT = 1;
+      amp = Math.max(amp, Math.min(0.85, 0.55 * intensity + 0.25));
+    },
+    update: (dt: number, t: number) => {
+      if (shakeT <= 0) {
+        if (capPivot.rotation.x !== 0 || capPivot.rotation.z !== 0) {
+          capPivot.rotation.x = 0;
+          capPivot.rotation.z = 0;
+        }
+        return;
+      }
+      shakeT = Math.max(0, shakeT - dt * 2.4);
+      capPivot.rotation.z = Math.sin(t * 36) * amp * shakeT;
+      capPivot.rotation.x = Math.cos(t * 31) * amp * 0.6 * shakeT;
+      if (shakeT === 0) amp = 0;
+    },
+  };
 }
 
 export function makeCloud() {
@@ -696,7 +743,9 @@ export function makePond() {
   };
 }
 
-// Cute upright flower — stem + 5 petal-spheres + yellow centre.
+// Cute upright flower — stem + 5 petal-spheres + yellow centre. The
+// flower head sits in a pivot sub-group so it can wobble when a kid
+// drives over it without lifting the stem off the ground.
 export function makeFlower(hue: number) {
   const g = new THREE.Group();
   const stem = new THREE.Mesh(
@@ -704,22 +753,63 @@ export function makeFlower(hue: number) {
     new THREE.MeshStandardMaterial({ color: 0x4f9b3a, roughness: 1 })
   );
   stem.position.y = 0.2;
+  stem.castShadow = true;
   g.add(stem);
+  const headPivot = new THREE.Group();
+  headPivot.position.y = 0.4;
+  g.add(headPivot);
   const petalColor = new THREE.Color(`hsl(${hue}, 80%, 70%)`);
   const petalMat = new THREE.MeshStandardMaterial({ color: petalColor, roughness: 0.8 });
   for (let i = 0; i < 5; i++) {
     const a = (i / 5) * Math.PI * 2;
     const petal = new THREE.Mesh(new THREE.SphereGeometry(0.1, 8, 8), petalMat);
-    petal.position.set(Math.cos(a) * 0.13, 0.42, Math.sin(a) * 0.13);
-    g.add(petal);
+    petal.position.set(Math.cos(a) * 0.13, 0.02, Math.sin(a) * 0.13);
+    petal.castShadow = true;
+    headPivot.add(petal);
   }
   const centre = new THREE.Mesh(
     new THREE.SphereGeometry(0.07, 10, 8),
     new THREE.MeshStandardMaterial({ color: 0xffe066, roughness: 0.7 })
   );
-  centre.position.y = 0.44;
-  g.add(centre);
-  return g;
+  centre.position.y = 0.04;
+  centre.castShadow = true;
+  headPivot.add(centre);
+
+  // Squish state — 1 means fully flattened, 0 means standing tall.
+  // Decays smoothly back to 0 with a tiny overshoot so the flower
+  // springs back up like grass after being stepped on.
+  let squishT = 0;
+  let lastBumpAt = 0;
+  return {
+    group: g,
+    shake: (intensity: number = 1) => {
+      // Held for ~0.4s before recovery starts so a kid driving across
+      // a row of flowers leaves a clear trail of flattened ones.
+      squishT = Math.min(1, Math.max(squishT, 0.6 + intensity * 0.4));
+      lastBumpAt = performance.now();
+    },
+    update: (dt: number, _t: number) => {
+      // Hold the squish briefly after a bump, then ease back up with
+      // a cubic so the recovery has a satisfying spring.
+      const heldFor = (performance.now() - lastBumpAt) / 1000;
+      const HOLD = 0.35;
+      const RECOVER = 1.1;
+      if (squishT > 0) {
+        if (heldFor > HOLD) {
+          squishT = Math.max(0, squishT - dt / RECOVER);
+        }
+      }
+      // Y-scale: 1 when fresh, 0.18 when squashed — petal head almost
+      // touching the ground.
+      const k = squishT;
+      const yScale = 1 - k * 0.82;
+      g.scale.set(1 + k * 0.25, yScale, 1 + k * 0.25); // petals splay out as it flattens
+      // Tilt the head a bit while squashed so it doesn't read as a
+      // perfectly symmetric pancake.
+      headPivot.rotation.z = Math.sin(lastBumpAt * 0.0173) * 0.4 * k;
+      headPivot.rotation.x = Math.cos(lastBumpAt * 0.0211) * 0.35 * k;
+    },
+  };
 }
 
 // Butterfly — body + two flapping wings.

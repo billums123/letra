@@ -277,6 +277,9 @@ export function SoundMatchGame() {
       playChime();
       await audio.playSequence([audio.letterName(entry.letter), audio.randomCelebrate()]);
       collect(entry.letter);
+      // Bump the sound-match counter; this awards a Listening Star
+      // every 10 successful matches (the store handles the threshold).
+      useGameStore.getState().recordSoundMatch();
       const next = roundRef.current + 1;
       roundRef.current = next;
       setRound(next);

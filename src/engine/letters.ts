@@ -22,6 +22,30 @@ import letterFixtures from "./letterFixtures.json";
 const BUNDLED_LETTER_OVERRIDES = letterFixtures as Record<string, EditableParts>;
 const LETTER_OVERRIDES_KEY = "letra:editor:overrides:v2";
 
+// One-shot migration: an out-of-spec capital "A" snuck into some
+// users' localStorage (eyes pulled way out, smile drifted). Drop the
+// stale A entry so the bundled glyph wins on next load. Keyed by a
+// version flag so we don't keep clobbering A if the user later
+// re-authors it on purpose.
+(function scrubBrokenLetterAFromOverrides() {
+  if (typeof localStorage === "undefined") return;
+  const FLAG = "letra:scrubA:v1";
+  try {
+    if (localStorage.getItem(FLAG)) return;
+    const raw = localStorage.getItem(LETTER_OVERRIDES_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw) as Record<string, unknown>;
+      if (parsed && typeof parsed === "object" && "A" in parsed) {
+        delete parsed.A;
+        localStorage.setItem(LETTER_OVERRIDES_KEY, JSON.stringify(parsed));
+      }
+    }
+    localStorage.setItem(FLAG, "1");
+  } catch {
+    /* non-fatal */
+  }
+})();
+
 function getLetterOverrides(): Record<string, EditableParts> {
   if (typeof localStorage === "undefined") return BUNDLED_LETTER_OVERRIDES;
   try {

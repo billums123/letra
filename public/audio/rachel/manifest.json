@@ -1,7 +1,7 @@
 {
   "voiceId": "21m00Tcm4TlvDq8ikWAM",
   "modelId": "eleven_multilingual_v2",
-  "generatedAt": "2026-04-27T21:59:16.235Z",
+  "generatedAt": "2026-04-29T16:28:46.202Z",
   "letters": {
     "A": {
       "name": "letter-A-name",
@@ -133,7 +133,17 @@
   ],
   "hints": [
     "hint-keep-looking",
-    "hint-look-around"
+    "hint-look-around",
+    "hint-i-believe",
+    "hint-where-could-it-be",
+    "hint-keep-going"
+  ],
+  "wrongNudge": [
+    "wrong-close",
+    "wrong-almost",
+    "wrong-keep-looking",
+    "wrong-different",
+    "wrong-try-again"
   ],
   "menu": {
     "welcome": "menu-welcome",

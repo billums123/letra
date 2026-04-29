@@ -11,7 +11,7 @@ import { buildLetterCharacter, distanceXZ, loadFont } from "../engine/letters";
 import { makeBurst, makeFirework } from "../engine/particles";
 import { pickClearSpawn } from "../engine/world";
 import { ALPHABET } from "../audio/types";
-import { useGameStore } from "../state/store";
+import { useGameStore, type AvatarKind } from "../state/store";
 import { isDev } from "../util/isDev";
 
 // Find the alphabet from A to Z. Letters scattered in a wide ring; the kid
@@ -49,12 +49,13 @@ type LetterEntry = {
 // Avatar-aware prompt id and verb. Walking is the default; if the kid is
 // driving the car we swap to the "drive" wording so the audio matches what
 // they're actually doing on screen.
-function alphabetPromptId(avatar: "kid" | "car" | "rocket"): string {
+function alphabetPromptId(avatar: AvatarKind): string {
   if (avatar === "car") return "prompt-find-alphabet-drive";
   if (avatar === "rocket") return "prompt-find-alphabet-fly";
+  // Kid + potato share the walking prompt — the potato just walks.
   return "prompt-find-alphabet";
 }
-function moveVerb(avatar: "kid" | "car" | "rocket"): string {
+function moveVerb(avatar: AvatarKind): string {
   if (avatar === "car") return "Drive";
   if (avatar === "rocket") return "Fly";
   return "Walk";
@@ -85,6 +86,18 @@ export function FindAlphabetGame() {
   const currentIndex = useRef(0);
   const hintScheduledRef = useRef(false);
   const lastProgressRef = useRef(performance.now());
+  // Letters the kid was already overlapping last frame — used to fire
+  // the "wrong letter" nudge only on the rising edge of contact, not
+  // every frame they sit on top of an already-bumped letter.
+  const prevWrongOverlapRef = useRef<Set<string>>(new Set());
+  // Per-letter cooldown so re-driving onto a recently-bumped wrong
+  // letter doesn't re-trigger the audio. Stored as a wall-clock
+  // timestamp keyed by glyph; a fresh nudge requires the cooldown
+  // window to have elapsed since the last nudge for that letter.
+  const wrongLetterCooldownRef = useRef<Map<string, number>>(new Map());
+  // Suppress overlapping nudges — if one is mid-flight we don't want
+  // a second one stomping on it.
+  const wrongNudgeBusyRef = useRef(false);
   // Dance-party state. Held in refs so the engine tickHook (a long-
   // lived closure) can read them without restarting on every state
   // change.
@@ -157,6 +170,46 @@ export function FindAlphabetGame() {
       if (d < COLLECT_DIST && !next.character.isCollected) {
         collectLetter(engine, next, playerPos);
       }
+
+      // Wrong-letter nudges: the kid drove onto a letter that isn't
+      // the current target. Each wrong contact (rising edge only) plays
+      // the bumped letter's name and reminds them of the target. We
+      // throttle per-letter so a kid pressed against a wrong letter
+      // hears the nudge once, not every frame.
+      const targetLetter = next.letter;
+      const currentOverlap = new Set<string>();
+      for (const entry of lettersRef.current) {
+        if (entry.character.isCollected) continue;
+        if (entry.letter === targetLetter) continue;
+        const dist = distanceXZ(playerPos, entry.character.positionXZ());
+        if (dist < COLLECT_DIST) currentOverlap.add(entry.letter);
+      }
+      if (!wrongNudgeBusyRef.current) {
+        const now = performance.now();
+        for (const L of currentOverlap) {
+          if (prevWrongOverlapRef.current.has(L)) continue; // already bumped
+          const lastNudgedAt = wrongLetterCooldownRef.current.get(L) ?? 0;
+          if (now - lastNudgedAt < 4000) continue;          // cooldown
+          // Fire the nudge: bumped letter's name, then the target's.
+          wrongLetterCooldownRef.current.set(L, now);
+          wrongNudgeBusyRef.current = true;
+          // No celebrate animation — the wrong letter shouldn't look
+          // like it earned a victory dance. Audio: bumped letter's
+          // name, then a random "whoops, not quite" nudge clip.
+          audio.stop();
+          audio
+            .play(audio.letterName(L))
+            .then(() =>
+              audio.play(audio.randomWrongNudge(), { interrupt: false }),
+            )
+            .finally(() => {
+              wrongNudgeBusyRef.current = false;
+            });
+          break; // only one nudge per frame
+        }
+      }
+      prevWrongOverlapRef.current = currentOverlap;
+
       const since = (performance.now() - lastProgressRef.current) / 1000;
       if (since > HINT_AFTER_SECONDS && !hintScheduledRef.current) {
         hintScheduledRef.current = true;
@@ -196,6 +249,16 @@ export function FindAlphabetGame() {
     if (currentIndex.current >= ALPHABET.length) {
       setCompleted(true);
       playWoo();
+      // Award the case-specific alphabet trophy. The earned-modal will
+      // pop over the dance party, which is fine — the kid taps "Yay!"
+      // and is dropped right back into the celebration.
+      const trophyId =
+        letterCase === "lowercase"
+          ? "alphabet-lower"
+          : letterCase === "mixed"
+            ? "alphabet-mixed"
+            : "alphabet-upper";
+      useGameStore.getState().awardTrophy(trophyId);
       // Brief pause so the player hears the final letter name + woo
       // before the dance music takes over.
       setTimeout(() => startDanceParty(engine), 700);

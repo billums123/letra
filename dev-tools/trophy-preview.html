@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Letra — Trophy Preview</title>
+<style>
+  :root {
+    color-scheme: light;
+    --bg: #fff7e6;
+    --ink: #3a2a14;
+    --muted: #8a7458;
+    --tile-shadow: 0 10px 0 rgba(0,0,0,0.16), 0 14px 24px rgba(0,0,0,0.18);
+  }
+  html, body { margin: 0; padding: 0; background: var(--bg); color: var(--ink); }
+  body {
+    font: 16px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+    padding: 32px 24px 64px;
+    min-height: 100vh;
+  }
+  h1 {
+    margin: 0 0 6px;
+    font-size: 32px;
+    letter-spacing: -0.01em;
+  }
+  .lede { color: var(--muted); margin: 0 0 28px; max-width: 680px; }
+  .controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin: 0 0 28px;
+  }
+  .controls button {
+    appearance: none;
+    border: 2px solid #d6c8b0;
+    background: #fff;
+    color: var(--ink);
+    border-radius: 999px;
+    padding: 8px 16px;
+    font: inherit;
+    cursor: pointer;
+  }
+  .controls button.active {
+    background: #ffd56b;
+    border-color: #b8932a;
+  }
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 24px;
+  }
+  .row {
+    background: #ffffff;
+    border-radius: 24px;
+    padding: 18px 18px 22px;
+    box-shadow: 0 6px 0 rgba(0,0,0,0.06), 0 8px 16px rgba(0,0,0,0.06);
+  }
+  .row h3 {
+    margin: 0 0 4px;
+    font-size: 18px;
+  }
+  .row .meta {
+    color: var(--muted);
+    font-size: 13px;
+    margin: 0 0 14px;
+  }
+  .pair {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+  }
+  /* The tile mocks up how a trophy will appear on the shelf:
+     a chunky pastel square with the PNG centred, a stacking
+     ×N badge in the bottom-right, and white border. */
+  .tile {
+    position: relative;
+    aspect-ratio: 1 / 1;
+    border-radius: 22px;
+    border: 4px solid #fff;
+    box-shadow: var(--tile-shadow);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: hidden;
+    background-position: center;
+    background-size: cover;
+  }
+  .tile.locked {
+    /* Unearned silhouette state on the shelf: same tile colour
+       but the trophy art is replaced with a soft grey hint so
+       kids see "there's a trophy to be won here". */
+    filter: saturate(0.4) brightness(1.05);
+  }
+  .tile img {
+    width: 88%;
+    height: 88%;
+    object-fit: contain;
+    image-rendering: -webkit-optimize-contrast;
+  }
+  .tile.locked img {
+    filter: grayscale(1) brightness(0.7) opacity(0.35);
+  }
+  .badge {
+    position: absolute;
+    bottom: 8px;
+    right: 8px;
+    background: #ffcf3a;
+    color: #5a3a00;
+    border: 3px solid #fff;
+    border-radius: 999px;
+    padding: 2px 10px;
+    font-weight: 800;
+    font-size: 14px;
+    box-shadow: 0 2px 0 rgba(0,0,0,0.18);
+  }
+  .stateLabel {
+    text-align: center;
+    font-size: 12px;
+    color: var(--muted);
+    margin-top: 6px;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+  }
+  .missing {
+    color: #b04a4a;
+    font-weight: 700;
+    font-size: 12px;
+    text-align: center;
+    padding: 12px;
+  }
+  .trigger {
+    margin-top: 14px;
+    font-size: 13px;
+    color: var(--muted);
+    border-top: 1px dashed #e7dcc4;
+    padding-top: 10px;
+  }
+  .trigger b { color: var(--ink); }
+  .filename {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .legend {
+    margin: 12px 0 24px;
+    color: var(--muted);
+    font-size: 14px;
+  }
+</style>
+</head>
+<body>
+  <h1>Letra Trophy Preview</h1>
+  <p class="lede">
+    Each card shows the won state (left) and the locked silhouette (right) on the
+    same shelf-tile background. Stacking badge (×3) is mocked on the won state.
+    Reload after running <code>npm run trophies:generate</code> to see new art.
+  </p>
+  <div class="controls">
+    <button data-bg="#ffe7a8" class="active">Honey</button>
+    <button data-bg="#bee7c2">Mint</button>
+    <button data-bg="#c5dcff">Sky</button>
+    <button data-bg="#f5c4d6">Rose</button>
+    <button data-bg="#e7d6ff">Lilac</button>
+    <button data-bg="#fff7e6">Cream (BG)</button>
+  </div>
+  <p class="legend">
+    Tip: tap the colour buttons to preview every trophy against different shelf-tile
+    backgrounds. The PNGs are transparent so the colour shows through.
+  </p>
+
+  <div class="grid" id="grid"></div>
+
+  <script>
+    // Keep this list in sync with scripts/generate-trophies.ts.
+    const TROPHIES = [
+      { id: "alphabet-upper", name: "Big-Letter Hero",    trigger: "Finish A→Z in UPPERCASE — stacks", stack: 2 },
+      { id: "alphabet-lower", name: "Little-Letter Hero", trigger: "Finish a→z in lowercase — stacks", stack: 1 },
+      { id: "alphabet-mixed", name: "Mix-Up Master",      trigger: "Finish A→Z in mixed case — stacks", stack: 1 },
+      { id: "spell-cat",      name: "Cat Catcher",        trigger: "Spell CAT — stacks", stack: 3 },
+      { id: "spell-dog",      name: "Pup Finder",         trigger: "Spell DOG — stacks", stack: 2 },
+      { id: "spell-sun",      name: "Sunbeam",            trigger: "Spell SUN — stacks", stack: 1 },
+      { id: "spell-bus",      name: "Bus Driver",         trigger: "Spell BUS — stacks", stack: 4 },
+      { id: "spell-pig",      name: "Pig Pal",            trigger: "Spell PIG — stacks", stack: 1 },
+      { id: "sound-match",    name: "Listening Star",     trigger: "Match 10 sounds — stacks per +10", stack: 5 },
+      { id: "word-wizard",    name: "Word Wizard",        trigger: "Spell 25 words total (any mix)", stack: 1 },
+    ];
+
+    const grid = document.getElementById("grid");
+    let currentBg = "#ffe7a8";
+
+    function render() {
+      grid.innerHTML = "";
+      for (const t of TROPHIES) {
+        const card = document.createElement("div");
+        card.className = "row";
+        const src = `../public/trophies/${t.id}.png`;
+
+        card.innerHTML = `
+          <h3>${t.name}</h3>
+          <div class="meta"><span class="filename">${t.id}.png</span></div>
+          <div class="pair">
+            <div>
+              <div class="tile" data-bg style="background:${currentBg}">
+                <img src="${src}" alt="${t.name}"
+                     onerror="this.parentElement.innerHTML='<div class=missing>not generated yet</div>'" />
+                ${t.stack > 1 ? `<div class="badge">×${t.stack}</div>` : ""}
+              </div>
+              <div class="stateLabel">won${t.stack > 1 ? ` · stack ×${t.stack}` : ""}</div>
+            </div>
+            <div>
+              <div class="tile locked" data-bg style="background:${currentBg}">
+                <img src="${src}" alt="${t.name} locked"
+                     onerror="this.parentElement.innerHTML='<div class=missing>not generated yet</div>'" />
+              </div>
+              <div class="stateLabel">locked</div>
+            </div>
+          </div>
+          <div class="trigger"><b>How to earn:</b> ${t.trigger}</div>
+        `;
+        grid.appendChild(card);
+      }
+    }
+
+    document.querySelectorAll(".controls button").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        document.querySelectorAll(".controls button").forEach((b) => b.classList.remove("active"));
+        btn.classList.add("active");
+        currentBg = btn.dataset.bg;
+        document.querySelectorAll("[data-bg]").forEach((el) => {
+          el.style.background = currentBg;
+        });
+      });
+    });
+
+    render();
+  </script>
+</body>
+</html>

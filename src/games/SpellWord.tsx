@@ -177,6 +177,11 @@ function SpellWordRound({
     if (currentIndex.current >= word.word.length) {
       setCompleted(true);
       playWoo();
+      // Record the spelling — every Nth completion of the same word
+      // awards that word's trophy (Cat Catcher fires after 5 CATs,
+      // ×2 after 10, etc.). The store also auto-fires Word Wizard
+      // when the kid crosses 25 total completions across any words.
+      useGameStore.getState().recordSpellCompletion(word.word);
       setTimeout(() => {
         audio.play(`reveal-spell-${word.word}`).then(() => audio.play(audio.randomCelebrate()));
       }, 700);
