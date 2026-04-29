@@ -453,9 +453,30 @@ export function MainMenu() {
           boxShadow: "0 6px 0 rgba(0,0,0,0.18), 0 8px 14px rgba(0,0,0,0.18)",
           display: "grid",
           placeItems: "center",
+          // Reset line-box padding inside the button. iOS Safari's
+          // default line-height + Apple Color Emoji ascender metrics
+          // otherwise push the visual glyph above geometric centre.
+          padding: 0,
+          lineHeight: 1,
         }}
       >
-        🏆
+        <span
+          aria-hidden
+          style={{
+            // lineHeight: 1 collapses the inline box to the glyph's
+            // visual bounds so iOS centres the emoji on its actual
+            // pixels rather than its baseline. display: block lets the
+            // grid layout treat it as a proper centred item.
+            display: "block",
+            lineHeight: 1,
+            // Tiny optical bump — Apple Color Emoji's vertical centre
+            // sits a hair below the typographic middle, so we nudge
+            // up by 1px on small viewports / 2px on desktop to match.
+            transform: compact ? "translateY(-1px)" : "translateY(-2px)",
+          }}
+        >
+          🏆
+        </span>
         <span
           aria-hidden
           style={{
@@ -466,6 +487,7 @@ export function MainMenu() {
             color: "white",
             fontSize: compact ? 12 : 16,
             fontWeight: 900,
+            lineHeight: 1.2,
             borderRadius: 12,
             padding: compact ? "1px 6px" : "2px 8px",
             border: "3px solid white",
