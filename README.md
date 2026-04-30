@@ -15,7 +15,9 @@ trophies and stickers for every letter they master.
 ElevenLabs powers every voice line in the game — a single warm, friendly voice
 across the welcome, the prompts, the celebrations, and every A-Z phonetic sound.
 
-![cover](docs/cover-placeholder.png)
+<p align="center">
+  <img src="public/letra-title.png" alt="Letra" width="600" />
+</p>
 
 ---
 

@@ -28,7 +28,9 @@ type Spec = {
 
 const SPECS: Spec[] = [
   // Title is the largest hero image, displayed up to 260 CSS px tall.
-  { rel: "letra-title.png", maxLong: 900 },
+  // Aspect is 3:2 (~390 CSS px wide), so 1536 covers ~4× retina without
+  // upscaling beyond what the original asset gave us.
+  { rel: "letra-title.png", maxLong: 1536 },
   // Square favicon — small target footprint.
   { rel: "letra-icon.png", maxLong: 256 },
   // Wide case-picker tiles, displayed up to 150 CSS px tall.
