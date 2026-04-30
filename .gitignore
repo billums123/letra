@@ -11,3 +11,4 @@ dist-ssr
 *.log
 *.tsbuildinfo
 audio-generation.log
+public/_originals/

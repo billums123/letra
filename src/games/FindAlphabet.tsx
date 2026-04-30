@@ -186,6 +186,12 @@ export function FindAlphabetGame() {
       const targetLetter = next.letter;
       const currentOverlap = new Set<string>();
       for (const entry of lettersRef.current) {
+        // Skip letters the kid has already passed in alphabet order
+        // (index below current target). isCollected flips later, after
+        // the 1.6s celebrate animation, so without this check the
+        // just-collected letter triggers a wrong-letter nudge while
+        // the kid is still standing on it.
+        if (entry.index < currentIndex.current) continue;
         if (entry.character.isCollected) continue;
         if (entry.letter === targetLetter) continue;
         const dist = distanceXZ(playerPos, entry.character.positionXZ());
