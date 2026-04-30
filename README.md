@@ -144,79 +144,13 @@ no server needed).
 
 ## How it's built
 
-```
-src/
-├── audio/
-│   ├── Player.ts          dual-backend audio player (ElevenLabs + Web Speech)
-│   ├── music.ts           background-music player
-│   ├── songs.ts           track registry + per-screen pool selector
-│   ├── sfx.ts             one-shot sound effects (chime, woo, …)
-│   ├── audioCtx.ts        shared AudioContext + iOS unlock
-│   ├── iosKeepalive.ts    silent ticker that keeps iOS audio alive
-│   └── types.ts           manifest schema + canonical clip inventory
-├── components/Game.tsx    top-level shell — mounts menu or game
-├── engine/
-│   ├── Engine.ts          three.js renderer + camera + per-frame loop
-│   ├── world.ts           low-poly ground, hills, trees, mushrooms, clouds
-│   ├── biomes/            biome registry (meadow + moon + alien config)
-│   ├── player.ts          avatar character (kid / car / rocket variants)
-│   ├── letters.ts         3D letter character builder (text geo + face + arms)
-│   ├── letterShapes.ts    per-letter face/arm placement overrides
-│   └── particles.ts       confetti burst
-├── games/
-│   ├── SpellWord.tsx      missing-pet game
-│   ├── FindAlphabet.tsx   A-Z hunt
-│   └── SoundMatch.tsx     hear-and-find (endless cycles)
-├── input/
-│   ├── useInput.ts        keyboard + Web Gamepad + joystick channel
-│   └── VirtualJoystick.tsx nipplejs joystick (touch only)
-├── state/
-│   ├── store.ts           zustand store (screen, collected, avatar, biome,
-│   │                      case, voice, trophies, pending earn-events)
-│   └── trophies.ts        trophy registry + earn rules
-└── ui/
-    ├── MainMenu.tsx       picture-based game selector
-    ├── HUD.tsx            in-game home, replay, target letters
-    ├── StickerBook.tsx    reward shelf modal (mastered letters)
-    ├── TrophyShelf.tsx    trophy display modal
-    ├── EarnedTrophyModal.tsx  pop-up celebration when a trophy unlocks
-    ├── TrophyLab.tsx      dev: trigger / inspect trophies
-    ├── LetterEditor.tsx   dev: tune any 3D letter glyph (lots of knobs)
-    ├── LetterTest.tsx     dev: render every glyph in a grid
-    ├── AlienEditor.tsx    dev: tune the alien NPC
-    ├── QTailEditor.tsx    dev: tune the lowercase-q tail curl
-    └── TreeEditor.tsx     dev: tree preview for screen-caps
+React + Vite + TypeScript shell, plain **three.js** for the world (an
+`Engine` class owns the renderer, scene, camera, and per-frame loop —
+React just mounts the canvas). **Zustand** for state, **nipplejs** for
+the touch joystick, **ElevenLabs** for voices.
 
-scripts/
-├── generate-audio.ts      Node script: bakes ElevenLabs MP3s once
-├── generate-trophies.ts   Node script: bakes trophy PNGs once
-└── …                      misc. asset / audio-tuning utilities
-public/
-├── fonts/helvetiker_bold.typeface.json   bundled font for the letter glyphs
-├── trophies/              generated trophy PNGs
-├── music/                 background-music tracks
-└── audio/                 generated voice MP3s (gitignored)
-```
-
-### Why bare three.js, no React Three Fiber?
-
-The first build of the engine used `@react-three/fiber`, but its renderer
-refused to mount its child components in this development environment — across
-fiber v8 + React 18 and v9 + React 19, with cleared caches and fresh
-installs. Rather than fight the framework, the rendering layer is now plain
-three.js: a single `Engine` class owns the renderer, scene, camera, lights,
-shadow maps, and the per-frame loop. React just mounts the canvas and gets the
-live engine via a callback. The result is more predictable lifecycle and
-faster cold start.
-
-### Why static audio?
-
-Two reasons. The first is cost — ElevenLabs character credits are precious,
-and a kid playing for 30 minutes will trigger the same letter sounds dozens of
-times. Pre-baking once means a single generation pays for unlimited play.
-
-The second is latency. A 3-year-old has roughly zero patience for a "loading…"
-moment. Cached MP3s start the instant `audio.play()` is called.
+Audio is **pre-baked** to static MP3s — credits are precious, and a
+3-year-old has zero patience for "loading…".
 
 ### Designed for tiny motor skills
 
