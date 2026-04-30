@@ -1,11 +1,29 @@
-import { defineConfig } from "vite";
+import { defineConfig, type PluginOption } from "vite";
 import react from "@vitejs/plugin-react";
 import { VitePWA } from "vite-plugin-pwa";
+
+// Cloudflare Web Analytics — privacy-friendly visitor count + visit-duration
+// reporting. Picks up the token from CLOUDFLARE_ANALYTICS_TOKEN at build time
+// (set it on Railway → no secret to commit). When the env var is unset the
+// plugin is a no-op, so local builds and forks don't ping Cloudflare.
+function cloudflareWebAnalytics(token: string | undefined): PluginOption {
+  return {
+    name: "cloudflare-web-analytics",
+    apply: "build",
+    transformIndexHtml(html) {
+      if (!token) return html;
+      const config = JSON.stringify({ token });
+      const tag = `<script defer src="https://static.cloudflareinsights.com/beacon.min.js" data-cf-beacon='${config}'></script>`;
+      return html.replace("</head>", `    ${tag}\n  </head>`);
+    },
+  };
+}
 
 // Letra dev server. Default port 5173; falls through to next free port.
 export default defineConfig({
   plugins: [
     react(),
+    cloudflareWebAnalytics(process.env.CLOUDFLARE_ANALYTICS_TOKEN),
     // PWA: makes Letra installable to the home screen on phones / Chromebooks
     // and lets the game work offline once everything's been loaded once. The
     // service worker auto-updates so a deployed change rolls out without the
