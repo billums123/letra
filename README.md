@@ -10,7 +10,7 @@
 Letra drops a 3-to-6-year-old into a happy low-poly world full of cute, walking
 letter characters with googly eyes, little arms, and big smiles. They learn the
 alphabet by walking up to letters, hearing the name and the sound, and earning
-trophies and stickers for every letter they master.
+trophies for every letter they master.
 
 ElevenLabs powers every voice line in the game — a single warm, friendly voice
 across the welcome, the prompts, the celebrations, and every A-Z phonetic sound.
@@ -43,8 +43,6 @@ Plus:
   every fifth time the kid spells a particular word, and every tenth
   successful sound-match. Plus a one-shot **Word Wizard** milestone for
   spelling 25 words altogether.
-- **🏅 Sticker book** — every mastered letter (any game mode) gets saved to
-  localStorage. Tap a sticker to hear the letter again any time.
 - **🔁 Replay button** — every prompt is one tap away of being repeated.
 - **Hint timer** — if a kid wanders without making progress, the voice
   gently re-orients them (10 s in Sound Match, 35 s in Spell-the-Word).
@@ -156,7 +154,7 @@ Audio is **pre-baked** to static MP3s — credits are precious, and a
 
 - Big buttons everywhere (≥240×280 in the menu, ≥84px corner buttons in the
   HUD).
-- Universal icons (◀ Home, 🔁 Replay, 🏅 Stickers) so a kid who can't read
+- Universal icons (◀ Home, 🔁 Replay, 🏆 Trophies) so a kid who can't read
   still gets the affordance.
 - Voice on hover/touch — the menu speaks the option name as you point at it.
 - Generous proximity collection (1.6 m radius) so you don't have to land
