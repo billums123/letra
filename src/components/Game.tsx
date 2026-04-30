@@ -1,5 +1,5 @@
 import { useEffect } from "react";
-import { useGameStore } from "../state/store";
+import { useGameStore, type Screen } from "../state/store";
 import { useInputBootstrap } from "../input/useInput";
 import { VirtualJoystick } from "../input/VirtualJoystick";
 import { MainMenu } from "../ui/MainMenu";
@@ -16,6 +16,22 @@ import { QTailEditor } from "../ui/QTailEditor";
 import { TrophyLab } from "../ui/TrophyLab";
 import { EarnedTrophyModal } from "../ui/EarnedTrophyModal";
 import { isDev } from "../util/isDev";
+
+// Virtual URLs we sync the current screen to for analytics. Each game
+// mode gets its own path so Cloudflare Web Analytics treats it as a
+// distinct pageview. Dev screens are kept under /dev so they never
+// show up alongside real player traffic in the dashboard.
+const SCREEN_PATHS: Record<Screen, string> = {
+  "menu": "/",
+  "spell-word": "/play/spell-word",
+  "find-alphabet": "/play/find-alphabet",
+  "sound-match": "/play/sound-match",
+  "letter-test": "/dev/letter-test",
+  "letter-editor": "/dev/letter-editor",
+  "alien-editor": "/dev/alien-editor",
+  "q-tail-editor": "/dev/q-tail-editor",
+  "trophy-lab": "/dev/trophy-lab",
+};
 
 export function Game() {
   useInputBootstrap();
@@ -47,6 +63,27 @@ export function Game() {
     if (!voiceSlug) return;
     audio.setVoice(voiceSlug).then(() => setAudioMode(audio.mode));
   }, [voiceSlug, setAudioMode]);
+
+  // Mirror the current screen into the URL so Cloudflare Web Analytics'
+  // SPA mode logs each game-start as its own pageview. Letra has no real
+  // routing — every screen lives at "/" — so without this hook every
+  // session looks like a single page-view to CF and we can't tell who
+  // bounced on the menu vs. who actually played a round.
+  // pushState (rather than replaceState) ensures the analytics beacon
+  // fires reliably; the popstate handler below catches the browser back
+  // button and just routes back to the menu so the URL/state mismatch
+  // never confuses the kid.
+  useEffect(() => {
+    const path = SCREEN_PATHS[screen];
+    if (window.location.pathname !== path) {
+      window.history.pushState({ screen }, "", path);
+    }
+  }, [screen]);
+  useEffect(() => {
+    const onPop = () => goToMenu();
+    window.addEventListener("popstate", onPop);
+    return () => window.removeEventListener("popstate", onPop);
+  }, [goToMenu]);
 
   // If a non-dev visitor lands on a dev-only screen (e.g. via leftover
   // localStorage state or a stale link), bounce them back to the main menu.
