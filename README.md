@@ -2,15 +2,18 @@
 
 **A 3D letter-learning adventure for pre-K kids.**
 
+> **Powered by [Zed](https://zed.dev) + [ElevenLabs](https://elevenlabs.io).**
+> Built for the [ElevenLabs × Zed Hack #6](https://hackathons.elevenlabs.io)
+> hackathon — Zed's agentic editor wrote most of the code, and ElevenLabs
+> voices every line the kid hears.
+
 Letra drops a 3-to-6-year-old into a happy low-poly world full of cute, walking
 letter characters with googly eyes, little arms, and big smiles. They learn the
 alphabet by walking up to letters, hearing the name and the sound, and earning
-stickers for every letter they master.
+trophies and stickers for every letter they master.
 
-Built for the [ElevenLabs × Zed Hack #6](https://hackathons.elevenlabs.io)
-hackathon. ElevenLabs powers every voice line in the game — a single warm,
-friendly voice across the welcome, the prompts, the celebrations, and every
-A-Z phonetic sound.
+ElevenLabs powers every voice line in the game — a single warm, friendly voice
+across the welcome, the prompts, the celebrations, and every A-Z phonetic sound.
 
 ![cover](docs/cover-placeholder.png)
 
@@ -27,16 +30,38 @@ cues so a kid who can't read yet can still navigate:
 - **🔤 Find the Alphabet** — All 26 letters laid out in a golden spiral.
   Walk to A, then B, then C… Each pickup says the letter and its sound.
 - **👂 Match the Sound** — Voice plays a phonetic sound; walk to the letter
-  that makes it. Three rounds at first, growing to five letters as the kid
-  gets the hang of it. Wrong choice = gentle hint and a replay.
+  that makes it. Endless mode: cycles through a shuffled alphabet so every
+  letter shows up once before any repeats, then reshuffles. Choice count
+  scales 3 → 5 as the kid plays. Wrong choice = gentle hint and a replay.
 
 Plus:
 
+- **🏆 Trophies** — a shelf of unlockable rewards. Stack-up trophies for
+  finishing the alphabet in each case (UPPERCASE / lowercase / Mixed),
+  every fifth time the kid spells a particular word, and every tenth
+  successful sound-match. Plus a one-shot **Word Wizard** milestone for
+  spelling 25 words altogether.
 - **🏅 Sticker book** — every mastered letter (any game mode) gets saved to
   localStorage. Tap a sticker to hear the letter again any time.
 - **🔁 Replay button** — every prompt is one tap away of being repeated.
-- **Hint timer** — if a kid is stuck for 18-22 seconds the voice gently
-  re-orients them.
+- **Hint timer** — if a kid wanders without making progress, the voice
+  gently re-orients them (10 s in Sound Match, 35 s in Spell-the-Word).
+- **🎵 Music** — original chiptune-style background tracks. A dedicated
+  menu theme plus a randomised pool that rolls a fresh track each time
+  the kid enters a game.
+
+### Personalisation
+
+Picked from the menu before each game:
+
+- **Avatar** — drive a chubby orange **kid**, a low-poly **car**, or a
+  hovering **rocket**. Same omnidirectional movement model on all three.
+- **Biome** — play in the sunny **Park** (trees, mushrooms, lily-pad pond,
+  butterflies) or on the **Moon** (low-grav bounding, planted flag, no
+  flora). New biomes drop in by adding one file in `src/engine/biomes/`.
+- **Letter case** — UPPERCASE, lowercase, or Mixed for Spell-the-Word and
+  Find-the-Alphabet. Mixed rolls per-letter in Find-the-Alphabet and
+  per-word in Spell-the-Word.
 
 ---
 
@@ -121,32 +146,54 @@ no server needed).
 src/
 ├── audio/
 │   ├── Player.ts          dual-backend audio player (ElevenLabs + Web Speech)
+│   ├── music.ts           background-music player
+│   ├── songs.ts           track registry + per-screen pool selector
+│   ├── sfx.ts             one-shot sound effects (chime, woo, …)
+│   ├── audioCtx.ts        shared AudioContext + iOS unlock
+│   ├── iosKeepalive.ts    silent ticker that keeps iOS audio alive
 │   └── types.ts           manifest schema + canonical clip inventory
 ├── components/Game.tsx    top-level shell — mounts menu or game
 ├── engine/
 │   ├── Engine.ts          three.js renderer + camera + per-frame loop
 │   ├── world.ts           low-poly ground, hills, trees, mushrooms, clouds
-│   ├── player.ts          capsule kid character with face + bob animation
+│   ├── biomes/            biome registry (meadow + moon + alien config)
+│   ├── player.ts          avatar character (kid / car / rocket variants)
 │   ├── letters.ts         3D letter character builder (text geo + face + arms)
+│   ├── letterShapes.ts    per-letter face/arm placement overrides
 │   └── particles.ts       confetti burst
 ├── games/
 │   ├── SpellWord.tsx      missing-pet game
 │   ├── FindAlphabet.tsx   A-Z hunt
-│   └── SoundMatch.tsx     hear-and-find
+│   └── SoundMatch.tsx     hear-and-find (endless cycles)
 ├── input/
 │   ├── useInput.ts        keyboard + Web Gamepad + joystick channel
 │   └── VirtualJoystick.tsx nipplejs joystick (touch only)
-├── state/store.ts         zustand store (screen + collected letters)
+├── state/
+│   ├── store.ts           zustand store (screen, collected, avatar, biome,
+│   │                      case, voice, trophies, pending earn-events)
+│   └── trophies.ts        trophy registry + earn rules
 └── ui/
     ├── MainMenu.tsx       picture-based game selector
     ├── HUD.tsx            in-game home, replay, target letters
-    └── StickerBook.tsx    reward shelf modal
+    ├── StickerBook.tsx    reward shelf modal (mastered letters)
+    ├── TrophyShelf.tsx    trophy display modal
+    ├── EarnedTrophyModal.tsx  pop-up celebration when a trophy unlocks
+    ├── TrophyLab.tsx      dev: trigger / inspect trophies
+    ├── LetterEditor.tsx   dev: tune any 3D letter glyph (lots of knobs)
+    ├── LetterTest.tsx     dev: render every glyph in a grid
+    ├── AlienEditor.tsx    dev: tune the alien NPC
+    ├── QTailEditor.tsx    dev: tune the lowercase-q tail curl
+    └── TreeEditor.tsx     dev: tree preview for screen-caps
 
 scripts/
-└── generate-audio.ts      Node script: bakes ElevenLabs MP3s once
+├── generate-audio.ts      Node script: bakes ElevenLabs MP3s once
+├── generate-trophies.ts   Node script: bakes trophy PNGs once
+└── …                      misc. asset / audio-tuning utilities
 public/
 ├── fonts/helvetiker_bold.typeface.json   bundled font for the letter glyphs
-└── audio/                 generated MP3s (gitignored)
+├── trophies/              generated trophy PNGs
+├── music/                 background-music tracks
+└── audio/                 generated voice MP3s (gitignored)
 ```
 
 ### Why bare three.js, no React Three Fiber?
@@ -195,8 +242,8 @@ moment. Cached MP3s start the instant `audio.play()` is called.
 - The Helvetiker glyph is a stylised geometric font. A future iteration could
   swap in a curvy schoolbook font (e.g. Andika or Sassoon) to better match the
   letter shapes most pre-K classrooms use.
-- The world is one biome. A future version could swap themes per game (forest,
-  beach, space) to keep things fresh.
+- Two biomes ship today (Park + Moon). The biome registry makes adding more
+  a one-file affair — forest, beach, and underwater are obvious next picks.
 - Audio is American English only. ElevenLabs supports many languages — adding
   Spanish or Mandarin would mostly mean a re-run of the generation script
   with translated prompts.
@@ -205,4 +252,4 @@ moment. Cached MP3s start the instant `audio.play()` is called.
 
 ## License
 
-Private repository, all rights reserved. Built by [@billums123](https://github.com/billums123).
+All rights reserved. Built by [@billums123](https://github.com/billums123).
