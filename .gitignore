@@ -12,3 +12,4 @@ dist-ssr
 *.tsbuildinfo
 audio-generation.log
 public/_originals/
+.claude/

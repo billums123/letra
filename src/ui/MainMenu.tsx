@@ -813,20 +813,33 @@ function CasePicker({ screen, onCancel, onPick }: CasePickerProps) {
           type="button"
           onClick={onCancel}
           style={{
-            marginTop: compact ? 18 : 22,
+            marginTop: compact ? 18 : 26,
             appearance: "none",
-            border: "3px solid white",
-            background: "rgba(255,255,255,0.4)",
+            border: "4px solid white",
+            // Solid cream tile + chunky drop-shadow stack to match
+            // the rest of the app's "toy button" language. The
+            // earlier translucent chip read as a placeholder UI
+            // bolted onto an otherwise polished modal.
+            background: "#fff2b8",
             color: "#3a2a14",
-            borderRadius: 18,
-            padding: "10px 18px",
-            fontSize: 16,
+            borderRadius: 999,
+            padding: "12px 22px",
+            fontSize: 17,
             fontWeight: 600,
             cursor: "pointer",
             fontFamily: "inherit",
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 8,
+            boxShadow:
+              "0 6px 0 rgba(0,0,0,0.16), 0 8px 14px rgba(0,0,0,0.18)",
+            letterSpacing: 0.4,
           }}
         >
-          ◀ Back
+          <span aria-hidden style={{ fontSize: 14, lineHeight: 1 }}>
+            ◀
+          </span>
+          Back
         </button>
       </div>
     </div>

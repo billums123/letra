@@ -47,17 +47,34 @@ const STYLE_FRAMING =
   "Designed for ages 3-6.";
 
 // Reusable language for the case-picker letter quartets — keeps the
-// three pickers (uppercase, lowercase, mixed) visually aligned.
+// three pickers (uppercase, lowercase, mixed) visually aligned. The
+// adjectives below are deliberately prescriptive (uniform stroke
+// weight, glossy 3D bevels, jewel-tone saturation, matching scale)
+// because gpt-image-1 otherwise produces visibly inconsistent
+// renders across the three images: thinner lowercase letterforms,
+// muted colours, missing sparkles, etc.
 const QUARTET_FRAMING =
   "Four chubby cartoon letter characters standing in a happy row " +
-  "left-to-right with even spacing, each rendered as its own " +
+  "left-to-right with even spacing, ALL FOUR rendered at the same " +
+  "scale, the same uniform thick chunky stroke weight, and the same " +
+  "saturated jewel-tone colour intensity. Each letter is its own " +
   "character with two big friendly eyes, a wide smiley mouth, two " +
   "pink cheek blush dots, two tiny mitten arms with rounded hands, " +
   "and two stubby legs. Each letter wears a chunky thick white " +
-  "outline. Slight bouncy tilt, glossy soft 3D bevelled forms. A " +
-  "few sparkly star confetti dots float between them. Wide " +
-  "horizontal composition. Reading order is strict — exactly the " +
-  "four characters described, in that exact order, no extra " +
+  "outline of identical thickness on every character. Glossy soft " +
+  "3D bevelled forms with matching highlight + shadow on every " +
+  "letter. Slight bouncy tilt. A few sparkly yellow star confetti " +
+  "dots floating in the air between the characters. Wide horizontal " +
+  "composition. The four-character group is HORIZONTALLY AND " +
+  "VERTICALLY CENTERED in the canvas and FITS ENTIRELY INSIDE THE " +
+  "CENTRAL 70% — leaving at least 15% transparent padding to the " +
+  "left of the first character, 15% to the right of the last, and " +
+  "12% above and below. NO part of any character, arm, leg, " +
+  "antenna, or sparkle touches or crosses any edge of the canvas. " +
+  "All four characters are rendered at the SAME visual height " +
+  "regardless of case (lowercase letters fill the same vertical " +
+  "extent as uppercase letters). Reading order is strict — exactly " +
+  "the four characters described, in that exact order, no extra " +
   "letters, no other words, no logos, no brand marks. ";
 
 const LOGOS: LogoSpec[] = [
