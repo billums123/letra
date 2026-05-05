@@ -346,7 +346,11 @@ export function FindAlphabetGame() {
       };
     }
     // Kick off a firework round one for the moment of victory.
-    const fw = makeFirework(player.clone(), 60);
+    // Read the player position FRESH (not the pre-teleport snapshot)
+    // so the firework launches from wherever the dance floor is —
+    // e.g. on the sky biome's central island, not at the kid's old
+    // location on some far rainbow.
+    const fw = makeFirework(engine.player.position().clone(), 60);
     engine.scene.add(fw.group);
     engine.addActor({
       update(dt, t) {
@@ -436,7 +440,10 @@ export function FindAlphabetGame() {
         const lastFW = (entry.character.group.userData.lastFireworkAt as number | undefined) ?? 0;
         if (now - lastFW < 900) continue;
         entry.character.group.userData.lastFireworkAt = now;
-        const pos = new THREE.Vector3(lp.x, 0, lp.z);
+        // Spawn the firework at the letter's actual elevation —
+        // hardcoded y=0 worked for ground biomes but in sky islands
+        // it'd drop the burst far below the dancing letter.
+        const pos = new THREE.Vector3(lp.x, entry.dance.homeY, lp.z);
         const fw = makeFirework(pos, 28);
         engine.scene.add(fw.group);
         engine.addActor({
