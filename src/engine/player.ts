@@ -291,42 +291,54 @@ function buildCar(): PlayerHandles {
     wheels.push(wheel);
   }
 
-  // Tail pipe — a short chrome stub protruding from the rear bumper.
-  // Slightly off-centre (driver's side) so the back face still reads
-  // as a rounded box rather than being bisected by a centred pipe.
-  // The body is 1.9 deep, so the rear face is at z = -0.95; the pipe
-  // pokes out a touch past that.
+  // Tail pipe — a short dark stub tucked under the rear of the car so
+  // it reads as "exhaust pipe" without breaking the silhouette. Sits
+  // below the body (body bottom is at y=0.20) and slightly off-centre
+  // so the centred grille smile up front isn't visually mirrored by
+  // a centred outlet at the back.
   const pipeMat = new THREE.MeshStandardMaterial({
-    color: 0x4a4a4a,
-    roughness: 0.4,
-    metalness: 0.7,
+    color: 0x2a2a2a,
+    roughness: 0.5,
+    metalness: 0.5,
   });
   const tailPipe = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.07, 0.07, 0.2, 12),
+    new THREE.CylinderGeometry(0.06, 0.06, 0.18, 12),
     pipeMat,
   );
   tailPipe.rotation.x = Math.PI / 2;
-  tailPipe.position.set(0.38, 0.32, -1.05);
+  tailPipe.position.set(0.38, 0.16, -1.0);
   tailPipe.castShadow = true;
   group.add(tailPipe);
 
-  // Exhaust puff — a soft cloud trailing the pipe. Animated per-frame
-  // in update(): slow billow while parked, larger swells while
-  // driving. MeshBasicMaterial (no lighting) so the puff stays
-  // legibly white-grey against any biome background. depthWrite is
-  // off so the transparent edges don't punch a hole in the grass.
-  const puffMat = new THREE.MeshBasicMaterial({
-    color: 0xdcdcdc,
-    transparent: true,
-    opacity: 0.32,
-    depthWrite: false,
-  });
-  const exhaustPuff = new THREE.Mesh(
-    new THREE.SphereGeometry(0.14, 12, 10),
-    puffMat,
-  );
-  exhaustPuff.position.set(0.38, 0.36, -1.25);
-  group.add(exhaustPuff);
+  // Exhaust trail — a small ring of puff sprites that emit from the
+  // pipe outlet, drift backward + upward, grow and fade out, then
+  // reset. Multiple staggered puffs read as "smoke trail" instead of
+  // a single pulsing blob. Each puff owns its own material clone so
+  // it can fade independently. depthWrite is off so the transparent
+  // edges don't punch a hole in whatever's behind them.
+  const PUFF_COUNT = 6;
+  const puffOrigin = new THREE.Vector3(0.38, 0.22, -1.12);
+  const puffs: { mesh: THREE.Mesh; age: number; lifetime: number; jitter: number }[] = [];
+  for (let i = 0; i < PUFF_COUNT; i++) {
+    const m = new THREE.MeshBasicMaterial({
+      // A barely-warm grey — a hair off neutral so the trail reads as
+      // exhaust on green grass without looking like a UI element.
+      color: 0xc8c2bc,
+      transparent: true,
+      opacity: 0,
+      depthWrite: false,
+    });
+    const mesh = new THREE.Mesh(new THREE.SphereGeometry(0.1, 10, 8), m);
+    group.add(mesh);
+    puffs.push({
+      mesh,
+      // Stagger initial ages so the trail starts populated rather
+      // than spawning all six at once on the first frame.
+      age: (i / PUFF_COUNT) * 1.0,
+      lifetime: 0.9 + Math.random() * 0.4,
+      jitter: Math.random() * Math.PI * 2,
+    });
+  }
 
   let facing = 0;
   let bob = 0;
@@ -374,15 +386,44 @@ function buildCar(): PlayerHandles {
       for (const w of wheels) w.rotation.x = wheelSpin;
       // Engine pitch + volume tracks input magnitude.
       motor.setActivity(mag);
-      // Subtle exhaust puff — slow billow while parked, larger swells
-      // while driving. A small random flicker on top of the envelope
-      // keeps the cloud feeling turbulent rather than mechanical.
-      const puffPulse = 1 + Math.sin(bob * 0.6) * 0.18;
-      const puffEnergy = 0.55 + mag * 1.1;
-      const puffFlick = 0.9 + Math.random() * 0.2;
-      exhaustPuff.scale.setScalar(puffPulse * puffEnergy * puffFlick * 0.85);
-      (exhaustPuff.material as THREE.MeshBasicMaterial).opacity =
-        0.16 + mag * 0.35 + Math.sin(bob * 0.8) * 0.04;
+      // Exhaust trail — each puff ages forward, drifts backward + up,
+      // grows, and fades out, then resets to a fresh lifetime. Speeds
+      // up under throttle so the trail visibly spools when the car is
+      // driving. All positions are in car-local space; the puffs
+      // therefore travel with the car when it turns, which reads
+      // correctly as "trailing behind".
+      const emitRate = 0.7 + mag * 1.3;
+      const trailDistance = 0.5 + mag * 0.55;
+      for (const p of puffs) {
+        p.age += dt * emitRate;
+        if (p.age >= p.lifetime) {
+          p.age -= p.lifetime;
+          p.lifetime = 0.85 + Math.random() * 0.5;
+          p.jitter = Math.random() * Math.PI * 2;
+        }
+        const t = Math.min(1, p.age / p.lifetime);
+        // Drift backwards (-Z) + slowly upward (+Y), with a small
+        // sideways wobble so the line of puffs doesn't read as a
+        // straight ruler. The wobble phase comes from p.jitter so
+        // every puff snakes differently.
+        const sideways = Math.sin(p.jitter + t * 6) * 0.06 * t;
+        p.mesh.position.set(
+          puffOrigin.x + sideways,
+          puffOrigin.y + t * 0.22,
+          puffOrigin.z - t * trailDistance,
+        );
+        // Grow as it ages — fresh puffs are tight, old puffs are
+        // billowy clouds.
+        const scale = 0.55 + t * 1.6;
+        p.mesh.scale.setScalar(scale);
+        // Opacity envelope: fade in fast, fade out slow. Idle puffs
+        // are wispy; throttle puffs are denser.
+        const fadeIn = Math.min(1, t / 0.12);
+        const fadeOut = Math.max(0, 1 - (t - 0.12) / 0.88);
+        const baseAlpha = 0.06 + mag * 0.22;
+        (p.mesh.material as THREE.MeshBasicMaterial).opacity =
+          baseAlpha * fadeIn * fadeOut;
+      }
       // Cartoony putt-putts sprinkle through the drive at random
       // intervals so the engine reads as alive. No takeoff vroom —
       // it kept retriggering on direction changes mid-turn.
