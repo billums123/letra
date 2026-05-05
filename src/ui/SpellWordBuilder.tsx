@@ -1,15 +1,18 @@
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useState } from "react";
 import { useGameStore } from "../state/store";
 import { SPELL_WORDS } from "../audio/types";
 
 // Dev-only: guided flow for adding a new word to Spell-the-Word.
 //   1. Type the word (uppercase A-Z, 2–10 chars).
-//   2. Pick / edit an intro + reveal prompt from three archetype templates.
+//   2. Pick / edit an intro + reveal prompt from templates or AI suggestions.
 //   3. POST to /__dev/generate-spell-clips — Vite middleware writes
 //      prompt-spell-<WORD>.mp3 + reveal-spell-<WORD>.mp3 for every voice.
-//   4. Listen, edit, re-roll. Approve.
-//   5. Copy the SPELL_WORDS snippet to paste into chat — Claude wires it
-//      into src/audio/types.ts.
+//      The endpoint accepts partial bodies, so the review step can edit one
+//      side and regenerate just that MP3 without touching the other.
+//   4. Listen, edit either side inline, regenerate just that part, approve.
+//   5. Copy a multi-line hand-off snippet (file pointer + entry + voices that
+//      already have MP3s + optional trophy reminder) to paste into chat —
+//      Claude wires it into src/audio/types.ts.
 
 type Stage = "word" | "prompts" | "generating" | "review" | "done";
 
@@ -51,12 +54,15 @@ export function SpellWordBuilder() {
   const [intro, setIntro] = useState("");
   const [reveal, setReveal] = useState("");
   const [error, setError] = useState<string | null>(null);
-  const [generated, setGenerated] = useState<{ voice: string; intro: string; reveal: string }[]>([]);
+  type GeneratedRow = { voice: string; intro?: string; reveal?: string };
+  const [generated, setGenerated] = useState<GeneratedRow[]>([]);
+  // null when nothing in flight; "intro"/"reveal" for partial regen of a
+  // single side; "both" for the initial generate or a full re-roll.
+  const [regeneratingPart, setRegeneratingPart] = useState<"intro" | "reveal" | "both" | null>(null);
+  const [includeTrophyHint, setIncludeTrophyHint] = useState(false);
   const [aiSuggestions, setAiSuggestions] = useState<Suggestion[]>([]);
   const [aiStatus, setAiStatus] = useState<"idle" | "loading" | "error">("idle");
   const [aiError, setAiError] = useState<string | null>(null);
-  const introAudioRef = useRef<HTMLAudioElement>(null);
-  const revealAudioRef = useRef<HTMLAudioElement>(null);
 
   const cleanWord = word.trim().toUpperCase();
   const wordValid = /^[A-Z]{2,10}$/.test(cleanWord);
@@ -96,30 +102,76 @@ export function SpellWordBuilder() {
     }
   }
 
-  async function generate() {
+  // Generates one or both sides. Initial run goes through "generating"
+  // stage with a dedicated spinner; per-part regenerations stay on
+  // the review stage and only spin a single button.
+  async function generateParts(parts: ("intro" | "reveal")[], opts: { initial?: boolean } = {}) {
     setError(null);
-    setStage("generating");
+    const which = parts.length === 2 ? "both" : parts[0];
+    setRegeneratingPart(which);
+    if (opts.initial) setStage("generating");
     try {
       const res = await fetch("/__dev/generate-spell-clips", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ word: cleanWord, intro, reveal }),
+        body: JSON.stringify({
+          word: cleanWord,
+          intro: parts.includes("intro") ? intro : undefined,
+          reveal: parts.includes("reveal") ? reveal : undefined,
+        }),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({ error: `HTTP ${res.status}` }));
         throw new Error(body.error || `HTTP ${res.status}`);
       }
-      const json = (await res.json()) as { generated: { voice: string; intro: string; reveal: string }[] };
-      setGenerated(json.generated);
+      const json = (await res.json()) as { generated: GeneratedRow[] };
+      // Merge with existing rows so a partial regen only updates the
+      // requested side and leaves the other URL intact.
+      setGenerated((prev) => {
+        const next: GeneratedRow[] = [];
+        const seen = new Set<string>();
+        for (const row of json.generated) {
+          const existing = prev.find((p) => p.voice === row.voice);
+          next.push({
+            voice: row.voice,
+            intro: row.intro ?? existing?.intro,
+            reveal: row.reveal ?? existing?.reveal,
+          });
+          seen.add(row.voice);
+        }
+        for (const row of prev) if (!seen.has(row.voice)) next.push(row);
+        return next;
+      });
       setStage("review");
     } catch (e) {
       setError((e as Error).message);
-      setStage("prompts");
+      if (opts.initial) setStage("prompts");
+    } finally {
+      setRegeneratingPart(null);
     }
   }
 
-  // Snippet to paste into chat — Claude appends to SPELL_WORDS in types.ts.
-  const snippet = `{ word: "${cleanWord}", intro: ${JSON.stringify(intro)}, reveal: ${JSON.stringify(reveal)} },`;
+  // Hand-off snippet — gives Claude enough to wire this in without
+  // hunting around. Includes file/array pointer, the literal entry,
+  // a list of voices that already have MP3s on disk, and an optional
+  // reminder about the per-word trophy.
+  const voicesGenerated = generated
+    .filter((g) => g.intro && g.reveal)
+    .map((g) => g.voice)
+    .join(", ");
+  const trophyHint = includeTrophyHint
+    ? `\n\nAlso add a per-word trophy in scripts/generate-trophies.ts (id: "spell-${cleanWord.toLowerCase()}") matching the existing CAT/DOG/etc. entries, plus a trophy image entry in scripts/optimize-images.ts.`
+    : "";
+  const snippet = `Please add this word to Spell-the-Word.
+
+File: src/audio/types.ts
+Array: SPELL_WORDS (append at the end)
+Entry:
+
+  { word: "${cleanWord}", intro: ${JSON.stringify(intro)}, reveal: ${JSON.stringify(reveal)} },
+
+The MP3s are already on disk for these voices: ${voicesGenerated || "(none yet — generate first)"}.
+Files: public/audio/<voice>/prompt-spell-${cleanWord}.mp3 + reveal-spell-${cleanWord}.mp3${trophyHint}`;
 
   async function copySnippet() {
     try {
@@ -286,7 +338,7 @@ export function SpellWordBuilder() {
             <button
               type="button"
               disabled={stage !== "prompts" || !intro.trim() || !reveal.trim()}
-              onClick={generate}
+              onClick={() => generateParts(["intro", "reveal"], { initial: true })}
               style={btnStyle("#9bdc4a")}
             >
               Generate audio
@@ -302,49 +354,81 @@ export function SpellWordBuilder() {
           </div>
         )}
 
-        {/* Step 4 — Listen */}
+        {/* Step 3 — Listen + iterate */}
         {(stage === "review" || stage === "done") && (
-          <Section step={3} title="Listen + approve" active={stage === "review"} done={stage === "done"}>
-            {generated.map((g) => (
-              <div key={g.voice} style={{ marginBottom: 10 }}>
-                <div style={{ fontSize: 14, fontWeight: 800, marginBottom: 4 }}>{g.voice}</div>
-                <div style={{ display: "grid", gap: 4 }}>
-                  <div>
-                    <span style={{ opacity: 0.7, fontSize: 13, marginRight: 8 }}>intro</span>
-                    <audio ref={introAudioRef} controls src={g.intro} style={{ verticalAlign: "middle" }} />
-                  </div>
-                  <div>
-                    <span style={{ opacity: 0.7, fontSize: 13, marginRight: 8 }}>reveal</span>
-                    <audio ref={revealAudioRef} controls src={g.reveal} style={{ verticalAlign: "middle" }} />
-                  </div>
-                </div>
-              </div>
-            ))}
-            <div style={{ marginTop: 12, display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <button type="button" onClick={() => setStage("prompts")} style={btnStyle("#888")}>
-                Edit prompts
+          <Section step={3} title="Listen + iterate" active={stage === "review"} done={stage === "done"}>
+            <div style={{ opacity: 0.85, fontSize: 13, marginBottom: 12 }}>
+              Edit either side and regenerate just that part — no need to re-roll both.
+            </div>
+            <PartPanel
+              label="Intro"
+              text={intro}
+              onChangeText={setIntro}
+              urlsByVoice={generated
+                .map((g) => ({ voice: g.voice, url: g.intro }))
+                .filter((x): x is { voice: string; url: string } => Boolean(x.url))}
+              busy={regeneratingPart === "intro" || regeneratingPart === "both"}
+              disabled={stage !== "review"}
+              onRegenerate={() => generateParts(["intro"])}
+            />
+            <PartPanel
+              label="Reveal"
+              text={reveal}
+              onChangeText={setReveal}
+              urlsByVoice={generated
+                .map((g) => ({ voice: g.voice, url: g.reveal }))
+                .filter((x): x is { voice: string; url: string } => Boolean(x.url))}
+              busy={regeneratingPart === "reveal" || regeneratingPart === "both"}
+              disabled={stage !== "review"}
+              onRegenerate={() => generateParts(["reveal"])}
+            />
+            {error && (
+              <div style={{ ...hintStyle, color: "#ff7e7e", marginTop: 8 }}>Error: {error}</div>
+            )}
+            <div style={{ marginTop: 14, display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <button type="button" onClick={() => setStage("prompts")} style={btnStyle("#888")} disabled={stage !== "review"}>
+                ← Pick a different template
               </button>
-              <button type="button" onClick={generate} style={btnStyle("#7ec8ff")}>
-                Re-roll audio
+              <button
+                type="button"
+                onClick={() => generateParts(["intro", "reveal"])}
+                disabled={stage !== "review" || regeneratingPart !== null}
+                style={btnStyle(regeneratingPart === "both" ? "#444" : "#7ec8ff")}
+              >
+                {regeneratingPart === "both" ? "⏳ Regenerating both…" : "Regenerate both"}
               </button>
-              <button type="button" onClick={() => setStage("done")} style={btnStyle("#9bdc4a")}>
+              <button
+                type="button"
+                onClick={() => setStage("done")}
+                disabled={stage !== "review"}
+                style={btnStyle("#9bdc4a")}
+              >
                 ✓ Approve
               </button>
             </div>
           </Section>
         )}
 
-        {/* Step 5 — Hand-off */}
+        {/* Step 4 — Hand-off */}
         {stage === "done" && (
           <Section step={4} title="Hand off to Claude" active done={false}>
             <div style={{ opacity: 0.85, fontSize: 14, marginBottom: 8 }}>
-              MP3s are already on disk. Paste this line into chat with Claude — they'll add it to{" "}
-              <code>SPELL_WORDS</code> in <code>src/audio/types.ts</code>.
+              Paste the snippet below into chat with Claude — it includes the file pointer,
+              the array name, the literal entry, and the list of voices that already have
+              MP3s on disk, so Claude doesn't have to ask follow-ups.
             </div>
+            <label style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, fontSize: 13 }}>
+              <input
+                type="checkbox"
+                checked={includeTrophyHint}
+                onChange={(e) => setIncludeTrophyHint(e.target.checked)}
+              />
+              <span>Also ask Claude to add a per-word trophy (existing 5 words each have one)</span>
+            </label>
             <textarea
               readOnly
               value={snippet}
-              rows={2}
+              rows={includeTrophyHint ? 10 : 7}
               style={{ ...textareaStyle, fontFamily: "ui-monospace, Menlo, monospace", fontSize: 13 }}
               onFocus={(e) => e.currentTarget.select()}
             />
@@ -362,15 +446,13 @@ export function SpellWordBuilder() {
                   setAiSuggestions([]);
                   setAiError(null);
                   setAiStatus("idle");
+                  setIncludeTrophyHint(false);
                   setStage("word");
                 }}
                 style={btnStyle("#7ec8ff")}
               >
                 Add another word
               </button>
-            </div>
-            <div style={{ ...hintStyle, marginTop: 12 }}>
-              Tip: also tell Claude if you want a per-word trophy (currently 5/5 existing words have one).
             </div>
           </Section>
         )}
@@ -409,6 +491,75 @@ function Section({
       </h2>
       <div style={{ marginTop: 10 }}>{children}</div>
     </section>
+  );
+}
+
+// One side of the spell-the-word audio (intro OR reveal). Renders an
+// editable textarea, the latest MP3 for each voice, and a Regenerate
+// button that hits the partial endpoint.
+function PartPanel({
+  label,
+  text,
+  onChangeText,
+  urlsByVoice,
+  busy,
+  disabled,
+  onRegenerate,
+}: {
+  label: string;
+  text: string;
+  onChangeText: (text: string) => void;
+  urlsByVoice: { voice: string; url: string }[];
+  busy: boolean;
+  disabled: boolean;
+  onRegenerate: () => void;
+}) {
+  return (
+    <div
+      style={{
+        marginBottom: 12,
+        padding: "10px 12px",
+        borderRadius: 10,
+        background: "rgba(255,255,255,0.04)",
+        border: "1px solid rgba(255,255,255,0.08)",
+      }}
+    >
+      <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 6 }}>
+        <strong style={{ fontSize: 14 }}>{label}</strong>
+        <button
+          type="button"
+          onClick={onRegenerate}
+          disabled={busy || disabled || !text.trim()}
+          style={{
+            ...btnStyle(busy ? "#444" : "#9bdc4a"),
+            padding: "4px 10px",
+            fontSize: 12,
+            marginLeft: "auto",
+          }}
+        >
+          {busy ? "⏳ Regenerating…" : "Regenerate"}
+        </button>
+      </div>
+      <textarea
+        value={text}
+        onChange={(e) => onChangeText(e.target.value)}
+        rows={2}
+        disabled={disabled || busy}
+        style={{ ...textareaStyle, fontSize: 13 }}
+      />
+      {urlsByVoice.length > 0 && (
+        <div style={{ marginTop: 6, display: "grid", gap: 4 }}>
+          {urlsByVoice.map((row) => (
+            <div key={row.voice} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{ opacity: 0.7, fontSize: 12, width: 70 }}>{row.voice}</span>
+              {/* key by URL so each regenerate force-remounts the audio
+                  element; without this the browser keeps the old buffer. */}
+              <audio key={row.url} controls preload="auto" src={row.url} style={{ height: 32 }} />
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 

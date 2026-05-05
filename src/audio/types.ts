@@ -196,6 +196,7 @@ export const SPELL_WORDS: { word: string; intro: string; reveal: string }[] = [
   { word: "SUN", intro: "It is so cloudy! Help bring back the sun by finding S, U, N!", reveal: "Hooray, the sun is back!" },
   { word: "BUS", intro: "We need to catch the bus! Find the letters B, U, S to bring it!", reveal: "All aboard the bus!" },
   { word: "PIG", intro: "Our friend the pig is hiding. Find P, I, G to call them out!", reveal: "Oink oink, the pig is here!" },
+  { word: "HAT", intro: "Oh no! The hat is lost! Find H, A, T to find it!", reveal: "There’s the hat!" },
 ];
 
 export function buildEntries(): AudioEntry[] {

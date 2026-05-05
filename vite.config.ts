@@ -78,29 +78,39 @@ function devAudioPlugin(): PluginOption {
         try {
           const body = (await readJson(req)) as { word?: string; intro?: string; reveal?: string };
           const word = String(body?.word ?? "").toUpperCase();
-          const intro = String(body?.intro ?? "").trim();
-          const reveal = String(body?.reveal ?? "").trim();
-          if (!/^[A-Z]{2,10}$/.test(word) || !intro || !reveal) {
-            sendJson(res, 400, { error: "Invalid payload. Need uppercase A-Z word (2–10 chars) plus non-empty intro and reveal." });
+          const intro = body?.intro ? String(body.intro).trim() : "";
+          const reveal = body?.reveal ? String(body.reveal).trim() : "";
+          if (!/^[A-Z]{2,10}$/.test(word)) {
+            sendJson(res, 400, { error: "Invalid word. Need uppercase A-Z, 2–10 chars." });
+            return;
+          }
+          // Partial regeneration: omit intro to skip the intro MP3, omit
+          // reveal to skip the reveal MP3. At least one must be present
+          // — there's nothing to do otherwise.
+          if (!intro && !reveal) {
+            sendJson(res, 400, { error: "Need at least one of intro or reveal." });
             return;
           }
           const apiKey = requireKey(res);
           if (!apiKey) return;
           const registryRaw = await fs.readFile(path.join(PUBLIC_AUDIO, "voices.json"), "utf8");
           const registry = JSON.parse(registryRaw) as VoicesRegistry;
-          const generated: { voice: string; intro: string; reveal: string }[] = [];
+          const generated: { voice: string; intro?: string; reveal?: string }[] = [];
           for (const voice of registry.voices) {
             const voiceDir = path.join(PUBLIC_AUDIO, voice.slug);
             await fs.mkdir(voiceDir, { recursive: true });
-            const introPath = path.join(voiceDir, `prompt-spell-${word}.mp3`);
-            const revealPath = path.join(voiceDir, `reveal-spell-${word}.mp3`);
-            await generateClipMp3({ text: intro, voiceId: voice.voiceId, modelId: voice.modelId, apiKey, outPath: introPath });
-            await generateClipMp3({ text: reveal, voiceId: voice.voiceId, modelId: voice.modelId, apiKey, outPath: revealPath });
-            generated.push({
-              voice: voice.slug,
-              intro: `/audio/${voice.slug}/prompt-spell-${word}.mp3?ts=${Date.now()}`,
-              reveal: `/audio/${voice.slug}/reveal-spell-${word}.mp3?ts=${Date.now()}`,
-            });
+            const result: { voice: string; intro?: string; reveal?: string } = { voice: voice.slug };
+            if (intro) {
+              const introPath = path.join(voiceDir, `prompt-spell-${word}.mp3`);
+              await generateClipMp3({ text: intro, voiceId: voice.voiceId, modelId: voice.modelId, apiKey, outPath: introPath });
+              result.intro = `/audio/${voice.slug}/prompt-spell-${word}.mp3?ts=${Date.now()}`;
+            }
+            if (reveal) {
+              const revealPath = path.join(voiceDir, `reveal-spell-${word}.mp3`);
+              await generateClipMp3({ text: reveal, voiceId: voice.voiceId, modelId: voice.modelId, apiKey, outPath: revealPath });
+              result.reveal = `/audio/${voice.slug}/reveal-spell-${word}.mp3?ts=${Date.now()}`;
+            }
+            generated.push(result);
           }
           sendJson(res, 200, { word, generated });
         } catch (err) {
@@ -133,12 +143,16 @@ function devAudioPlugin(): PluginOption {
 - Spell the letters comma-separated: "${letters}"
 - Use the lowercase word: "${lower}"
 - Sound natural read aloud by an adult to a small child
-- Keep intros to one sentence, reveals to a short triumphant phrase
+- Keep intros SHORT — aim for ~14 words, hard cap at 18. One brisk sentence.
+- Reveals must be a punchy triumphant fragment, ≤6 words.
 
-Existing examples for reference (don't copy these):
-- CAT intro: "Oh no! A cat went missing! Help me find the letters that spell C, A, T to find the cat!"
-- DOG reveal: "There is the dog!"
-- SUN intro: "It is so cloudy! Help bring back the sun by finding S, U, N!"
+Length is critical — pre-K kids tune out long sentences. Cut filler ("help me",
+"can you", "let's go and") aggressively.
+
+Examples of the right length (don't copy these):
+- BUS intro: "We need the bus! Find B, U, S to bring it!" (10 words)
+- PIG intro: "The pig is hiding! Find P, I, G to call them out!" (12 words)
+- DOG reveal: "There is the dog!" (4 words)
 
 Return JSON in this exact schema:
 {"suggestions":[{"label":"2–4 word scenario","intro":"...","reveal":"..."},{...},{...}]}`;
