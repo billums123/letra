@@ -113,7 +113,7 @@ function SpellWordRound({
       };
     })();
     const letters: LetterEntry[] = word.word.split("").map((L, i) => {
-      const spawn = pickClearSpawn(engine.obstacles, taken, { minRadius: SPAWN_INNER, maxRadius: SPAWN_OUTER }, 1.0, rng);
+      const spawn = pickClearSpawn(engine.obstacles, taken, { minRadius: SPAWN_INNER, maxRadius: SPAWN_OUTER }, 1.0, rng, engine.isWalkable);
       const baseY = engine.terrainHeight?.(spawn.x, spawn.z) ?? 0;
       const character = buildLetterCharacter(font, { letter: L, lowercase, baseY });
       character.group.position.set(spawn.x, baseY, spawn.z);

@@ -30,6 +30,12 @@ export type BiomeContext = {
   // depressions instead of hovering over them. Sampler returns the
   // ground Y at the supplied (x, z); 0 means flat ground.
   setTerrainHeight: (sampler: (x: number, z: number) => number) => void;
+  // Biomes whose walkable surface is non-contiguous (e.g. sky islands
+  // separated by void) call this to register a predicate. Games
+  // consult it via `pickClearSpawn`'s walkable filter so letters /
+  // props don't end up floating in the void between surfaces. Returns
+  // true if (x, z) is somewhere the avatar can stand.
+  setWalkable: (predicate: (x: number, z: number) => boolean) => void;
 };
 
 export type Biome = {

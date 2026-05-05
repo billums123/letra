@@ -166,7 +166,7 @@ export function SoundMatchGame() {
     // there is nothing to shrink, so we kick off immediately.
     const enterDelay = outgoing.length > 0 ? 0.36 : 0;
     candidates.forEach((L, i) => {
-      const spawn = pickClearSpawn(engine.obstacles, taken, { minRadius: minR, maxRadius: maxR }, 1.0, rng);
+      const spawn = pickClearSpawn(engine.obstacles, taken, { minRadius: minR, maxRadius: maxR }, 1.0, rng, engine.isWalkable);
       const baseY = engine.terrainHeight?.(spawn.x, spawn.z) ?? 0;
       // Apply the kid's case selection. Mixed rolls per-letter so the
       // round can show e.g. "A b c" — same as Find the Alphabet.

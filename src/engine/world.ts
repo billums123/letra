@@ -89,6 +89,10 @@ export type WorldBuildResult = WorldHandles & {
   // ctx.setTerrainHeight; we expose it back to the engine here so it
   // can offset the avatar's Y each frame to follow the surface.
   terrainHeight: ((x: number, z: number) => number) | null;
+  // Biomes with non-contiguous walkable surfaces register a predicate
+  // via ctx.setWalkable; pickClearSpawn consults it so letters spawn
+  // only on islands / paths instead of in the void.
+  isWalkable: ((x: number, z: number) => boolean) | null;
 };
 
 export function buildWorld(
@@ -100,6 +104,7 @@ export function buildWorld(
   const obstacles: Obstacle[] = [];
   const tick: Array<(dt: number, t: number) => void> = [];
   let terrainHeight: ((x: number, z: number) => number) | null = null;
+  let isWalkable: ((x: number, z: number) => boolean) | null = null;
   const ctx: BiomeContext = {
     group,
     obstacles,
@@ -110,9 +115,12 @@ export function buildWorld(
     setTerrainHeight: (fn) => {
       terrainHeight = fn;
     },
+    setWalkable: (fn) => {
+      isWalkable = fn;
+    },
   };
   biome.buildProps(ctx);
-  return { group, worldRadius: WORLD_RADIUS, obstacles, tick, terrainHeight };
+  return { group, worldRadius: WORLD_RADIUS, obstacles, tick, terrainHeight, isWalkable };
 }
 
 // The original meadow content is now the body of `buildMeadow` so it
@@ -303,7 +311,12 @@ export function pickClearSpawn(
   taken: { x: number; z: number; radius: number }[],
   bounds: { minRadius: number; maxRadius: number },
   selfRadius: number,
-  rng: () => number
+  rng: () => number,
+  // Optional walkable filter. Biomes with non-contiguous surfaces (e.g.
+  // sky islands separated by void) register one via setWalkable; we
+  // reject any candidate position the predicate says isn't walkable
+  // so letters don't spawn floating between islands.
+  isWalkable?: ((x: number, z: number) => boolean) | null
 ): { x: number; z: number } {
   const { minRadius, maxRadius } = bounds;
   // Cap maxRadius so we don't try to spawn letters past the world edge —
@@ -311,11 +324,16 @@ export function pickClearSpawn(
   // inside the boundary boulders.
   const cappedMax = Math.min(maxRadius, WORLD_RADIUS - selfRadius - 2);
   const cappedMin = Math.min(minRadius, cappedMax - 0.1);
-  for (let attempt = 0; attempt < 60; attempt++) {
+  // For non-contiguous biomes the rejection rate is high (most random
+  // points fall in the void) — bump the attempt budget so we still
+  // find a valid spot most of the time.
+  const attemptBudget = isWalkable ? 240 : 60;
+  for (let attempt = 0; attempt < attemptBudget; attempt++) {
     const angle = rng() * Math.PI * 2;
     const dist = cappedMin + rng() * (cappedMax - cappedMin);
     const x = Math.cos(angle) * dist;
     const z = Math.sin(angle) * dist;
+    if (isWalkable && !isWalkable(x, z)) continue;
     let clear = true;
     for (const o of obstacles) {
       if (Math.hypot(x - o.x, z - o.z) < o.radius + selfRadius + 0.4) {

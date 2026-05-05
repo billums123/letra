@@ -59,6 +59,11 @@ export class Engine {
   // visibly dips into moon craters. Public so games can place spawn
   // props (letters, etc.) at the correct height.
   terrainHeight: ((x: number, z: number) => number) | null = null;
+  // Optional walkable predicate from biomes whose play area is not a
+  // single connected disc (sky islands etc.). Games pass this to
+  // pickClearSpawn so letters land only on surfaces the avatar can
+  // actually reach.
+  isWalkable: ((x: number, z: number) => boolean) | null = null;
 
   // Directional lights with castShadow that we move with the player so
   // the orthographic shadow frustum (typically ~50 units across) always
@@ -101,6 +106,7 @@ export class Engine {
     const world = buildWorld(biome, () => this.player?.group.position ?? null);
     this.scene.add(world.group);
     this.terrainHeight = world.terrainHeight;
+    this.isWalkable = world.isWalkable;
     this.obstacles = world.obstacles;
     this.worldRadius = world.worldRadius;
     // Per-frame world animations (drifting butterflies etc) are
@@ -151,6 +157,14 @@ export class Engine {
       const dt = Math.min(this.clock.getDelta(), 0.1);
       const t = this.clock.elapsedTime;
 
+      // Snapshot pre-update XZ so the walkable clamp at the end of the
+      // tick has a "last known good" to revert to if the avatar's
+      // movement would step off a non-contiguous biome's walkable
+      // surface (e.g. into the void between sky islands).
+      const pp = this.player.group.position;
+      const prevX = pp.x;
+      const prevZ = pp.z;
+
       // Player update from current input
       const input = readInput();
       this.player.update(dt, input.move);
@@ -160,7 +174,6 @@ export class Engine {
       // normal so the player stops at the obstacle edge instead of sticking
       // or jittering. New overlaps (rising edge) fire the obstacle's
       // onBump callback so e.g. trees can shake when bumped.
-      const pp = this.player.group.position;
       const overlap = new Set<Obstacle>();
       for (const o of this.obstacles) {
         const dx = pp.x - o.x;
@@ -197,6 +210,26 @@ export class Engine {
         const k = maxDist / distFromCenter;
         pp.x *= k;
         pp.z *= k;
+      }
+
+      // Walkable-surface clamp — biomes with a non-contiguous play
+      // area (sky islands, etc.) register an isWalkable predicate.
+      // If the post-update XZ falls off a walkable surface, we try
+      // the move along each axis individually so the avatar can
+      // slide along an edge, then fall back to fully reverting if
+      // both single-axis moves are also off the surface. This is the
+      // sole containment for those biomes — no invisible-obstacle
+      // ring required.
+      const walkable = this.isWalkable;
+      if (walkable && !walkable(pp.x, pp.z)) {
+        if (walkable(pp.x, prevZ)) {
+          pp.z = prevZ;
+        } else if (walkable(prevX, pp.z)) {
+          pp.x = prevX;
+        } else {
+          pp.x = prevX;
+          pp.z = prevZ;
+        }
       }
 
       // Terrain follow — biomes that deform the ground (e.g. moon

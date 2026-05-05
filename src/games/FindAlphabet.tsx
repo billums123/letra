@@ -149,7 +149,7 @@ export function FindAlphabetGame() {
       const t = i / ALPHABET.length;
       const minR = Math.max(RING_INNER, RING_INNER + t * 4);
       const maxR = Math.min(RING_OUTER, RING_INNER + t * (RING_OUTER - RING_INNER) + 6);
-      const spawn = pickClearSpawn(engine.obstacles, taken, { minRadius: minR, maxRadius: maxR }, 1.0, rng);
+      const spawn = pickClearSpawn(engine.obstacles, taken, { minRadius: minR, maxRadius: maxR }, 1.0, rng, engine.isWalkable);
       const baseY = engine.terrainHeight?.(spawn.x, spawn.z) ?? 0;
       const character = buildLetterCharacter(font, { letter: L, lowercase, baseY });
       character.group.position.set(spawn.x, baseY, spawn.z);
