@@ -36,6 +36,13 @@ export type BiomeContext = {
   // props don't end up floating in the void between surfaces. Returns
   // true if (x, z) is somewhere the avatar can stand.
   setWalkable: (predicate: (x: number, z: number) => boolean) => void;
+  // Optional override for where the end-of-game dance celebration
+  // should anchor. Defaults to the player's current position; biomes
+  // with a designated "main square" (e.g. sky islands' central island)
+  // can register an explicit XZ so the player gets teleported there
+  // and the ring of dancing letters fits in a known, large-enough
+  // walkable area.
+  setCelebrationCenter: (center: { x: number; z: number }) => void;
 };
 
 export type Biome = {

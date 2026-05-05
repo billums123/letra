@@ -109,7 +109,7 @@ export const skyBiome: Biome = {
 };
 
 function buildProps(ctx: BiomeContext): void {
-  const { group, obstacles, tick, worldRadius, setTerrainHeight, setWalkable } = ctx;
+  const { group, obstacles, tick, worldRadius, setTerrainHeight, setWalkable, setCelebrationCenter } = ctx;
 
   const islandsById = new Map(ISLANDS.map((i) => [i.id, i]));
 
@@ -231,6 +231,12 @@ function buildProps(ctx: BiomeContext): void {
   };
   setWalkable(isWalkableXZ);
 
+  // End-of-game celebration anchors on the central island (radius 7,
+  // height 5). The kid gets teleported there at finale time and all
+  // 26 letters arrange around them — a single walkable surface that
+  // comfortably holds the dance ring.
+  setCelebrationCenter({ x: 0, z: 0 });
+
   // ── Containment ──────────────────────────────────────────────────
   // No invisible-obstacle ring here. The engine's per-frame walkable
   // clamp (using the predicate registered above) reverts any move
@@ -334,14 +340,13 @@ function buildProps(ctx: BiomeContext): void {
     });
   }
 
-  // Cloud floor far below — same variation kit, but tinted warmer so
-  // they read as a distant horizon-glowing carpet rather than another
-  // band of regular clouds.
+  // Cloud floor far below — same variation kit and the same white
+  // colour as the upper layer. Earlier versions tinted them peach to
+  // suggest a horizon glow, but it read as tan rocks; plain white
+  // reads cleanly as "more clouds, further down".
   const floorMat = new THREE.MeshStandardMaterial({
-    color: 0xfff0e6,
+    color: 0xffffff,
     roughness: 1,
-    emissive: 0xffd9b6,
-    emissiveIntensity: 0.05,
   });
   for (let i = 0; i < 26; i++) {
     const variant = pickCloudVariant(cloudRand);
@@ -392,9 +397,7 @@ function buildProps(ctx: BiomeContext): void {
 
   // ── Hot-air balloons drifting around the play zone ───────────────
   // Replaces the meadow's butterflies. Each balloon orbits a random
-  // anchor at slow speed and carries an adorable little passenger
-  // who continuously waves at the kid. The passenger is built into
-  // the balloon group, so it inherits the orbital motion automatically.
+  // anchor at slow speed so the sky has a constant gentle motion.
   const balloonRand = mulberry32(freshSeed());
   for (let i = 0; i < 4; i++) {
     const orbitR = 12 + balloonRand() * 18;
@@ -404,21 +407,14 @@ function buildProps(ctx: BiomeContext): void {
     const phase = balloonRand() * Math.PI * 2;
     const baseY = 14 + balloonRand() * 8;
     const hue = balloonRand();
-    const passengerHue = balloonRand();
-    const balloon = makeBalloon(hue, passengerHue);
+    const balloon = makeBalloon(hue);
     group.add(balloon);
-    // Passenger wave is keyed off `t` with a per-balloon phase offset
-    // so each kid in the sky waves on their own beat.
-    const wavePhase = balloonRand() * Math.PI * 2;
     tick.push((_dt, t) => {
       const ang = t * speed + phase;
       balloon.position.x = cx + Math.cos(ang) * orbitR;
       balloon.position.z = cz + Math.sin(ang) * orbitR;
       balloon.position.y = baseY + Math.sin(t * 0.4 + phase) * 0.6;
       balloon.rotation.y = ang + Math.PI / 2;
-      // Drive the passenger arm + bob via the userData callback the
-      // balloon factory installed.
-      (balloon.userData.tickPassenger as ((tt: number) => void) | undefined)?.(t + wavePhase);
     });
   }
 
@@ -687,11 +683,9 @@ function makeRainbow(p: {
 }
 
 // Hot-air balloon — sphere envelope (with stripes), basket below,
-// little ropes connecting them, plus an adorable waving passenger
-// peering out of the basket. Used as ambient sky decoration drifting
-// around the play zone. Per-frame, the caller drives the passenger
-// wave by invoking `group.userData.tickPassenger(t)`.
-function makeBalloon(hue: number, passengerHue: number): THREE.Group {
+// little ropes connecting them. Used as ambient sky decoration
+// drifting around the play zone.
+function makeBalloon(hue: number): THREE.Group {
   const g = new THREE.Group();
   const colorA = new THREE.Color().setHSL(hue, 0.7, 0.55);
   const colorB = new THREE.Color().setHSL((hue + 0.5) % 1, 0.7, 0.7);
@@ -735,167 +729,7 @@ function makeBalloon(hue: number, passengerHue: number): THREE.Group {
       g.add(rope);
     }
   }
-  // Adorable passenger — sits in the basket, waves continuously.
-  const passenger = makeBalloonPassenger(passengerHue);
-  passenger.group.position.y = -2.15; // peek over the basket rim
-  g.add(passenger.group);
-  g.userData.tickPassenger = passenger.tick;
   return g;
-}
-
-// A small chubby character peering out of the balloon basket, waving
-// at the kid. Big head, oversized eyes, blush, soft smile, one little
-// arm raised above its head doing a continuous wave. Returns a tick
-// function that drives the wave + a tiny body bob.
-function makeBalloonPassenger(hue: number): {
-  group: THREE.Group;
-  tick: (t: number) => void;
-} {
-  const group = new THREE.Group();
-
-  // Body palette — pastel saturation with a slightly lighter head so
-  // the silhouette reads even at small on-screen sizes.
-  const bodyColor = new THREE.Color().setHSL(hue, 0.55, 0.62);
-  const headColor = new THREE.Color().setHSL(hue, 0.55, 0.72);
-  const armColor = bodyColor.clone().multiplyScalar(0.85);
-
-  // Body — a chubby rounded barrel just clearing the basket rim.
-  const bodyMat = new THREE.MeshStandardMaterial({
-    color: bodyColor,
-    roughness: 0.45,
-  });
-  const body = new THREE.Mesh(new THREE.SphereGeometry(0.28, 14, 10), bodyMat);
-  body.scale.set(1, 1.05, 1);
-  body.position.y = 0.18;
-  body.castShadow = true;
-  group.add(body);
-
-  // Head — bigger than the body for that chibi/cute proportion.
-  const headMat = new THREE.MeshStandardMaterial({
-    color: headColor,
-    roughness: 0.4,
-  });
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.34, 16, 12), headMat);
-  head.position.y = 0.62;
-  head.castShadow = true;
-  group.add(head);
-
-  // Eyes — two big white spheres with dark pupils. Positioned slightly
-  // forward (z+) so the passenger reads as facing outward.
-  const eyeWhiteMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.35 });
-  const pupilMat = new THREE.MeshStandardMaterial({ color: 0x1c1422, roughness: 0.3 });
-  const shineMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
-  for (const side of [-1, 1] as const) {
-    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.085, 12, 10), eyeWhiteMat);
-    eye.position.set(side * 0.13, 0.66, 0.27);
-    group.add(eye);
-    const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.05, 10, 10), pupilMat);
-    pupil.position.set(side * 0.13, 0.66, 0.32);
-    group.add(pupil);
-    // Tiny shine on each pupil — sells the "alive" twinkle.
-    const shine = new THREE.Mesh(new THREE.SphereGeometry(0.018, 6, 6), shineMat);
-    shine.position.set(side * 0.13 - 0.02, 0.69, 0.36);
-    group.add(shine);
-  }
-
-  // Cheek blushes — soft pink discs to the side of each eye.
-  const blushMat = new THREE.MeshBasicMaterial({
-    color: 0xff8aae,
-    transparent: true,
-    opacity: 0.75,
-    depthWrite: false,
-  });
-  for (const side of [-1, 1] as const) {
-    const blush = new THREE.Mesh(new THREE.CircleGeometry(0.055, 12), blushMat);
-    blush.position.set(side * 0.24, 0.55, 0.27);
-    blush.lookAt(side * 0.24, 0.55, 1);
-    group.add(blush);
-  }
-
-  // Mouth — tiny smile arc.
-  const mouth = new THREE.Mesh(
-    new THREE.TorusGeometry(0.06, 0.018, 6, 14, Math.PI),
-    new THREE.MeshStandardMaterial({ color: 0x1f1428, roughness: 0.55 })
-  );
-  mouth.rotation.x = Math.PI / 2;
-  mouth.rotation.z = Math.PI;
-  mouth.position.set(0, 0.5, 0.31);
-  group.add(mouth);
-
-  // Little hat — a tiny pointed cone perched on top, in a contrasting
-  // hue. Adds personality without busying up the silhouette.
-  const hatMat = new THREE.MeshStandardMaterial({
-    color: new THREE.Color().setHSL((hue + 0.4) % 1, 0.7, 0.5),
-    roughness: 0.55,
-  });
-  const hat = new THREE.Mesh(new THREE.ConeGeometry(0.18, 0.22, 12), hatMat);
-  hat.position.y = 0.95;
-  hat.castShadow = true;
-  group.add(hat);
-  const hatBall = new THREE.Mesh(
-    new THREE.SphereGeometry(0.05, 10, 8),
-    new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.6 })
-  );
-  hatBall.position.y = 1.07;
-  group.add(hatBall);
-
-  // Waving arm — a pivot at the shoulder, a stubby cylinder for the
-  // arm, and a sphere hand at the end. The pivot's Z rotation drives
-  // the wave back-and-forth motion.
-  const waveArmPivot = new THREE.Group();
-  waveArmPivot.position.set(0.22, 0.32, 0);
-  group.add(waveArmPivot);
-  const armMat = new THREE.MeshStandardMaterial({ color: armColor, roughness: 0.55 });
-  const arm = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.05, 0.045, 0.34, 8),
-    armMat
-  );
-  // Position the arm so it extends OUT from the shoulder pivot — the
-  // pivot is at the top of the arm, and the arm hangs along its local
-  // -Y. Combined with the pivot's resting Z rotation we get an arm
-  // raised overhead ready to wave.
-  arm.position.y = -0.17;
-  waveArmPivot.add(arm);
-  const handMat = new THREE.MeshStandardMaterial({
-    color: bodyColor.clone().lerp(new THREE.Color(0xffffff), 0.25),
-    roughness: 0.5,
-  });
-  const hand = new THREE.Mesh(new THREE.SphereGeometry(0.07, 12, 10), handMat);
-  hand.position.y = -0.36;
-  waveArmPivot.add(hand);
-  // Resting pose: arm raised overhead, ready to wave back and forth.
-  const armRestZ = -2.2; // ~-126°, points the arm up and slightly outward
-  waveArmPivot.rotation.z = armRestZ;
-
-  // Other arm — held at rest beside the body, no animation.
-  const otherArmPivot = new THREE.Group();
-  otherArmPivot.position.set(-0.22, 0.32, 0);
-  group.add(otherArmPivot);
-  const otherArm = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.05, 0.045, 0.3, 8),
-    armMat
-  );
-  otherArm.position.y = -0.15;
-  otherArmPivot.add(otherArm);
-  const otherHand = new THREE.Mesh(new THREE.SphereGeometry(0.065, 12, 10), handMat);
-  otherHand.position.y = -0.32;
-  otherArmPivot.add(otherHand);
-  otherArmPivot.rotation.z = 0.2; // hangs slightly out from the body
-
-  // Tick — gentle whole-body bob plus a continuous wave on the right
-  // arm. The wave amplitude is intentionally large (±0.5 rad) so the
-  // motion is visible at distance.
-  const tick = (t: number) => {
-    group.position.y = -2.15 + Math.sin(t * 1.6) * 0.04;
-    waveArmPivot.rotation.z = armRestZ + Math.sin(t * 5) * 0.5;
-    // Tiny head wobble so the passenger doesn't read as a static
-    // doll while waving.
-    head.rotation.z = Math.sin(t * 1.2) * 0.05;
-    hat.rotation.z = head.rotation.z;
-    hatBall.position.x = Math.sin(t * 1.2) * 0.02;
-  };
-
-  return { group, tick };
 }
 
 // ─── Cloud variation ──────────────────────────────────────────────────
@@ -944,30 +778,35 @@ function makeCloudVariant(
       ];
       break;
     case "stretched":
-      // Long horizontal cloud — multiple spheres in a row, like a
-      // streak of cirrus. Uses smaller individual spheres so the
-      // cloud reads as elongated rather than a fat blob.
+      // Long horizontal cloud — overlapping spheres along the major
+      // axis so the silhouette reads as one elongated cloud, NOT a
+      // string of beads. Each sphere overlaps its neighbours by ~50%
+      // of its radius, with secondary spheres layered above/below to
+      // bulk it out vertically.
       layout = [
-        [0, 0, 0, 1.0],
-        [1.6, -0.05, 0, 0.85],
-        [-1.5, 0.05, 0, 0.85],
-        [3.0, -0.1, 0.1, 0.7],
-        [-2.9, 0.1, -0.1, 0.7],
-        [4.2, -0.15, 0, 0.55],
-        [-4.0, 0.05, 0, 0.55],
+        [0, 0, 0, 1.2],
+        [1.0, 0.05, 0, 1.05],
+        [-1.0, 0.0, 0, 1.05],
+        [1.95, -0.05, 0.1, 0.9],
+        [-1.95, 0.05, -0.1, 0.9],
+        [2.7, -0.1, 0, 0.7],
+        [-2.7, -0.1, 0, 0.7],
+        [0.4, 0.35, 0.3, 0.85],
+        [-0.4, 0.35, -0.3, 0.85],
       ];
       break;
     case "wispy":
       // Flat, spread-out shape — a thin cloud where you can almost see
-      // through to the sky behind. Wide low-amplitude bumps.
+      // through to the sky behind. Spheres overlap so the cloud reads
+      // as a single soft volume rather than separate puffs.
       layout = [
-        [0, 0, 0, 0.85],
-        [1.4, -0.05, 0.4, 0.7],
-        [-1.3, 0, -0.3, 0.7],
-        [2.6, -0.1, -0.1, 0.55],
-        [-2.5, 0.05, 0.2, 0.55],
-        [0.2, -0.2, 0.9, 0.6],
-        [-0.1, 0.15, -0.95, 0.55],
+        [0, 0, 0, 1.0],
+        [1.0, -0.05, 0.3, 0.85],
+        [-1.0, 0, -0.25, 0.85],
+        [1.85, -0.1, -0.05, 0.7],
+        [-1.85, 0.05, 0.15, 0.7],
+        [0.2, -0.15, 0.75, 0.75],
+        [-0.1, 0.1, -0.8, 0.7],
       ];
       break;
   }

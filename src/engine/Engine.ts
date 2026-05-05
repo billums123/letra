@@ -64,6 +64,12 @@ export class Engine {
   // pickClearSpawn so letters land only on surfaces the avatar can
   // actually reach.
   isWalkable: ((x: number, z: number) => boolean) | null = null;
+  // Optional XZ anchor for the end-of-game celebration. When set,
+  // games should teleport the player here and arrange the ring of
+  // dancing letters around it. Sky islands uses this to relocate the
+  // dance party to the central island so all 26 letters fit on a
+  // single walkable surface.
+  celebrationCenter: { x: number; z: number } | null = null;
 
   // Directional lights with castShadow that we move with the player so
   // the orthographic shadow frustum (typically ~50 units across) always
@@ -107,6 +113,7 @@ export class Engine {
     this.scene.add(world.group);
     this.terrainHeight = world.terrainHeight;
     this.isWalkable = world.isWalkable;
+    this.celebrationCenter = world.celebrationCenter;
     this.obstacles = world.obstacles;
     this.worldRadius = world.worldRadius;
     // Per-frame world animations (drifting butterflies etc) are

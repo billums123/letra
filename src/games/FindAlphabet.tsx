@@ -295,8 +295,17 @@ export function FindAlphabetGame() {
   // celebration track, and flip into dance-mode tickHook.
   const startDanceParty = (engine: Engine) => {
     const player = engine.player.position();
-    const cx = player.x;
-    const cz = player.z;
+    // Biomes with a designated dance floor (e.g. sky islands' central
+    // island) override where the celebration anchors. We teleport the
+    // player there too so they're at the centre of the ring, not
+    // wherever they happened to bump the last letter.
+    const anchor = engine.celebrationCenter;
+    const cx = anchor ? anchor.x : player.x;
+    const cz = anchor ? anchor.z : player.z;
+    if (anchor) {
+      const anchorY = engine.terrainHeight?.(anchor.x, anchor.z) ?? 0;
+      engine.player.group.position.set(anchor.x, anchorY, anchor.z);
+    }
     // Stop any in-flight letter-name speech so the music takes the foreground.
     audio.flushQueue();
     audio.stop();
