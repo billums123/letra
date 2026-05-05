@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useGameStore } from "../state/store";
 import { SPELL_WORDS } from "../audio/types";
 
@@ -69,6 +69,10 @@ export function SpellWordBuilder() {
   const [aiStatus, setAiStatus] = useState<"idle" | "loading" | "error">("idle");
   const [aiError, setAiError] = useState<string | null>(null);
   const [snippetCopied, setSnippetCopied] = useState(false);
+  // Optional ElevenLabs model override. undefined = use the voice's
+  // registered default. Same shape as the AudioTester's per-clip
+  // override so the two tools feel consistent.
+  const [modelId, setModelId] = useState<string | undefined>(undefined);
 
   const cleanWord = word.trim().toUpperCase();
   const wordValid = /^[A-Z]{2,10}$/.test(cleanWord);
@@ -124,6 +128,7 @@ export function SpellWordBuilder() {
           word: cleanWord,
           intro: parts.includes("intro") ? intro : undefined,
           reveal: parts.includes("reveal") ? reveal : undefined,
+          modelId,
         }),
       });
       if (!res.ok) {
@@ -206,6 +211,36 @@ Files: public/audio/<voice>/prompt-spell-${cleanWord}.mp3 + reveal-spell-${clean
             ◀ Menu
           </button>
           <h1 style={{ margin: 0, fontSize: 26, fontWeight: 900 }}>Spell-the-Word Builder</h1>
+          <label
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 6,
+              marginLeft: "auto",
+              fontSize: 13,
+              opacity: 0.85,
+            }}
+          >
+            <span>model</span>
+            <select
+              value={modelId ?? "default"}
+              onChange={(e) => setModelId(e.target.value === "default" ? undefined : e.target.value)}
+              style={{
+                padding: "6px 10px",
+                borderRadius: 8,
+                border: "2px solid rgba(255,255,255,0.2)",
+                background: "rgba(0,0,0,0.3)",
+                color: "white",
+                fontSize: 13,
+                fontWeight: 700,
+              }}
+            >
+              <option value="default">voice default (multilingual_v2)</option>
+              <option value="eleven_v3">eleven_v3 (most expressive)</option>
+              <option value="eleven_flash_v2">eleven_flash_v2 (phoneme-aware)</option>
+              <option value="eleven_multilingual_v2">eleven_multilingual_v2</option>
+            </select>
+          </label>
         </div>
 
         {/* Step 1 — Word */}
@@ -506,6 +541,19 @@ function Section({
   );
 }
 
+// Wraps an <audio> element and explicitly calls .load() whenever the
+// src URL changes. Setting a new src via React's `src` prop updates the
+// DOM attribute but doesn't reliably trigger a media load — Chrome in
+// particular often keeps the previous buffer (or none at all, showing
+// 0:00 / 0:00) until you call .load() yourself.
+function AudioPreview({ url }: { url: string }) {
+  const ref = useRef<HTMLAudioElement>(null);
+  useEffect(() => {
+    ref.current?.load();
+  }, [url]);
+  return <audio ref={ref} controls preload="auto" src={url} style={{ height: 32 }} />;
+}
+
 // One side of the spell-the-word audio (intro OR reveal). Renders an
 // editable textarea, the latest MP3 for each voice, and a Regenerate
 // button that hits the partial endpoint.
@@ -564,9 +612,7 @@ function PartPanel({
           {urlsByVoice.map((row) => (
             <div key={row.voice} style={{ display: "flex", alignItems: "center", gap: 8 }}>
               <span style={{ opacity: 0.7, fontSize: 12, width: 70 }}>{row.voice}</span>
-              {/* key by URL so each regenerate force-remounts the audio
-                  element; without this the browser keeps the old buffer. */}
-              <audio key={row.url} controls preload="auto" src={row.url} style={{ height: 32 }} />
+              <AudioPreview url={row.url} />
             </div>
           ))}
         </div>

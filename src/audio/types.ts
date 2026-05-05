@@ -189,12 +189,16 @@ export function letterNameText(letter: string): string {
 }
 
 // Spelling-game words. Each has a friendly intro line and the letters needed.
-// Limit to 3-letter "CVC" words that pre-K kids see early in phonics.
+// Mostly 3-letter CVC words pre-K kids see early in phonics; the runtime
+// supports 2–10 letters (validated in the word builder), so simple sight
+// words like TREE are fine too.
 //
 // Intro shape: brief scenario flavour → "Let's find the <word>" → the
-// letters. The directive ALWAYS names the word right before the letters
-// so a 3-year-old hears "cat / C, A, T" back-to-back and binds the
-// spelling to the noun without a synonym or pronoun in between.
+// letters (for nouns), or "Let's spell <word>" → letters (for adjectives,
+// verbs, or anything where "the <word>" sounds wrong). The directive
+// ALWAYS names the word right before the letters so a 3-year-old hears
+// "cat / C, A, T" back-to-back and binds the spelling to the word
+// without a synonym or pronoun in between.
 export const SPELL_WORDS: { word: string; intro: string; reveal: string }[] = [
   { word: "CAT", intro: "Oh no! The cat ran off! Let's find the cat. C, A, T!", reveal: "We found the cat!" },
   { word: "DOG", intro: "Let's find the dog. D, O, G.", reveal: "There is the dog!" },
@@ -202,6 +206,8 @@ export const SPELL_WORDS: { word: string; intro: string; reveal: string }[] = [
   { word: "BUS", intro: "We need a ride! Let's find the bus. B, U, S!", reveal: "All aboard the bus!" },
   { word: "PIG", intro: "Let's find the pig. P, I, G!", reveal: "There is the pig!" },
   { word: "HAT", intro: "Oh no! The hat is missing! Let's find the hat. H, A, T!", reveal: "There’s the hat!" },
+  { word: "BIG", intro: "Let's spell BIG! B, I, G!", reveal: "You spelled BIG!" },
+  { word: "TREE", intro: "Let's spell TREE! T, R, E, E!", reveal: "You spelled TREE!" },
 ];
 
 export function buildEntries(): AudioEntry[] {

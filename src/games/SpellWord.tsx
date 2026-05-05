@@ -91,6 +91,12 @@ function SpellWordRound({
   const lastProgressRef = useRef(performance.now());
   const currentIndex = useRef(0);
   const hintScheduledRef = useRef(false);
+  // Position of the most recently collected letter. Until the player
+  // physically walks out of its COLLECT_DIST radius we suppress further
+  // pickups, so two duplicate letters that happen to spawn close
+  // together (the TREE/BOOK problem) don't collapse into a single
+  // stand-still chain-collect.
+  const lastCollectPosRef = useRef<{ x: number; z: number } | null>(null);
 
   const onEngineReady = (engine: Engine) => {
     engineRef.current = engine;
@@ -112,12 +118,24 @@ function SpellWordRound({
         return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
       };
     })();
+    // Letters that appear more than once in the word (e.g. the two Es
+    // in TREE) need extra spacing — otherwise both can land within
+    // COLLECT_DIST of the same spot and the kid picks them up in
+    // back-to-back frames, looking like the game accepted T, R, E as
+    // a complete spelling. The bumped keep-out radius (2.5 vs 1.0)
+    // forces the next instance to spawn well beyond 2 * COLLECT_DIST
+    // (1.7 m × 2 = 3.4 m) from the previous one.
+    const letterCounts = word.word.split("").reduce<Record<string, number>>((acc, L) => {
+      acc[L] = (acc[L] ?? 0) + 1;
+      return acc;
+    }, {});
     const letters: LetterEntry[] = word.word.split("").map((L, i) => {
       const spawn = pickClearSpawn(engine.obstacles, taken, { minRadius: SPAWN_INNER, maxRadius: SPAWN_OUTER }, 1.0, rng);
       const baseY = engine.terrainHeight?.(spawn.x, spawn.z) ?? 0;
       const character = buildLetterCharacter(font, { letter: L, lowercase, baseY });
       character.group.position.set(spawn.x, baseY, spawn.z);
-      taken.push({ x: spawn.x, z: spawn.z, radius: 1.0 });
+      const keepoutRadius = (letterCounts[L] ?? 1) > 1 ? 2.5 : 1.0;
+      taken.push({ x: spawn.x, z: spawn.z, radius: keepoutRadius });
       // Initial face-toward-camera so it's right on first paint.
       character.faceTowards(engine.camera.position.x, engine.camera.position.z);
       engine.scene.add(character.group);
@@ -131,11 +149,38 @@ function SpellWordRound({
       for (const entry of lettersRef.current) {
         entry.character.faceTowards(engine.camera.position.x, engine.camera.position.z);
       }
-      const next = lettersRef.current.find((l) => !l.character.isCollected && l.index === currentIndex.current);
-      if (!next) return;
-      const d = distanceXZ(playerPos, next.character.positionXZ());
-      if (d < COLLECT_DIST) {
-        collectLetter(engine, next, playerPos);
+      // After a pickup, gate the next collection on the player having
+      // physically walked out of the previous letter's radius. Without
+      // this guard, two same-letter spawns that landed close (worst
+      // case: pickClearSpawn fallback ignored the taken list) would
+      // both collect from a single stand-still position.
+      if (lastCollectPosRef.current) {
+        const dx = playerPos.x - lastCollectPosRef.current.x;
+        const dz = playerPos.z - lastCollectPosRef.current.z;
+        if (Math.hypot(dx, dz) < COLLECT_DIST + 0.4) {
+          // Still inside the previous pickup's bubble — keep waiting.
+        } else {
+          lastCollectPosRef.current = null;
+        }
+      }
+      // Any uncollected letter whose character matches the one we need
+      // counts as a valid pickup. Words with duplicate letters (TREE,
+      // BOOK, EGG …) would otherwise be blocked: the kid sees two
+      // identical Es but only one of them — the one at the exact
+      // current index — could be collected, and walking onto the
+      // "wrong" identical letter looked like a silent broken game.
+      const required = word.word[currentIndex.current];
+      if (required === undefined) return;
+      if (lastCollectPosRef.current) return; // gated above
+      for (const candidate of lettersRef.current) {
+        if (candidate.character.isCollected) continue;
+        if (candidate.letter !== required) continue;
+        if (distanceXZ(playerPos, candidate.character.positionXZ()) < COLLECT_DIST) {
+          const pos = candidate.character.positionXZ();
+          lastCollectPosRef.current = { x: pos.x, z: pos.z };
+          collectLetter(engine, candidate, playerPos);
+          break;
+        }
       }
       const since = (performance.now() - lastProgressRef.current) / 1000;
       if (since > HINT_AFTER_SECONDS && !hintScheduledRef.current) {
@@ -182,8 +227,17 @@ function SpellWordRound({
       // ×2 after 10, etc.). The store also auto-fires Word Wizard
       // when the kid crosses 25 total completions across any words.
       useGameStore.getState().recordSpellCompletion(word.word);
+      // playSequence respects the audio Player's sequenceVersion guard,
+      // so when the kid taps "Next word" mid-reveal the celebration
+      // clip won't fire afterwards and clobber the next round's prompt.
+      // A bare reveal.then(celebrate) chain was firing celebrate even
+      // after stop() resolved the reveal — the .then() doesn't know
+      // about the interrupt.
       setTimeout(() => {
-        audio.play(`reveal-spell-${word.word}`).then(() => audio.play(audio.randomCelebrate()));
+        void audio.playSequence([
+          `reveal-spell-${word.word}`,
+          audio.randomCelebrate(),
+        ]);
       }, 700);
     }
   };
