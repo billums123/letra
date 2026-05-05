@@ -58,6 +58,10 @@ type GameCardProps = {
   // When set, the card runs the boot pop-in animation at the given
   // delay (ms). Undefined skips the animation entirely.
   popDelay?: number;
+  // Phase offset (seconds) for the icon's ambient bob, so the three
+  // cards' icons aren't bobbing in lockstep. Pass a different value
+  // per card.
+  bobPhase?: number;
 };
 
 function GameCard({
@@ -71,6 +75,7 @@ function GameCard({
   compact,
   short,
   popDelay,
+  bobPhase = 0,
 }: GameCardProps & { compact: boolean; short: boolean }) {
   const lastSpoken = useRef(0);
   const [hover, setHover] = useState(false);
@@ -183,11 +188,22 @@ function GameCard({
               objectFit: "contain",
               filter:
                 "drop-shadow(0 8px 0 rgba(0,0,0,0.14)) drop-shadow(0 4px 10px rgba(0,0,0,0.18))",
+              // Slow idle bob — the icon gently hovers up + down so a
+              // parked card still reads as "alive" rather than a
+              // static brochure tile. Each card passes a different
+              // bobPhase so the three icons aren't synchronized.
+              animation: `letra-bob 3.4s ease-in-out ${bobPhase}s infinite`,
             }}
             draggable={false}
           />
         ) : (
-          <div style={{ fontSize: compact ? 88 : 108, lineHeight: 1 }}>
+          <div
+            style={{
+              fontSize: compact ? 88 : 108,
+              lineHeight: 1,
+              animation: `letra-bob 3.4s ease-in-out ${bobPhase}s infinite`,
+            }}
+          >
             {emoji}
           </div>
         )}
@@ -352,6 +368,7 @@ export function MainMenu() {
           compact={compact}
           short={short}
           popDelay={boot ? 140 : undefined}
+          bobPhase={0}
         />
         <GameCard
           iconUrl="/icons/find-alphabet.png"
@@ -364,6 +381,7 @@ export function MainMenu() {
           compact={compact}
           short={short}
           popDelay={boot ? 230 : undefined}
+          bobPhase={0.5}
         />
         <GameCard
           iconUrl="/icons/match-sound.png"
@@ -376,6 +394,7 @@ export function MainMenu() {
           compact={compact}
           short={short}
           popDelay={boot ? 320 : undefined}
+          bobPhase={1.1}
         />
       </main>
 

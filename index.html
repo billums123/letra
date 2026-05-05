@@ -47,6 +47,14 @@
         80%  { transform: scale(0.97) translateY(1px) rotate(-1deg); }
         100% { opacity: 1; transform: scale(1) translateY(0) rotate(0deg); }
       }
+
+      /* Slow ambient bob for the menu game-card icons. Each card uses a
+         different animation-delay so the three icons drift out of sync,
+         which reads as "alive" rather than "synchronized robots". */
+      @keyframes letra-bob {
+        0%, 100% { transform: translateY(0) rotate(-1.5deg); }
+        50%      { transform: translateY(-8px) rotate(1.5deg); }
+      }
     </style>
   </head>
   <body>
