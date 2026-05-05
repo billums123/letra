@@ -727,13 +727,21 @@ function CasePicker({ screen, onCancel, onPick }: CasePickerProps) {
           boxShadow: "0 18px 0 rgba(0,0,0,0.18), 0 30px 60px rgba(0,0,0,0.3)",
           color: "#3a2a14",
           textAlign: "center",
+          // Rounded toy stack — matches the Letra aesthetic without
+          // hitting the heavy Lilita One letterforms. font-family
+          // inherits, but <button> elements don't pick it up
+          // automatically — each button below sets fontFamily:
+          // "inherit" to opt in.
+          fontFamily:
+            "'Fredoka','Comic Sans MS','Chalkboard SE',system-ui,sans-serif",
+          letterSpacing: 0.4,
         }}
       >
-        <div style={{ fontSize: compact ? 32 : 48, fontWeight: 900 }}>
+        <div style={{ fontSize: compact ? 32 : 48, fontWeight: 600 }}>
           {heading}
         </div>
         <div
-          style={{ marginTop: 8, fontWeight: 800, fontSize: compact ? 18 : 22 }}
+          style={{ marginTop: 8, fontWeight: 500, fontSize: compact ? 18 : 22 }}
         >
           Pick your letters
         </div>
@@ -765,6 +773,10 @@ function CasePicker({ screen, onCancel, onPick }: CasePickerProps) {
                 flexDirection: "column",
                 alignItems: "center",
                 gap: compact ? 10 : 14,
+                // Buttons don't inherit font-family from the dialog
+                // by default in most browsers — opt in explicitly so
+                // the option label renders in Lilita One.
+                fontFamily: "inherit",
               }}
             >
               {/* Cream card behind the letters keeps the AI-rendered
@@ -791,7 +803,7 @@ function CasePicker({ screen, onCancel, onPick }: CasePickerProps) {
                   draggable={false}
                 />
               </div>
-              <span style={{ fontSize: compact ? 22 : 30, fontWeight: 900 }}>
+              <span style={{ fontSize: compact ? 22 : 28, fontWeight: 600 }}>
                 {opt.label}
               </span>
             </button>
@@ -809,8 +821,9 @@ function CasePicker({ screen, onCancel, onPick }: CasePickerProps) {
             borderRadius: 18,
             padding: "10px 18px",
             fontSize: 16,
-            fontWeight: 800,
+            fontWeight: 600,
             cursor: "pointer",
+            fontFamily: "inherit",
           }}
         >
           ◀ Back

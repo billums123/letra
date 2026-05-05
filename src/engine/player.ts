@@ -306,7 +306,10 @@ function buildCar(): PlayerHandles {
     pipeMat,
   );
   tailPipe.rotation.x = Math.PI / 2;
-  tailPipe.position.set(0.38, 0.16, -1.0);
+  // Pipe centred on the rear bumper (rear face at z = -0.95) so only
+  // a short stub pokes out — reads as a tucked-in tail pipe rather
+  // than a long external exhaust standing off the back.
+  tailPipe.position.set(0.38, 0.16, -0.95);
   tailPipe.castShadow = true;
   group.add(tailPipe);
 
@@ -317,7 +320,9 @@ function buildCar(): PlayerHandles {
   // it can fade independently. depthWrite is off so the transparent
   // edges don't punch a hole in whatever's behind them.
   const PUFF_COUNT = 6;
-  const puffOrigin = new THREE.Vector3(0.38, 0.22, -1.12);
+  // Origin sits at the pipe outlet (pipe centre z=-0.95, length 0.18,
+  // so the back face is at z=-1.04). Puffs spawn just behind that.
+  const puffOrigin = new THREE.Vector3(0.38, 0.14, -1.07);
   const puffs: { mesh: THREE.Mesh; age: number; lifetime: number; jitter: number }[] = [];
   for (let i = 0; i < PUFF_COUNT; i++) {
     const m = new THREE.MeshBasicMaterial({
@@ -409,18 +414,21 @@ function buildCar(): PlayerHandles {
         const sideways = Math.sin(p.jitter + t * 6) * 0.06 * t;
         p.mesh.position.set(
           puffOrigin.x + sideways,
-          puffOrigin.y + t * 0.22,
+          puffOrigin.y + t * 0.14,
           puffOrigin.z - t * trailDistance,
         );
         // Grow as it ages — fresh puffs are tight, old puffs are
-        // billowy clouds.
-        const scale = 0.55 + t * 1.6;
+        // billowy clouds. Restrained growth so the trail stays a
+        // subtle wisp rather than a smoke screen.
+        const scale = 0.45 + t * 1.1;
         p.mesh.scale.setScalar(scale);
         // Opacity envelope: fade in fast, fade out slow. Idle puffs
-        // are wispy; throttle puffs are denser.
+        // are barely-there; throttle puffs are still wispy. The
+        // numbers are deliberately low — exhaust is meant to read
+        // as ambient detail, not a focal effect.
         const fadeIn = Math.min(1, t / 0.12);
         const fadeOut = Math.max(0, 1 - (t - 0.12) / 0.88);
-        const baseAlpha = 0.06 + mag * 0.22;
+        const baseAlpha = 0.04 + mag * 0.14;
         (p.mesh.material as THREE.MeshBasicMaterial).opacity =
           baseAlpha * fadeIn * fadeOut;
       }
