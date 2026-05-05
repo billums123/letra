@@ -1,6 +1,6 @@
 import * as THREE from "three";
 import type { Biome, BiomeContext } from "./types";
-import { freshSeed, makeCloud, makeFlower, makeMushroom, makeTree, mulberry32 } from "../world";
+import { freshSeed, makeFlower, makeMushroom, makeTree, mulberry32 } from "../world";
 import type { Obstacle } from "../world";
 
 // Sky-islands biome. A handful of grassy floating islands at varying
@@ -261,10 +261,10 @@ function buildProps(ctx: BiomeContext): void {
   // around island level (parallax depth) and a soft cloud sea below
   // the islands so peeking past an edge shows something other than
   // empty fog. Each cloud orbits its anchor at a slow speed and
-  // breathes (subtle scale pulse) so the sky always feels alive.
+  // breathes so the sky feels alive even when the kid is still.
+  // Variation comes from FOUR shape variants (puff, fluffy,
+  // stretched, wispy), wide size jitter, and per-cloud speed/phase.
   const cloudRand = mulberry32(freshSeed());
-  // Per-cloud animation state. Building it once and pushing a single
-  // tick callback is cheaper than registering one per cloud.
   type CloudAnim = {
     obj: THREE.Object3D;
     cx: number; cz: number;
@@ -276,84 +276,104 @@ function buildProps(ctx: BiomeContext): void {
     bobPhase: number;
     baseY: number;
     baseScale: number;
+    // Asymmetric scale shaping — most clouds aren't perfect spheres,
+    // they're stretched along one axis. We bake that into the base
+    // and let the pulse breathe on top of it.
+    scaleX: number;
+    scaleY: number;
+    scaleZ: number;
     pulseAmp: number;
     pulseSpeed: number;
     pulsePhase: number;
+    // Yaw drift so the cloud rotates as it ambles — sells the idea
+    // it's not a rigid prop, it's a soft volume catching the wind.
+    yawSpeed: number;
+    yawPhase: number;
   };
   const cloudAnims: CloudAnim[] = [];
-  // Mid-altitude clouds at island level for parallax depth.
-  for (let i = 0; i < 14; i++) {
+
+  // Mid-altitude clouds at island level for parallax depth. Mix of
+  // shapes + speeds so no two read as the same prop.
+  const skyCloudMat = new THREE.MeshStandardMaterial({
+    color: 0xffffff,
+    roughness: 1,
+  });
+  for (let i = 0; i < 18; i++) {
+    const variant = pickCloudVariant(cloudRand);
+    const c = makeCloudVariant(variant, cloudRand, skyCloudMat);
     const angle = cloudRand() * Math.PI * 2;
-    const orbitR = 35 + cloudRand() * 25;
-    const c = makeCloud();
-    const baseY = 4 + cloudRand() * 12;
-    const cx = 0;
-    const cz = 0;
+    const orbitR = 28 + cloudRand() * 38; // 28–66 — wider band than before
+    const baseY = 3 + cloudRand() * 16; // 3–19 — taller layer
     c.position.set(Math.cos(angle) * orbitR, baseY, Math.sin(angle) * orbitR);
-    const baseScale = 1.4 + cloudRand() * 1.6;
-    c.scale.setScalar(baseScale);
+    const baseScale = 0.9 + cloudRand() * 2.4; // 0.9–3.3 — much wider size jitter
+    // Stretch ratios: most clouds are wider than they are tall.
+    const scaleX = 0.85 + cloudRand() * 0.6;
+    const scaleY = 0.55 + cloudRand() * 0.5;
+    const scaleZ = 0.85 + cloudRand() * 0.6;
+    c.scale.set(baseScale * scaleX, baseScale * scaleY, baseScale * scaleZ);
+    c.rotation.y = cloudRand() * Math.PI * 2;
     group.add(c);
     cloudAnims.push({
       obj: c,
-      cx, cz,
+      cx: 0, cz: 0,
       orbitR,
-      angSpeed: 0.012 + cloudRand() * 0.015, // very slow drift around the play zone
+      // Speed varies wildly — fastest cloud is ~5× the slowest.
+      angSpeed: (cloudRand() < 0.5 ? 1 : -1) * (0.008 + cloudRand() * 0.04),
       angPhase: angle,
-      bobAmp: 0.3 + cloudRand() * 0.4,
-      bobSpeed: 0.25 + cloudRand() * 0.2,
+      bobAmp: 0.2 + cloudRand() * 0.7,
+      bobSpeed: 0.18 + cloudRand() * 0.45,
       bobPhase: cloudRand() * Math.PI * 2,
       baseY,
       baseScale,
-      pulseAmp: 0.05 + cloudRand() * 0.06, // ±5–11% scale breathing
-      pulseSpeed: 0.4 + cloudRand() * 0.4,
+      scaleX, scaleY, scaleZ,
+      pulseAmp: 0.04 + cloudRand() * 0.09,
+      pulseSpeed: 0.3 + cloudRand() * 0.6,
       pulsePhase: cloudRand() * Math.PI * 2,
+      yawSpeed: (cloudRand() - 0.5) * 0.06,
+      yawPhase: cloudRand() * Math.PI * 2,
     });
   }
-  // Cloud floor far below — tinted slightly so they read as a
-  // distant sea of clouds, not just stage fog.
+
+  // Cloud floor far below — same variation kit, but tinted warmer so
+  // they read as a distant horizon-glowing carpet rather than another
+  // band of regular clouds.
   const floorMat = new THREE.MeshStandardMaterial({
     color: 0xfff0e6,
     roughness: 1,
     emissive: 0xffd9b6,
     emissiveIntensity: 0.05,
   });
-  for (let i = 0; i < 22; i++) {
+  for (let i = 0; i < 26; i++) {
+    const variant = pickCloudVariant(cloudRand);
+    const cluster = makeCloudVariant(variant, cloudRand, floorMat);
     const x = (cloudRand() - 0.5) * 160;
     const z = (cloudRand() - 0.5) * 160;
-    const cluster = new THREE.Group();
-    const sizes: Array<[number, number, number, number]> = [
-      [0, 0, 0, 1.6],
-      [1.5, -0.1, 0, 1.2],
-      [-1.4, 0.1, 0.3, 1.3],
-      [0.5, 0.2, -0.3, 1.0],
-    ];
-    for (const [sx, sy, sz, sr] of sizes) {
-      const s = new THREE.Mesh(new THREE.SphereGeometry(sr, 12, 8), floorMat);
-      s.position.set(sx, sy, sz);
-      cluster.add(s);
-    }
-    const baseY = -8 - cloudRand() * 6;
+    const baseY = -7 - cloudRand() * 9;
     cluster.position.set(x, baseY, z);
-    const baseScale = 2.2 + cloudRand() * 1.8;
-    cluster.scale.setScalar(baseScale);
+    const baseScale = 1.6 + cloudRand() * 2.6;
+    const scaleX = 1.0 + cloudRand() * 0.7;
+    const scaleY = 0.5 + cloudRand() * 0.45;
+    const scaleZ = 1.0 + cloudRand() * 0.7;
+    cluster.scale.set(baseScale * scaleX, baseScale * scaleY, baseScale * scaleZ);
+    cluster.rotation.y = cloudRand() * Math.PI * 2;
     group.add(cluster);
-    // Floor clouds barely move horizontally (they're meant to read as
-    // a distant carpet) but breathe slightly so the layer doesn't
-    // look frozen when the kid stops moving.
     cloudAnims.push({
       obj: cluster,
       cx: x, cz: z,
-      orbitR: 0.8 + cloudRand() * 1.2, // tiny wobble, not a real orbit
-      angSpeed: 0.04 + cloudRand() * 0.04,
+      orbitR: 0.4 + cloudRand() * 1.6,
+      angSpeed: (cloudRand() < 0.5 ? 1 : -1) * (0.02 + cloudRand() * 0.06),
       angPhase: cloudRand() * Math.PI * 2,
-      bobAmp: 0.4 + cloudRand() * 0.3,
-      bobSpeed: 0.18 + cloudRand() * 0.12,
+      bobAmp: 0.3 + cloudRand() * 0.45,
+      bobSpeed: 0.14 + cloudRand() * 0.18,
       bobPhase: cloudRand() * Math.PI * 2,
       baseY,
       baseScale,
-      pulseAmp: 0.04 + cloudRand() * 0.04,
-      pulseSpeed: 0.3 + cloudRand() * 0.3,
+      scaleX, scaleY, scaleZ,
+      pulseAmp: 0.03 + cloudRand() * 0.06,
+      pulseSpeed: 0.2 + cloudRand() * 0.35,
       pulsePhase: cloudRand() * Math.PI * 2,
+      yawSpeed: (cloudRand() - 0.5) * 0.04,
+      yawPhase: cloudRand() * Math.PI * 2,
     });
   }
   // Single tick for every cloud — cheaper than one closure per cloud.
@@ -363,14 +383,18 @@ function buildProps(ctx: BiomeContext): void {
       a.obj.position.x = a.cx + Math.cos(ang) * a.orbitR;
       a.obj.position.z = a.cz + Math.sin(ang) * a.orbitR;
       a.obj.position.y = a.baseY + Math.sin(t * a.bobSpeed + a.bobPhase) * a.bobAmp;
-      const s = a.baseScale * (1 + Math.sin(t * a.pulseSpeed + a.pulsePhase) * a.pulseAmp);
-      a.obj.scale.setScalar(s);
+      const breathe = 1 + Math.sin(t * a.pulseSpeed + a.pulsePhase) * a.pulseAmp;
+      const s = a.baseScale * breathe;
+      a.obj.scale.set(s * a.scaleX, s * a.scaleY, s * a.scaleZ);
+      a.obj.rotation.y = a.yawPhase + t * a.yawSpeed;
     }
   });
 
   // ── Hot-air balloons drifting around the play zone ───────────────
   // Replaces the meadow's butterflies. Each balloon orbits a random
-  // anchor at slow speed so the sky has a constant gentle motion.
+  // anchor at slow speed and carries an adorable little passenger
+  // who continuously waves at the kid. The passenger is built into
+  // the balloon group, so it inherits the orbital motion automatically.
   const balloonRand = mulberry32(freshSeed());
   for (let i = 0; i < 4; i++) {
     const orbitR = 12 + balloonRand() * 18;
@@ -380,14 +404,21 @@ function buildProps(ctx: BiomeContext): void {
     const phase = balloonRand() * Math.PI * 2;
     const baseY = 14 + balloonRand() * 8;
     const hue = balloonRand();
-    const balloon = makeBalloon(hue);
+    const passengerHue = balloonRand();
+    const balloon = makeBalloon(hue, passengerHue);
     group.add(balloon);
+    // Passenger wave is keyed off `t` with a per-balloon phase offset
+    // so each kid in the sky waves on their own beat.
+    const wavePhase = balloonRand() * Math.PI * 2;
     tick.push((_dt, t) => {
       const ang = t * speed + phase;
       balloon.position.x = cx + Math.cos(ang) * orbitR;
       balloon.position.z = cz + Math.sin(ang) * orbitR;
       balloon.position.y = baseY + Math.sin(t * 0.4 + phase) * 0.6;
       balloon.rotation.y = ang + Math.PI / 2;
+      // Drive the passenger arm + bob via the userData callback the
+      // balloon factory installed.
+      (balloon.userData.tickPassenger as ((tt: number) => void) | undefined)?.(t + wavePhase);
     });
   }
 
@@ -656,9 +687,11 @@ function makeRainbow(p: {
 }
 
 // Hot-air balloon — sphere envelope (with stripes), basket below,
-// little ropes connecting them. Used as ambient sky decoration drifting
-// around the play zone.
-function makeBalloon(hue: number): THREE.Group {
+// little ropes connecting them, plus an adorable waving passenger
+// peering out of the basket. Used as ambient sky decoration drifting
+// around the play zone. Per-frame, the caller drives the passenger
+// wave by invoking `group.userData.tickPassenger(t)`.
+function makeBalloon(hue: number, passengerHue: number): THREE.Group {
   const g = new THREE.Group();
   const colorA = new THREE.Color().setHSL(hue, 0.7, 0.55);
   const colorB = new THREE.Color().setHSL((hue + 0.5) % 1, 0.7, 0.7);
@@ -701,6 +734,254 @@ function makeBalloon(hue: number): THREE.Group {
       rope.rotation.x = sz * 0.06;
       g.add(rope);
     }
+  }
+  // Adorable passenger — sits in the basket, waves continuously.
+  const passenger = makeBalloonPassenger(passengerHue);
+  passenger.group.position.y = -2.15; // peek over the basket rim
+  g.add(passenger.group);
+  g.userData.tickPassenger = passenger.tick;
+  return g;
+}
+
+// A small chubby character peering out of the balloon basket, waving
+// at the kid. Big head, oversized eyes, blush, soft smile, one little
+// arm raised above its head doing a continuous wave. Returns a tick
+// function that drives the wave + a tiny body bob.
+function makeBalloonPassenger(hue: number): {
+  group: THREE.Group;
+  tick: (t: number) => void;
+} {
+  const group = new THREE.Group();
+
+  // Body palette — pastel saturation with a slightly lighter head so
+  // the silhouette reads even at small on-screen sizes.
+  const bodyColor = new THREE.Color().setHSL(hue, 0.55, 0.62);
+  const headColor = new THREE.Color().setHSL(hue, 0.55, 0.72);
+  const armColor = bodyColor.clone().multiplyScalar(0.85);
+
+  // Body — a chubby rounded barrel just clearing the basket rim.
+  const bodyMat = new THREE.MeshStandardMaterial({
+    color: bodyColor,
+    roughness: 0.45,
+  });
+  const body = new THREE.Mesh(new THREE.SphereGeometry(0.28, 14, 10), bodyMat);
+  body.scale.set(1, 1.05, 1);
+  body.position.y = 0.18;
+  body.castShadow = true;
+  group.add(body);
+
+  // Head — bigger than the body for that chibi/cute proportion.
+  const headMat = new THREE.MeshStandardMaterial({
+    color: headColor,
+    roughness: 0.4,
+  });
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.34, 16, 12), headMat);
+  head.position.y = 0.62;
+  head.castShadow = true;
+  group.add(head);
+
+  // Eyes — two big white spheres with dark pupils. Positioned slightly
+  // forward (z+) so the passenger reads as facing outward.
+  const eyeWhiteMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.35 });
+  const pupilMat = new THREE.MeshStandardMaterial({ color: 0x1c1422, roughness: 0.3 });
+  const shineMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+  for (const side of [-1, 1] as const) {
+    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.085, 12, 10), eyeWhiteMat);
+    eye.position.set(side * 0.13, 0.66, 0.27);
+    group.add(eye);
+    const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.05, 10, 10), pupilMat);
+    pupil.position.set(side * 0.13, 0.66, 0.32);
+    group.add(pupil);
+    // Tiny shine on each pupil — sells the "alive" twinkle.
+    const shine = new THREE.Mesh(new THREE.SphereGeometry(0.018, 6, 6), shineMat);
+    shine.position.set(side * 0.13 - 0.02, 0.69, 0.36);
+    group.add(shine);
+  }
+
+  // Cheek blushes — soft pink discs to the side of each eye.
+  const blushMat = new THREE.MeshBasicMaterial({
+    color: 0xff8aae,
+    transparent: true,
+    opacity: 0.75,
+    depthWrite: false,
+  });
+  for (const side of [-1, 1] as const) {
+    const blush = new THREE.Mesh(new THREE.CircleGeometry(0.055, 12), blushMat);
+    blush.position.set(side * 0.24, 0.55, 0.27);
+    blush.lookAt(side * 0.24, 0.55, 1);
+    group.add(blush);
+  }
+
+  // Mouth — tiny smile arc.
+  const mouth = new THREE.Mesh(
+    new THREE.TorusGeometry(0.06, 0.018, 6, 14, Math.PI),
+    new THREE.MeshStandardMaterial({ color: 0x1f1428, roughness: 0.55 })
+  );
+  mouth.rotation.x = Math.PI / 2;
+  mouth.rotation.z = Math.PI;
+  mouth.position.set(0, 0.5, 0.31);
+  group.add(mouth);
+
+  // Little hat — a tiny pointed cone perched on top, in a contrasting
+  // hue. Adds personality without busying up the silhouette.
+  const hatMat = new THREE.MeshStandardMaterial({
+    color: new THREE.Color().setHSL((hue + 0.4) % 1, 0.7, 0.5),
+    roughness: 0.55,
+  });
+  const hat = new THREE.Mesh(new THREE.ConeGeometry(0.18, 0.22, 12), hatMat);
+  hat.position.y = 0.95;
+  hat.castShadow = true;
+  group.add(hat);
+  const hatBall = new THREE.Mesh(
+    new THREE.SphereGeometry(0.05, 10, 8),
+    new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.6 })
+  );
+  hatBall.position.y = 1.07;
+  group.add(hatBall);
+
+  // Waving arm — a pivot at the shoulder, a stubby cylinder for the
+  // arm, and a sphere hand at the end. The pivot's Z rotation drives
+  // the wave back-and-forth motion.
+  const waveArmPivot = new THREE.Group();
+  waveArmPivot.position.set(0.22, 0.32, 0);
+  group.add(waveArmPivot);
+  const armMat = new THREE.MeshStandardMaterial({ color: armColor, roughness: 0.55 });
+  const arm = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.05, 0.045, 0.34, 8),
+    armMat
+  );
+  // Position the arm so it extends OUT from the shoulder pivot — the
+  // pivot is at the top of the arm, and the arm hangs along its local
+  // -Y. Combined with the pivot's resting Z rotation we get an arm
+  // raised overhead ready to wave.
+  arm.position.y = -0.17;
+  waveArmPivot.add(arm);
+  const handMat = new THREE.MeshStandardMaterial({
+    color: bodyColor.clone().lerp(new THREE.Color(0xffffff), 0.25),
+    roughness: 0.5,
+  });
+  const hand = new THREE.Mesh(new THREE.SphereGeometry(0.07, 12, 10), handMat);
+  hand.position.y = -0.36;
+  waveArmPivot.add(hand);
+  // Resting pose: arm raised overhead, ready to wave back and forth.
+  const armRestZ = -2.2; // ~-126°, points the arm up and slightly outward
+  waveArmPivot.rotation.z = armRestZ;
+
+  // Other arm — held at rest beside the body, no animation.
+  const otherArmPivot = new THREE.Group();
+  otherArmPivot.position.set(-0.22, 0.32, 0);
+  group.add(otherArmPivot);
+  const otherArm = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.05, 0.045, 0.3, 8),
+    armMat
+  );
+  otherArm.position.y = -0.15;
+  otherArmPivot.add(otherArm);
+  const otherHand = new THREE.Mesh(new THREE.SphereGeometry(0.065, 12, 10), handMat);
+  otherHand.position.y = -0.32;
+  otherArmPivot.add(otherHand);
+  otherArmPivot.rotation.z = 0.2; // hangs slightly out from the body
+
+  // Tick — gentle whole-body bob plus a continuous wave on the right
+  // arm. The wave amplitude is intentionally large (±0.5 rad) so the
+  // motion is visible at distance.
+  const tick = (t: number) => {
+    group.position.y = -2.15 + Math.sin(t * 1.6) * 0.04;
+    waveArmPivot.rotation.z = armRestZ + Math.sin(t * 5) * 0.5;
+    // Tiny head wobble so the passenger doesn't read as a static
+    // doll while waving.
+    head.rotation.z = Math.sin(t * 1.2) * 0.05;
+    hat.rotation.z = head.rotation.z;
+    hatBall.position.x = Math.sin(t * 1.2) * 0.02;
+  };
+
+  return { group, tick };
+}
+
+// ─── Cloud variation ──────────────────────────────────────────────────
+// Four shape variants the cloud generators randomly pick from. Each
+// variant is a small group of overlapping spheres with a distinctive
+// silhouette so the sky reads as a mix of cloud types instead of one
+// repeated stamp.
+type CloudVariant = "puff" | "fluffy" | "stretched" | "wispy";
+
+function pickCloudVariant(rand: () => number): CloudVariant {
+  const r = rand();
+  if (r < 0.22) return "puff";
+  if (r < 0.62) return "fluffy";
+  if (r < 0.85) return "stretched";
+  return "wispy";
+}
+
+function makeCloudVariant(
+  variant: CloudVariant,
+  rand: () => number,
+  mat: THREE.MeshStandardMaterial
+): THREE.Group {
+  const g = new THREE.Group();
+  // Per-variant sphere layouts — [x, y, z, radius]. Authored by hand
+  // so each variant has a recognizable silhouette and varies enough
+  // when randomized that two clouds of the same variant don't look
+  // like clones.
+  let layout: Array<[number, number, number, number]>;
+  switch (variant) {
+    case "puff":
+      // Compact 2-3 sphere blob — small, round, drifts higher up.
+      layout = [
+        [0, 0, 0, 1.0],
+        [0.8, 0.05, 0.1, 0.75],
+        [-0.65, -0.05, 0.05, 0.7],
+      ];
+      break;
+    case "fluffy":
+      // The classic 4-5 sphere cumulus shape — what most clouds default to.
+      layout = [
+        [0, 0, 0, 1.4],
+        [1.3, -0.1, 0, 1.0],
+        [-1.2, 0.1, 0.2, 1.1],
+        [0.4, 0.25, -0.2, 0.95],
+        [-0.4, 0.3, 0.2, 0.85],
+      ];
+      break;
+    case "stretched":
+      // Long horizontal cloud — multiple spheres in a row, like a
+      // streak of cirrus. Uses smaller individual spheres so the
+      // cloud reads as elongated rather than a fat blob.
+      layout = [
+        [0, 0, 0, 1.0],
+        [1.6, -0.05, 0, 0.85],
+        [-1.5, 0.05, 0, 0.85],
+        [3.0, -0.1, 0.1, 0.7],
+        [-2.9, 0.1, -0.1, 0.7],
+        [4.2, -0.15, 0, 0.55],
+        [-4.0, 0.05, 0, 0.55],
+      ];
+      break;
+    case "wispy":
+      // Flat, spread-out shape — a thin cloud where you can almost see
+      // through to the sky behind. Wide low-amplitude bumps.
+      layout = [
+        [0, 0, 0, 0.85],
+        [1.4, -0.05, 0.4, 0.7],
+        [-1.3, 0, -0.3, 0.7],
+        [2.6, -0.1, -0.1, 0.55],
+        [-2.5, 0.05, 0.2, 0.55],
+        [0.2, -0.2, 0.9, 0.6],
+        [-0.1, 0.15, -0.95, 0.55],
+      ];
+      break;
+  }
+  // Per-cloud jitter on each sphere position + radius so two clouds
+  // of the same variant differ. Jitter is small enough that the
+  // variant's silhouette still reads.
+  for (const [x, y, z, r] of layout) {
+    const jx = (rand() - 0.5) * 0.18;
+    const jy = (rand() - 0.5) * 0.12;
+    const jz = (rand() - 0.5) * 0.18;
+    const jr = 1 + (rand() - 0.5) * 0.18;
+    const s = new THREE.Mesh(new THREE.SphereGeometry(r * jr, 12, 9), mat);
+    s.position.set(x + jx, y + jy, z + jz);
+    g.add(s);
   }
   return g;
 }
