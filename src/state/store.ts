@@ -16,7 +16,9 @@ export type Screen =
   | "letter-editor"
   | "alien-editor"
   | "q-tail-editor"
-  | "trophy-lab";
+  | "trophy-lab"
+  | "audio-tester"
+  | "word-builder";
 
 // One trophy-earned event waiting to be celebrated. Games push these
 // onto pendingEarns; the EarnedTrophyModal renders the head of the

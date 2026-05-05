@@ -1,13 +1,6 @@
 {
   "voices": [
     {
-      "slug": "rachel",
-      "name": "Rachel",
-      "voiceId": "21m00Tcm4TlvDq8ikWAM",
-      "modelId": "eleven_multilingual_v2",
-      "generatedAt": "2026-04-29T16:28:46.203Z"
-    },
-    {
       "slug": "marissa",
       "name": "Marissa",
       "voiceId": "A2JkxH7o94rRxvRjHHLO",

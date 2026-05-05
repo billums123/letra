@@ -25,6 +25,7 @@ import { config as loadEnv } from "dotenv";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { buildEntries, type AudioManifest, type AudioEntry, type VoicesRegistry, type VoiceRegistryEntry, ALPHABET, LETTER_SOUND_TEXT, SPELL_WORDS } from "../src/audio/types.ts";
+import { generateClipMp3 } from "./elevenlabs.ts";
 
 // Match Vite's convention: load .env.local first, then .env.
 loadEnv({ path: ".env.local" });
@@ -108,32 +109,13 @@ async function generateOne(entry: AudioEntry, voiceId: string, modelId: string, 
       "ELEVENLABS_API_KEY is not set. Copy .env.example to .env and add your key."
     );
   }
-  const url = `https://api.elevenlabs.io/v1/text-to-speech/${voiceId}?output_format=mp3_44100_128`;
-  const body = {
+  await generateClipMp3({
     text: entry.text,
-    model_id: entry.modelId ?? modelId,
-    voice_settings: {
-      stability: 0.5,
-      similarity_boost: 0.75,
-      style: 0.4,
-      use_speaker_boost: true,
-    },
-  };
-  const res = await fetch(url, {
-    method: "POST",
-    headers: {
-      "xi-api-key": ELEVEN_API_KEY,
-      "content-type": "application/json",
-      accept: "audio/mpeg",
-    },
-    body: JSON.stringify(body),
+    voiceId,
+    modelId: entry.modelId ?? modelId,
+    apiKey: ELEVEN_API_KEY,
+    outPath,
   });
-  if (!res.ok) {
-    const text = await res.text().catch(() => "<no body>");
-    throw new Error(`ElevenLabs ${res.status} for "${entry.id}": ${text.slice(0, 200)}`);
-  }
-  const arrayBuf = await res.arrayBuffer();
-  await fs.writeFile(outPath, Buffer.from(arrayBuf));
 }
 
 function buildManifest(voiceId: string, modelId: string): AudioManifest {

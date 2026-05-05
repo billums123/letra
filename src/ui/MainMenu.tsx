@@ -482,6 +482,22 @@ export function MainMenu() {
           >
             {compact ? "🧪" : "🧪 Trophy lab"}
           </button>
+          <button
+            type="button"
+            onClick={() => setScreen("audio-tester")}
+            aria-label="Open the audio clip tester"
+            style={compact ? compactCornerBtn : cornerBtn}
+          >
+            {compact ? "🎧" : "🎧 Audio"}
+          </button>
+          <button
+            type="button"
+            onClick={() => setScreen("word-builder")}
+            aria-label="Open the spell-the-word builder"
+            style={compact ? compactCornerBtn : cornerBtn}
+          >
+            {compact ? "📝" : "📝 Word"}
+          </button>
         </div>
       )}
 

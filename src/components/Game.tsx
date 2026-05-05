@@ -14,6 +14,8 @@ import { LetterEditor } from "../ui/LetterEditor";
 import { AlienEditor } from "../ui/AlienEditor";
 import { QTailEditor } from "../ui/QTailEditor";
 import { TrophyLab } from "../ui/TrophyLab";
+import { AudioTester } from "../ui/AudioTester";
+import { SpellWordBuilder } from "../ui/SpellWordBuilder";
 import { EarnedTrophyModal } from "../ui/EarnedTrophyModal";
 import { isDev } from "../util/isDev";
 
@@ -31,6 +33,8 @@ const SCREEN_PATHS: Record<Screen, string> = {
   "alien-editor": "/dev/alien-editor",
   "q-tail-editor": "/dev/q-tail-editor",
   "trophy-lab": "/dev/trophy-lab",
+  "audio-tester": "/dev/audio-tester",
+  "word-builder": "/dev/word-builder",
 };
 
 export function Game() {
@@ -94,7 +98,9 @@ export function Game() {
         screen === "letter-editor" ||
         screen === "alien-editor" ||
         screen === "q-tail-editor" ||
-        screen === "trophy-lab")
+        screen === "trophy-lab" ||
+        screen === "audio-tester" ||
+        screen === "word-builder")
     ) {
       goToMenu();
     }
@@ -116,7 +122,9 @@ export function Game() {
       screen === "letter-editor" ||
       screen === "alien-editor" ||
       screen === "q-tail-editor" ||
-      screen === "trophy-lab"
+      screen === "trophy-lab" ||
+      screen === "audio-tester" ||
+      screen === "word-builder"
     ) {
       music.stop();
     } else {
@@ -135,6 +143,8 @@ export function Game() {
       {dev && screen === "alien-editor" && <AlienEditor />}
       {dev && screen === "q-tail-editor" && <QTailEditor />}
       {dev && screen === "trophy-lab" && <TrophyLab />}
+      {dev && screen === "audio-tester" && <AudioTester />}
+      {dev && screen === "word-builder" && <SpellWordBuilder />}
       <VirtualJoystick visible={screen !== "menu" && screen !== "trophy-lab"} />
       {/* Mounted at the app root so trophy-earn celebrations fire over
           any screen — gameplay, menu, or the trophy lab itself. */}
