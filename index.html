@@ -21,11 +21,32 @@
     <link rel="preload" as="image" href="/icons/spell-word.png" />
     <link rel="preload" as="image" href="/icons/find-alphabet.png" />
     <link rel="preload" as="image" href="/icons/match-sound.png" />
+    <!-- Case-picker tiles. Preloaded so the first tap on a game card
+         opens the picker with the AI-rendered cases already painted —
+         the picker is one click away from the menu, so they reliably
+         finish before the kid gets there. -->
+    <link rel="preload" as="image" href="/case-uppercase.png" />
+    <link rel="preload" as="image" href="/case-lowercase.png" />
+    <link rel="preload" as="image" href="/case-mixed.png" />
     <style>
       html, body, #root { margin: 0; padding: 0; height: 100%; overflow: hidden; background: #7ec8ff; }
       body { font-family: 'Comic Sans MS', 'Chalkboard SE', system-ui, -apple-system, sans-serif; -webkit-tap-highlight-color: transparent; user-select: none; -webkit-user-select: none; touch-action: none; }
       * { box-sizing: border-box; }
       canvas { width: 100% !important; height: 100% !important; display: block; }
+
+      /* Boot pop-in — used by MainMenu on the very first mount per
+         session to make the title, game cards and footer chips spring
+         playfully into view. The overshoot easing + scale keyframes
+         give it a tactile, toy-like bounce that fits the rest of the
+         "chunky 3D" UI language. animation-fill-mode: backwards keeps
+         the staggered elements invisible during their delay so they
+         don't flash at full opacity before their turn to pop. */
+      @keyframes letra-pop-in {
+        0%   { opacity: 0; transform: scale(0.4) translateY(28px) rotate(-4deg); }
+        55%  { opacity: 1; transform: scale(1.10) translateY(-6px) rotate(2deg); }
+        80%  { transform: scale(0.97) translateY(1px) rotate(-1deg); }
+        100% { opacity: 1; transform: scale(1) translateY(0) rotate(0deg); }
+      }
     </style>
   </head>
   <body>

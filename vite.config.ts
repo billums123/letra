@@ -60,7 +60,11 @@ export default defineConfig({
       },
       workbox: {
         // Precache the app shell — small, deterministic, no audio.
-        globPatterns: ["**/*.{js,css,html,svg,json,woff2,ttf}"],
+        // PNGs are included so menu icons, case-picker tiles and trophy
+        // art all paint from the SW cache on repeat visits with zero
+        // network latency. The bundle of all PNGs is ~1 MB total —
+        // well under the install budget.
+        globPatterns: ["**/*.{js,css,html,svg,json,woff2,ttf,png}"],
         // Bump the budget — the bundled font + a single voice's manifest
         // can push past the default 2 MB.
         maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,

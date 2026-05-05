@@ -13,6 +13,22 @@ import { BIOMES } from "../engine/biomes";
 // Cards that route through the case picker before launching.
 type CasedScreen = "spell-word" | "find-alphabet" | "sound-match";
 
+// Module-scoped so the boot pop-in animation only runs on the very
+// first time the menu mounts in a given session. Coming back to the
+// menu from a game shouldn't replay the entrance — that'd feel like
+// the app is rebooting every round.
+let hasPlayedBootAnim = false;
+
+// Builds the inline `animation` value for an element that should pop
+// into view as part of the boot stagger. Keyframes live in index.html
+// (.@keyframes letra-pop-in). `backwards` keeps the element invisible
+// during its delay so it doesn't flash at full opacity before its turn.
+function popIn(delayMs: number): React.CSSProperties {
+  return {
+    animation: `letra-pop-in 0.62s cubic-bezier(0.34, 1.56, 0.64, 1) ${delayMs}ms backwards`,
+  };
+}
+
 // Picture-based main menu. Designed for ages 3-6: huge buttons, big icons,
 // audio narration on hover, no required reading. Pre-readers can navigate
 // by visual identification + voice cue.
@@ -39,6 +55,9 @@ type GameCardProps = {
   voiceClipId: string;
   onSelect: () => void;
   ariaLabel: string;
+  // When set, the card runs the boot pop-in animation at the given
+  // delay (ms). Undefined skips the animation entirely.
+  popDelay?: number;
 };
 
 function GameCard({
@@ -51,6 +70,7 @@ function GameCard({
   ariaLabel,
   compact,
   short,
+  popDelay,
 }: GameCardProps & { compact: boolean; short: boolean }) {
   const lastSpoken = useRef(0);
   const [hover, setHover] = useState(false);
@@ -137,6 +157,7 @@ function GameCard({
         // a quick crop matches the rounded card edge.
         overflow: "hidden",
         position: "relative",
+        ...(popDelay !== undefined ? popIn(popDelay) : {}),
       }}
     >
       <div
@@ -218,6 +239,17 @@ export function MainMenu() {
     return () => audio.stop();
   }, []);
 
+  // First time the menu mounts in this session, run the staggered boot
+  // pop-in. Subsequent menu visits (after a game) skip the animation
+  // because it'd otherwise feel like the app was rebooting every round.
+  // Captured in a ref so the value is stable across re-renders within
+  // this mount even after we flip the module flag in the effect.
+  const isBoot = useRef(!hasPlayedBootAnim);
+  useEffect(() => {
+    hasPlayedBootAnim = true;
+  }, []);
+  const boot = isBoot.current;
+
   return (
     <div
       style={{
@@ -268,6 +300,7 @@ export function MainMenu() {
               objectFit: "contain",
               filter: "drop-shadow(0 6px 12px rgba(0,0,0,0.18))",
               userSelect: "none",
+              ...(boot ? popIn(0) : {}),
             }}
             draggable={false}
           />
@@ -318,6 +351,7 @@ export function MainMenu() {
           ariaLabel="Spell the Word — find the letters that spell missing animals"
           compact={compact}
           short={short}
+          popDelay={boot ? 140 : undefined}
         />
         <GameCard
           iconUrl="/icons/find-alphabet.png"
@@ -329,6 +363,7 @@ export function MainMenu() {
           ariaLabel="Find the alphabet from A to Z"
           compact={compact}
           short={short}
+          popDelay={boot ? 230 : undefined}
         />
         <GameCard
           iconUrl="/icons/match-sound.png"
@@ -340,6 +375,7 @@ export function MainMenu() {
           ariaLabel="Match the sound to the letter"
           compact={compact}
           short={short}
+          popDelay={boot ? 320 : undefined}
         />
       </main>
 
@@ -363,6 +399,7 @@ export function MainMenu() {
           // picker's own gap, so this only affects the seam.
           gap: compact ? 22 : 56,
           paddingBottom: `calc(${compact ? 18 : 16}px + env(safe-area-inset-bottom, 0px))`,
+          ...(boot ? popIn(440) : {}),
         }}
       >
         <AvatarPicker avatar={avatar} setAvatar={setAvatar} compact={compact} />
@@ -458,6 +495,7 @@ export function MainMenu() {
           // otherwise push the visual glyph above geometric centre.
           padding: 0,
           lineHeight: 1,
+          ...(boot ? popIn(540) : {}),
         }}
       >
         <span
