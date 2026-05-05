@@ -190,13 +190,18 @@ export function letterNameText(letter: string): string {
 
 // Spelling-game words. Each has a friendly intro line and the letters needed.
 // Limit to 3-letter "CVC" words that pre-K kids see early in phonics.
+//
+// Intro shape: brief scenario flavour → "Let's find the <word>" → the
+// letters. The directive ALWAYS names the word right before the letters
+// so a 3-year-old hears "cat / C, A, T" back-to-back and binds the
+// spelling to the noun without a synonym or pronoun in between.
 export const SPELL_WORDS: { word: string; intro: string; reveal: string }[] = [
-  { word: "CAT", intro: "Oh no! A cat went missing! Help me find the letters that spell C, A, T to find the cat!", reveal: "We found the cat!" },
-  { word: "DOG", intro: "Where did our puppy go? Find the letters D, O, G and we will find the dog!", reveal: "There is the dog!" },
-  { word: "SUN", intro: "It is so cloudy! Help bring back the sun by finding S, U, N!", reveal: "Hooray, the sun is back!" },
-  { word: "BUS", intro: "We need to catch the bus! Find the letters B, U, S to bring it!", reveal: "All aboard the bus!" },
-  { word: "PIG", intro: "Our friend the pig is hiding. Find P, I, G to call them out!", reveal: "Oink oink, the pig is here!" },
-  { word: "HAT", intro: "Oh no! The hat is lost! Find H, A, T to find it!", reveal: "There’s the hat!" },
+  { word: "CAT", intro: "Oh no! The cat ran off! Let's find the cat. C, A, T!", reveal: "We found the cat!" },
+  { word: "DOG", intro: "Let's find the dog. D, O, G.", reveal: "There is the dog!" },
+  { word: "SUN", intro: "It's so cloudy! Let's find the sun. S, U, N!", reveal: "Hooray, the sun is back!" },
+  { word: "BUS", intro: "We need a ride! Let's find the bus. B, U, S!", reveal: "All aboard the bus!" },
+  { word: "PIG", intro: "Let's find the pig. P, I, G!", reveal: "There is the pig!" },
+  { word: "HAT", intro: "Oh no! The hat is missing! Let's find the hat. H, A, T!", reveal: "There’s the hat!" },
 ];
 
 export function buildEntries(): AudioEntry[] {

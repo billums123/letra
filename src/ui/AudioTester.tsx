@@ -68,6 +68,7 @@ export function AudioTester() {
   const [filter, setFilter] = useState("");
   const [playing, setPlaying] = useState<string | null>(null);
   const [editing, setEditing] = useState<Editing | null>(null);
+  const [copied, setCopied] = useState(false);
   // Forces a re-render when the player's voice list resolves (init is async).
   const [, force] = useState(0);
 
@@ -149,9 +150,11 @@ export function AudioTester() {
 
   async function copyPatch() {
     if (!editing) return;
-    const snippet = `{ id: "${editing.id}", text: ${JSON.stringify(editing.text)} }`;
+    const snippet = buildPatch(editing.id, editing.text, audio.activeVoice?.slug ?? null, editing.modelId);
     try {
       await navigator.clipboard.writeText(snippet);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
     } catch {
       // Clipboard may not be available in all dev contexts; the textarea
       // in the panel is selectable as a fallback.
@@ -297,6 +300,7 @@ export function AudioTester() {
                     {isEditing && editing && (
                       <EditPanel
                         editing={editing}
+                        copied={copied}
                         onChange={(text) => setEditing({ ...editing, text })}
                         onChangeModel={(modelId) => setEditing({ ...editing, modelId })}
                         onRevert={() => setEditing({ ...editing, text: editing.originalText })}
@@ -321,6 +325,7 @@ export function AudioTester() {
 
 function EditPanel({
   editing,
+  copied,
   onChange,
   onChangeModel,
   onRevert,
@@ -328,6 +333,7 @@ function EditPanel({
   onCopyPatch,
 }: {
   editing: Editing;
+  copied: boolean;
   onChange: (text: string) => void;
   onChangeModel: (modelId: string | undefined) => void;
   onRevert: () => void;
@@ -403,12 +409,12 @@ function EditPanel({
           onClick={onCopyPatch}
           disabled={editing.status !== "ok"}
           style={{
-            ...btnStyle(editing.status === "ok" ? "#7ec8ff" : "#444"),
+            ...btnStyle(copied ? "#9bdc4a" : editing.status === "ok" ? "#7ec8ff" : "#444"),
             padding: "4px 12px",
             fontSize: 13,
           }}
         >
-          Copy patch
+          {copied ? "✓ Copied!" : "Copy patch"}
         </button>
       </div>
       {editing.error && (
@@ -424,6 +430,45 @@ function EditPanel({
       )}
     </div>
   );
+}
+
+// Build a multi-line hand-off snippet that points Claude at the right spot
+// in src/audio/types.ts based on the clip id. The id naming convention
+// determines which map / array / push() line is the source of truth.
+function buildPatch(id: string, newText: string, voiceSlug: string | null, modelId: string | undefined): string {
+  let location: string;
+  const nameMatch = id.match(/^letter-([A-Z])-name$/);
+  const soundMatch = id.match(/^letter-([A-Z])-sound$/);
+  const introMatch = id.match(/^prompt-spell-([A-Z]+)$/);
+  const revealMatch = id.match(/^reveal-spell-([A-Z]+)$/);
+  if (nameMatch) {
+    const L = nameMatch[1];
+    location = `Source: src/audio/types.ts.\nLetter NAME for "${L}" — adjust LETTER_NAME_PHONEME["${L}"] (IPA, used by phoneme-aware model) or LETTER_NAME_TEXT["${L}"] (plain text override). The text below shows what was sent to ElevenLabs; figure out which map to update so it round-trips.`;
+  } else if (soundMatch) {
+    const L = soundMatch[1];
+    location = `Source: src/audio/types.ts.\nLetter SOUND for "${L}" — adjust LETTER_SOUND_PHONEME["${L}"] (IPA value used to generate the sound clip).`;
+  } else if (introMatch) {
+    const word = introMatch[1];
+    location = `Source: src/audio/types.ts.\nUpdate the SPELL_WORDS entry for "${word}" — change its 'intro' field to match the new text below.`;
+  } else if (revealMatch) {
+    const word = revealMatch[1];
+    location = `Source: src/audio/types.ts.\nUpdate the SPELL_WORDS entry for "${word}" — change its 'reveal' field to match the new text below.`;
+  } else {
+    location = `Source: src/audio/types.ts (function buildEntries()).\nFind the literal entries.push({ id: "${id}", text: ... }) line and update the 'text' field to the new text below.`;
+  }
+  return `Please update an audio clip's source-of-truth text so it matches the regenerated MP3.
+
+Clip id: ${id}
+
+${location}
+
+New text sent to ElevenLabs:
+${JSON.stringify(newText)}
+Model: ${modelId ?? "(voice default)"}
+
+The MP3 has already been regenerated for the ${voiceSlug ?? "active"} voice
+at public/audio/${voiceSlug ?? "<voice>"}/${id}.mp3 — no need to re-run the
+generate script just for this clip.`;
 }
 
 function btnStyle(bg: string): React.CSSProperties {

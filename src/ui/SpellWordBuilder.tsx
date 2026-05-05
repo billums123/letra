@@ -24,24 +24,29 @@ function spellLetters(word: string): string {
 
 function buildSuggestions(word: string): Suggestion[] {
   const lower = word.toLowerCase();
+  const upper = word.toUpperCase();
   const letters = spellLetters(word);
+  // The "Let's find the <word>" templates only make sense for nouns.
+  // Adjectives (BIG, RED) and verbs (RUN, HOP) need a part-of-speech
+  // -agnostic shape, so the third template uses "Let's spell <word>"
+  // which works for literally anything.
   return [
     {
-      label: "Lost / missing",
-      intro: `Oh no! A ${lower} went missing! Help me find the letters that spell ${letters} to find the ${lower}!`,
+      label: "Lost / missing (nouns)",
+      intro: `Oh no! The ${lower} is missing! Let's find the ${lower}. ${letters}!`,
       reveal: `We found the ${lower}!`,
       source: "template",
     },
     {
-      label: "Hiding",
-      intro: `Our friend the ${lower} is hiding. Find ${letters} to call them out!`,
+      label: "Hiding (nouns)",
+      intro: `The ${lower} is hiding! Let's find the ${lower}. ${letters}!`,
       reveal: `There is the ${lower}!`,
       source: "template",
     },
     {
-      label: "Bring it back",
-      intro: `We need the ${lower}! Find the letters ${letters} to bring it back!`,
-      reveal: `Hooray, the ${lower} is here!`,
+      label: "Spell it (works for any word)",
+      intro: `Let's spell ${upper}! ${letters}!`,
+      reveal: `You spelled ${upper}!`,
       source: "template",
     },
   ];
@@ -63,6 +68,7 @@ export function SpellWordBuilder() {
   const [aiSuggestions, setAiSuggestions] = useState<Suggestion[]>([]);
   const [aiStatus, setAiStatus] = useState<"idle" | "loading" | "error">("idle");
   const [aiError, setAiError] = useState<string | null>(null);
+  const [snippetCopied, setSnippetCopied] = useState(false);
 
   const cleanWord = word.trim().toUpperCase();
   const wordValid = /^[A-Z]{2,10}$/.test(cleanWord);
@@ -176,6 +182,8 @@ Files: public/audio/<voice>/prompt-spell-${cleanWord}.mp3 + reveal-spell-${clean
   async function copySnippet() {
     try {
       await navigator.clipboard.writeText(snippet);
+      setSnippetCopied(true);
+      setTimeout(() => setSnippetCopied(false), 2000);
     } catch {
       // No clipboard in some local dev contexts — the textarea is selectable.
     }
@@ -433,8 +441,12 @@ Files: public/audio/<voice>/prompt-spell-${cleanWord}.mp3 + reveal-spell-${clean
               onFocus={(e) => e.currentTarget.select()}
             />
             <div style={{ marginTop: 8, display: "flex", gap: 8 }}>
-              <button type="button" onClick={copySnippet} style={btnStyle("#ffd56b")}>
-                Copy snippet
+              <button
+                type="button"
+                onClick={copySnippet}
+                style={btnStyle(snippetCopied ? "#9bdc4a" : "#ffd56b")}
+              >
+                {snippetCopied ? "✓ Copied!" : "Copy snippet"}
               </button>
               <button
                 type="button"

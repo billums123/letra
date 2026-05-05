@@ -80,11 +80,30 @@ function clamp() {
 }
 
 export function startInput() {
+  // Skip the global keyboard handler when the user is typing into a
+  // form field — otherwise Space and Arrow are preventDefault'd at
+  // the window level and never make it into the <input>/<textarea>
+  // (the dev tools have a few). Without this, you can't type a space
+  // in the audio tester or word builder.
+  const isEditable = (target: EventTarget | null): boolean => {
+    const el = target as HTMLElement | null;
+    if (!el) return false;
+    return (
+      el.tagName === "INPUT" ||
+      el.tagName === "TEXTAREA" ||
+      el.tagName === "SELECT" ||
+      el.isContentEditable
+    );
+  };
   const onKeyDown = (e: KeyboardEvent) => {
+    if (isEditable(e.target)) return;
     keys.add(e.code);
     if (e.code === "Space" || e.code.startsWith("Arrow")) e.preventDefault();
   };
-  const onKeyUp = (e: KeyboardEvent) => keys.delete(e.code);
+  const onKeyUp = (e: KeyboardEvent) => {
+    if (isEditable(e.target)) return;
+    keys.delete(e.code);
+  };
   const onBlur = () => keys.clear();
   window.addEventListener("keydown", onKeyDown);
   window.addEventListener("keyup", onKeyUp);

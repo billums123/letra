@@ -138,21 +138,44 @@ function devAudioPlugin(): PluginOption {
           }
           const letters = word.split("").join(", ");
           const lower = word.toLowerCase();
-          const userPrompt = `Generate 3 distinct, warm, friendly intro+reveal pairs for the word "${word}". Each pair should:
-- Use a different scenario angle (lost, hidden, broken, weather, food, animal-friend, etc.)
-- Spell the letters comma-separated: "${letters}"
-- Use the lowercase word: "${lower}"
-- Sound natural read aloud by an adult to a small child
-- Keep intros SHORT — aim for ~14 words, hard cap at 18. One brisk sentence.
-- Reveals must be a punchy triumphant fragment, ≤6 words.
+          const userPrompt = `Generate 3 distinct, warm, friendly intro+reveal pairs for the word "${word}". Each intro MUST follow this 3-part shape:
 
-Length is critical — pre-K kids tune out long sentences. Cut filler ("help me",
-"can you", "let's go and") aggressively.
+  1. Brief scenario flavour (≤6 words). Different angle each time — lost,
+     hidden, weather, food, animal sound, friend-call, etc. Use a
+     different angle for each of the 3 suggestions.
+  2. A directive that names "${lower}" RIGHT BEFORE the letters. The
+     word "${lower}" must appear immediately before the letters with NO
+     other words between them.
+  3. The comma-spaced letters: "${letters}".
 
-Examples of the right length (don't copy these):
-- BUS intro: "We need the bus! Find B, U, S to bring it!" (10 words)
-- PIG intro: "The pig is hiding! Find P, I, G to call them out!" (12 words)
-- DOG reveal: "There is the dog!" (4 words)
+CRITICAL — handle the part of speech correctly:
+
+If "${word}" is a noun (CAT, DOG, BUS, HAT), the directive should be
+"Let's find the ${lower}" or "Help find the ${lower}".
+
+If "${word}" is an adjective (BIG, RED, HOT, WET), a verb (RUN, HOP,
+SIT, NAP), or anything else where "the ${lower}" is ungrammatical, you
+MUST switch to a part-of-speech-agnostic directive instead:
+"Let's spell ${lower}", "Today's word is ${lower}", "Can you spell
+${lower}?", or "Listen: ${lower}". DO NOT write "the big" or "find the
+red" — that's nonsense to a pre-K kid.
+
+The single invariant across both cases: the literal word "${lower}" must
+land directly before the letters so the kid hears the word and its
+spelling back-to-back.
+
+Length: ~12 words per intro, hard cap 18. Cut filler aggressively.
+
+Reveals: ≤6 words, punchy and triumphant. For nouns: "We found the
+${lower}!"-style. For non-nouns: "You spelled ${word}!"-style.
+
+Examples of the right shape (don't copy verbatim):
+- CAT intro (noun): "Oh no! The cat ran off! Let's find the cat. C, A, T!"
+- BUS intro (noun): "We need a ride! Let's find the bus. B, U, S!"
+- BIG intro (adjective): "Look at that giant truck! Let's spell BIG. B, I, G!"
+- RUN intro (verb): "The dog wants to play! Let's spell RUN. R, U, N!"
+- DOG reveal (noun): "There is the dog!"
+- BIG reveal (adjective): "You spelled BIG!"
 
 Return JSON in this exact schema:
 {"suggestions":[{"label":"2–4 word scenario","intro":"...","reveal":"..."},{...},{...}]}`;
