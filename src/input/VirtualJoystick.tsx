@@ -1,27 +1,42 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import nipplejs, { type JoystickManager } from "nipplejs";
 import { setJoystick } from "./useInput";
 
-// Virtual joystick zone. Only mounts when the device exposes touch — keyboard
-// and gamepad users never see it. Sized big and offset from the corner so a
-// little kid can park their thumb without missing.
+// Floating virtual joystick. The stick spawns wherever the kid first
+// touches the screen (nipplejs `dynamic` mode) so a 3-year-old never has
+// to hunt for a fixed control in the corner.
+//
+// Detection has two gates so it never false-fires on a desktop mouse:
+//   1. `(pointer: coarse)` matches phones/tablets immediately on mount.
+//   2. A one-shot `touchstart` upgrades hybrid devices (Surface,
+//      touchscreen Chromebooks) the first time a real finger lands.
+// Desktop mice trip neither gate, so the zone never mounts and clicks
+// pass straight through to whatever's behind it.
 
-const isTouchDevice =
-  typeof window !== "undefined" &&
-  ("ontouchstart" in window || navigator.maxTouchPoints > 0);
+function detectInitialTouch() {
+  if (typeof window === "undefined") return false;
+  return window.matchMedia?.("(pointer: coarse)").matches ?? false;
+}
 
 export function VirtualJoystick({ visible = true }: { visible?: boolean }) {
   const zoneRef = useRef<HTMLDivElement>(null);
+  const [touchAvailable, setTouchAvailable] = useState(detectInitialTouch);
 
   useEffect(() => {
-    if (!visible || !isTouchDevice) return;
+    if (touchAvailable) return;
+    const onTouch = () => setTouchAvailable(true);
+    window.addEventListener("touchstart", onTouch, { once: true, passive: true });
+    return () => window.removeEventListener("touchstart", onTouch);
+  }, [touchAvailable]);
+
+  useEffect(() => {
+    if (!visible || !touchAvailable) return;
     const zone = zoneRef.current;
     if (!zone) return;
 
     const manager: JoystickManager = nipplejs.create({
       zone,
-      mode: "static",
-      position: { left: "90px", bottom: "90px" },
+      mode: "dynamic",
       color: "#ffd56b",
       size: 140,
       restOpacity: 0.6,
@@ -42,22 +57,20 @@ export function VirtualJoystick({ visible = true }: { visible?: boolean }) {
       manager.destroy();
       setJoystick(0, 0, false);
     };
-  }, [visible]);
+  }, [visible, touchAvailable]);
 
-  if (!isTouchDevice) return null;
+  if (!touchAvailable) return null;
 
   return (
     <div
       ref={zoneRef}
       style={{
         position: "absolute",
-        left: 0,
-        bottom: 0,
-        width: 220,
-        height: 220,
+        inset: 0,
         zIndex: 5,
-        // touch-action: none keeps the browser from scrolling/zooming.
         touchAction: "none",
+        // HUD (zIndex 10) sits above and its buttons capture their own taps,
+        // so a fullscreen zone here is safe.
         pointerEvents: visible ? "auto" : "none",
       }}
     />

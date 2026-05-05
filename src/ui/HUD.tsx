@@ -6,12 +6,6 @@ import { useIsCompact } from "../util/useIsCompact";
 // Pre-K kids can't read complicated UI, so we keep buttons huge with universal
 // icons (◀ Home).
 
-// Mirrors the touch check in VirtualJoystick.tsx — used to know whether
-// to reserve room in the bottom-left for the on-screen joystick.
-const IS_TOUCH_DEVICE =
-  typeof window !== "undefined" &&
-  ("ontouchstart" in window || navigator.maxTouchPoints > 0);
-
 type HUDProps = {
   title?: string;
   prompt?: string;
@@ -105,11 +99,6 @@ export function HUD({ title, prompt, targets }: HUDProps) {
           padding: compact ? "8px 12px" : 16,
           // Keep the bottom HUD clear of the iOS home-bar.
           paddingBottom: `calc(${compact ? 8 : 16}px + env(safe-area-inset-bottom, 0px))`,
-          // On phones the virtual joystick sits in the bottom-left
-          // corner (220×220) — leave room so it doesn't hide the
-          // alphabet progress bar. On non-touch devices there's no
-          // joystick, so the bar can stay centred.
-          marginLeft: compact && IS_TOUCH_DEVICE ? 200 : 0,
         }}
       >
         {targets && targets.length > 0 && (
@@ -121,7 +110,7 @@ export function HUD({ title, prompt, targets }: HUDProps) {
               background: "rgba(255,255,255,0.9)",
               borderRadius: compact ? 14 : 18,
               boxShadow: "0 4px 0 rgba(0,0,0,0.1)",
-              maxWidth: compact && IS_TOUCH_DEVICE ? "calc(100vw - 220px)" : "calc(100vw - 24px)",
+              maxWidth: "calc(100vw - 24px)",
             }}
             aria-label={`Letters: ${targets.map((t) => `${t.letter}${t.found ? " found" : ""}`).join(", ")}`}
           >
@@ -156,7 +145,7 @@ export function HUD({ title, prompt, targets }: HUDProps) {
               borderRadius: 14,
               fontSize: compact ? 14 : 18,
               fontWeight: 700,
-              maxWidth: compact && IS_TOUCH_DEVICE ? "calc(100vw - 220px)" : compact ? "calc(100vw - 24px)" : "70%",
+              maxWidth: compact ? "calc(100vw - 24px)" : "70%",
               textAlign: "center",
             }}
           >
