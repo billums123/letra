@@ -233,9 +233,10 @@ function buildProps(ctx: BiomeContext): void {
 
   // End-of-game celebration anchors on the central island (radius 7,
   // height 5). The kid gets teleported there at finale time and all
-  // 26 letters arrange around them — a single walkable surface that
-  // comfortably holds the dance ring.
-  setCelebrationCenter({ x: 0, z: 0 });
+  // 26 letters arrange around them on a single walkable surface.
+  // ringRadius 4.6 keeps every letter well inside the 7-unit island
+  // edge with room to spare for trees and mushrooms.
+  setCelebrationCenter({ x: 0, z: 0, ringRadius: 4.6 });
 
   // ── Containment ──────────────────────────────────────────────────
   // No invisible-obstacle ring here. The engine's per-frame walkable

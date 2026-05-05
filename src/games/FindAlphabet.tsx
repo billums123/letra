@@ -43,6 +43,10 @@ type LetterEntry = {
     phaseOffset: number; // 0..1 in beats, so different letters peak at different moments
     homeX: number;
     homeZ: number;
+    // Base Y at the dance position — sampled from the biome's terrain
+    // (e.g. island height in the sky biome). The per-frame dance tick
+    // reads this so letters dance ON the island instead of at y=0.
+    homeY: number;
   };
 };
 
@@ -302,6 +306,7 @@ export function FindAlphabetGame() {
     const anchor = engine.celebrationCenter;
     const cx = anchor ? anchor.x : player.x;
     const cz = anchor ? anchor.z : player.z;
+    const ringR = anchor?.ringRadius ?? DANCE_RING_RADIUS;
     if (anchor) {
       const anchorY = engine.terrainHeight?.(anchor.x, anchor.z) ?? 0;
       engine.player.group.position.set(anchor.x, anchorY, anchor.z);
@@ -321,8 +326,8 @@ export function FindAlphabetGame() {
       const entry = letters[i];
       // Even angular spacing around the player.
       const angle = (i / letters.length) * Math.PI * 2;
-      const homeX = cx + Math.cos(angle) * DANCE_RING_RADIUS;
-      const homeZ = cz + Math.sin(angle) * DANCE_RING_RADIUS;
+      const homeX = cx + Math.cos(angle) * ringR;
+      const homeZ = cz + Math.sin(angle) * ringR;
       const homeY = engine.terrainHeight?.(homeX, homeZ) ?? 0;
       entry.character.setBaseY(homeY);
       entry.character.group.position.set(homeX, homeY, homeZ);
@@ -337,6 +342,7 @@ export function FindAlphabetGame() {
         phaseOffset: (i % 4) / 4,
         homeX,
         homeZ,
+        homeY,
       };
     }
     // Kick off a firework round one for the moment of victory.
@@ -371,7 +377,10 @@ export function FindAlphabetGame() {
       // accumulate.
       g.position.x = d.homeX;
       g.position.z = d.homeZ;
-      g.position.y = 0;
+      // Base y comes from the biome's terrain at this letter's home —
+      // for sky islands that's the central island top, not 0. Dance
+      // styles below add their own offset on top of homeY.
+      g.position.y = d.homeY;
       g.rotation.set(0, 0, 0);
       g.scale.setScalar(1);
       // Apply the chosen dance style. Each peaks at phase=0.5 (the
@@ -380,24 +389,24 @@ export function FindAlphabetGame() {
       switch (d.style) {
         case "bounce": {
           // Sharp pop up on each beat.
-          g.position.y = Math.abs(Math.sin(phase * Math.PI)) * 0.9;
+          g.position.y = d.homeY + Math.abs(Math.sin(phase * Math.PI)) * 0.9;
           break;
         }
         case "sway": {
           g.rotation.z = Math.sin(phase * Math.PI * 2) * 0.35;
-          g.position.y = 0.05 + (Math.cos(phase * Math.PI * 2) * 0.5 + 0.5) * 0.1;
+          g.position.y = d.homeY + 0.05 + (Math.cos(phase * Math.PI * 2) * 0.5 + 0.5) * 0.1;
           break;
         }
         case "spin": {
           // One full rotation every two beats.
           g.rotation.y = (elapsed * beatsPerSec * Math.PI) + d.phaseOffset * Math.PI * 2;
-          g.position.y = 0.15 + Math.sin(phase * Math.PI) * 0.18;
+          g.position.y = d.homeY + 0.15 + Math.sin(phase * Math.PI) * 0.18;
           break;
         }
         case "pulse": {
           const s = 1 + Math.sin(phase * Math.PI) * 0.18;
           g.scale.setScalar(s);
-          g.position.y = 0.05;
+          g.position.y = d.homeY + 0.05;
           break;
         }
         case "hop": {
@@ -409,7 +418,7 @@ export function FindAlphabetGame() {
           const len = Math.hypot(dirX, dirZ) || 1;
           g.position.x = d.homeX + (dirX / len) * inOut;
           g.position.z = d.homeZ + (dirZ / len) * inOut;
-          g.position.y = Math.abs(Math.sin(phase * Math.PI * 2)) * 0.55;
+          g.position.y = d.homeY + Math.abs(Math.sin(phase * Math.PI * 2)) * 0.55;
           break;
         }
       }

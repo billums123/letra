@@ -69,7 +69,7 @@ export class Engine {
   // dancing letters around it. Sky islands uses this to relocate the
   // dance party to the central island so all 26 letters fit on a
   // single walkable surface.
-  celebrationCenter: { x: number; z: number } | null = null;
+  celebrationCenter: { x: number; z: number; ringRadius?: number } | null = null;
 
   // Directional lights with castShadow that we move with the player so
   // the orthographic shadow frustum (typically ~50 units across) always

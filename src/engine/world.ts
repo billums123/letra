@@ -96,7 +96,7 @@ export type WorldBuildResult = WorldHandles & {
   // Optional override for the end-of-game dance celebration anchor.
   // When set, games should teleport the player there and arrange
   // letters around it instead of around the player's last position.
-  celebrationCenter: { x: number; z: number } | null;
+  celebrationCenter: { x: number; z: number; ringRadius?: number } | null;
 };
 
 export function buildWorld(
@@ -109,7 +109,7 @@ export function buildWorld(
   const tick: Array<(dt: number, t: number) => void> = [];
   let terrainHeight: ((x: number, z: number) => number) | null = null;
   let isWalkable: ((x: number, z: number) => boolean) | null = null;
-  let celebrationCenter: { x: number; z: number } | null = null;
+  let celebrationCenter: { x: number; z: number; ringRadius?: number } | null = null;
   const ctx: BiomeContext = {
     group,
     obstacles,

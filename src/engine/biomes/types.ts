@@ -41,8 +41,9 @@ export type BiomeContext = {
   // with a designated "main square" (e.g. sky islands' central island)
   // can register an explicit XZ so the player gets teleported there
   // and the ring of dancing letters fits in a known, large-enough
-  // walkable area.
-  setCelebrationCenter: (center: { x: number; z: number }) => void;
+  // walkable area. ringRadius optionally tightens the letter ring for
+  // small dance floors.
+  setCelebrationCenter: (center: { x: number; z: number; ringRadius?: number }) => void;
 };
 
 export type Biome = {
