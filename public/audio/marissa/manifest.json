@@ -1,7 +1,7 @@
 {
   "voiceId": "A2JkxH7o94rRxvRjHHLO",
   "modelId": "eleven_multilingual_v2",
-  "generatedAt": "2026-04-29T16:28:51.412Z",
+  "generatedAt": "2026-05-05T22:41:39.335Z",
   "letters": {
     "A": {
       "name": "letter-A-name",
@@ -119,6 +119,12 @@
     "spell-BUS-reveal": "reveal-spell-BUS",
     "spell-PIG": "prompt-spell-PIG",
     "spell-PIG-reveal": "reveal-spell-PIG",
+    "spell-HAT": "prompt-spell-HAT",
+    "spell-HAT-reveal": "reveal-spell-HAT",
+    "spell-BIG": "prompt-spell-BIG",
+    "spell-BIG-reveal": "reveal-spell-BIG",
+    "spell-TREE": "prompt-spell-TREE",
+    "spell-TREE-reveal": "reveal-spell-TREE",
     "find-alphabet": "prompt-find-alphabet",
     "sound-match": "prompt-sound-match",
     "sound-match-replay": "prompt-sound-match-replay"

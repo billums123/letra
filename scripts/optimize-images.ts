@@ -24,6 +24,12 @@ const BACKUP = path.join(PUBLIC, "_originals");
 type Spec = {
   rel: string;          // path relative to public/
   maxLong: number;      // max long-edge in CSS pixels × 2 for retina
+  // Extra transparent padding to add BEFORE the resize step, expressed
+  // as a fraction of the smaller side. gpt-image-1 reliably clips the
+  // case-picker characters' arms/legs/edges right against the canvas;
+  // padding here gives the rendered tile guaranteed breathing room
+  // and re-centres the group regardless of the model's framing.
+  padFraction?: { x: number; y: number };
 };
 
 const SPECS: Spec[] = [
@@ -33,10 +39,15 @@ const SPECS: Spec[] = [
   { rel: "letra-title.png", maxLong: 1536 },
   // Square favicon — small target footprint.
   { rel: "letra-icon.png", maxLong: 256 },
-  // Wide case-picker tiles, displayed up to 150 CSS px tall.
-  { rel: "case-uppercase.png", maxLong: 720 },
-  { rel: "case-lowercase.png", maxLong: 720 },
-  { rel: "case-mixed.png", maxLong: 720 },
+  // Wide case-picker tiles, displayed up to 150 CSS px tall. The
+  // gpt-image-1 source consistently lets characters touch (or clip
+  // through) the canvas edges no matter how the prompt yells about
+  // margins, so we extend the canvas with transparent padding before
+  // resize. 18% on the sides recovers any clipped arms/legs and
+  // visually centres the group inside the tile.
+  { rel: "case-uppercase.png", maxLong: 720, padFraction: { x: 0.18, y: 0.10 } },
+  { rel: "case-lowercase.png", maxLong: 720, padFraction: { x: 0.18, y: 0.10 } },
+  { rel: "case-mixed.png", maxLong: 720, padFraction: { x: 0.18, y: 0.10 } },
   // Game-card icons, displayed up to 180 CSS px square.
   { rel: "icons/spell-word.png", maxLong: 360 },
   { rel: "icons/find-alphabet.png", maxLong: 360 },
@@ -71,11 +82,29 @@ async function optimize(spec: Spec): Promise<{ before: number; after: number }> 
   const abs = path.join(PUBLIC, spec.rel);
   const before = (await fs.stat(abs)).size;
   await backup(spec.rel);
+  let pipe = sharp(path.join(BACKUP, spec.rel));
+  if (spec.padFraction) {
+    // Extend the source canvas with transparent pixels before resize
+    // so any character that hugs the edge in the AI render still has
+    // visual breathing room in the final tile.
+    const meta = await pipe.metadata();
+    const w = meta.width ?? 0;
+    const h = meta.height ?? 0;
+    const padX = Math.round(w * spec.padFraction.x);
+    const padY = Math.round(h * spec.padFraction.y);
+    pipe = sharp(path.join(BACKUP, spec.rel)).extend({
+      top: padY,
+      bottom: padY,
+      left: padX,
+      right: padX,
+      background: { r: 0, g: 0, b: 0, alpha: 0 },
+    });
+  }
   // Resize keeping aspect ratio; sharp's "inside" fit only shrinks if
   // larger than maxLong. Re-encode PNG with max compression effort and
   // palette quantization — cuts ~70% on these chunky-character pieces
   // without visible quality loss.
-  const buf = await sharp(path.join(BACKUP, spec.rel))
+  const buf = await pipe
     .resize({
       width: spec.maxLong,
       height: spec.maxLong,

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { audio } from "../audio/Player";
 import { buildEntries, type AudioEntry } from "../audio/types";
 import { useGameStore } from "../state/store";
@@ -379,6 +379,7 @@ function EditPanel({
             style={{ ...selectStyle, padding: "4px 8px", fontSize: 13 }}
           >
             <option value="default">voice default (multilingual_v2)</option>
+            <option value="eleven_v3">eleven_v3 (most expressive)</option>
             <option value="eleven_flash_v2">eleven_flash_v2 (phoneme-aware)</option>
             <option value="eleven_multilingual_v2">eleven_multilingual_v2</option>
           </select>
@@ -423,13 +424,23 @@ function EditPanel({
       {editing.freshUrl && editing.status === "ok" && (
         <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
           <span style={{ opacity: 0.7, fontSize: 12 }}>fresh:</span>
-          {/* key forces remount on each regenerate so the new src is loaded
-              even if the URL only differs by query string. */}
-          <audio key={editing.freshUrl} controls src={editing.freshUrl} style={{ height: 32 }} />
+          <FreshAudio url={editing.freshUrl} />
         </div>
       )}
     </div>
   );
+}
+
+// Wraps an <audio> element and explicitly calls .load() when the URL
+// changes. React's src prop sets the DOM attribute but doesn't always
+// trigger a media reload — Chrome especially leaves the player at
+// 0:00 / 0:00 unless you call .load() yourself.
+function FreshAudio({ url }: { url: string }) {
+  const ref = useRef<HTMLAudioElement>(null);
+  useEffect(() => {
+    ref.current?.load();
+  }, [url]);
+  return <audio ref={ref} controls preload="auto" src={url} style={{ height: 32 }} />;
 }
 
 // Build a multi-line hand-off snippet that points Claude at the right spot

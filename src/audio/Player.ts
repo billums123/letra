@@ -268,6 +268,14 @@ class AudioPlayer {
     if (this.mode === "muted") return;
     if (opts.interrupt !== false) this.stop();
     if (this.mode === "elevenlabs") {
+      // Yield once to let the AbortError from the just-paused previous
+      // play() settle in the microtask queue. Without this, back-to-back
+      // calls (e.g. clicking "Next word" while the celebrate clip is
+      // still finishing) race: the new a.play() promise itself rejects
+      // with AbortError, our .catch(finish) swallows it, and the new
+      // clip never starts. Symptom: occasionally no audio for the new
+      // word.
+      await Promise.resolve();
       return new Promise((resolve) => {
         const a = this.getAudioEl();
         // Swap the src on the cached element rather than creating a

@@ -76,10 +76,19 @@ function devAudioPlugin(): PluginOption {
           return;
         }
         try {
-          const body = (await readJson(req)) as { word?: string; intro?: string; reveal?: string };
+          const body = (await readJson(req)) as {
+            word?: string;
+            intro?: string;
+            reveal?: string;
+            modelId?: string;
+          };
           const word = String(body?.word ?? "").toUpperCase();
           const intro = body?.intro ? String(body.intro).trim() : "";
           const reveal = body?.reveal ? String(body.reveal).trim() : "";
+          // Optional per-request model override — falls back to the
+          // voice's registered default (eleven_multilingual_v2) when
+          // omitted, so existing clients keep working unchanged.
+          const overrideModelId = body?.modelId ? String(body.modelId).trim() : "";
           if (!/^[A-Z]{2,10}$/.test(word)) {
             sendJson(res, 400, { error: "Invalid word. Need uppercase A-Z, 2–10 chars." });
             return;
@@ -99,15 +108,16 @@ function devAudioPlugin(): PluginOption {
           for (const voice of registry.voices) {
             const voiceDir = path.join(PUBLIC_AUDIO, voice.slug);
             await fs.mkdir(voiceDir, { recursive: true });
+            const modelId = overrideModelId || voice.modelId;
             const result: { voice: string; intro?: string; reveal?: string } = { voice: voice.slug };
             if (intro) {
               const introPath = path.join(voiceDir, `prompt-spell-${word}.mp3`);
-              await generateClipMp3({ text: intro, voiceId: voice.voiceId, modelId: voice.modelId, apiKey, outPath: introPath });
+              await generateClipMp3({ text: intro, voiceId: voice.voiceId, modelId, apiKey, outPath: introPath });
               result.intro = `/audio/${voice.slug}/prompt-spell-${word}.mp3?ts=${Date.now()}`;
             }
             if (reveal) {
               const revealPath = path.join(voiceDir, `reveal-spell-${word}.mp3`);
-              await generateClipMp3({ text: reveal, voiceId: voice.voiceId, modelId: voice.modelId, apiKey, outPath: revealPath });
+              await generateClipMp3({ text: reveal, voiceId: voice.voiceId, modelId, apiKey, outPath: revealPath });
               result.reveal = `/audio/${voice.slug}/reveal-spell-${word}.mp3?ts=${Date.now()}`;
             }
             generated.push(result);
