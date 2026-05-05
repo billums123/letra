@@ -291,6 +291,43 @@ function buildCar(): PlayerHandles {
     wheels.push(wheel);
   }
 
+  // Tail pipe — a short chrome stub protruding from the rear bumper.
+  // Slightly off-centre (driver's side) so the back face still reads
+  // as a rounded box rather than being bisected by a centred pipe.
+  // The body is 1.9 deep, so the rear face is at z = -0.95; the pipe
+  // pokes out a touch past that.
+  const pipeMat = new THREE.MeshStandardMaterial({
+    color: 0x4a4a4a,
+    roughness: 0.4,
+    metalness: 0.7,
+  });
+  const tailPipe = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.07, 0.07, 0.2, 12),
+    pipeMat,
+  );
+  tailPipe.rotation.x = Math.PI / 2;
+  tailPipe.position.set(0.38, 0.32, -1.05);
+  tailPipe.castShadow = true;
+  group.add(tailPipe);
+
+  // Exhaust puff — a soft cloud trailing the pipe. Animated per-frame
+  // in update(): slow billow while parked, larger swells while
+  // driving. MeshBasicMaterial (no lighting) so the puff stays
+  // legibly white-grey against any biome background. depthWrite is
+  // off so the transparent edges don't punch a hole in the grass.
+  const puffMat = new THREE.MeshBasicMaterial({
+    color: 0xdcdcdc,
+    transparent: true,
+    opacity: 0.32,
+    depthWrite: false,
+  });
+  const exhaustPuff = new THREE.Mesh(
+    new THREE.SphereGeometry(0.14, 12, 10),
+    puffMat,
+  );
+  exhaustPuff.position.set(0.38, 0.36, -1.25);
+  group.add(exhaustPuff);
+
   let facing = 0;
   let bob = 0;
   let wheelSpin = 0;
@@ -337,6 +374,15 @@ function buildCar(): PlayerHandles {
       for (const w of wheels) w.rotation.x = wheelSpin;
       // Engine pitch + volume tracks input magnitude.
       motor.setActivity(mag);
+      // Subtle exhaust puff — slow billow while parked, larger swells
+      // while driving. A small random flicker on top of the envelope
+      // keeps the cloud feeling turbulent rather than mechanical.
+      const puffPulse = 1 + Math.sin(bob * 0.6) * 0.18;
+      const puffEnergy = 0.55 + mag * 1.1;
+      const puffFlick = 0.9 + Math.random() * 0.2;
+      exhaustPuff.scale.setScalar(puffPulse * puffEnergy * puffFlick * 0.85);
+      (exhaustPuff.material as THREE.MeshBasicMaterial).opacity =
+        0.16 + mag * 0.35 + Math.sin(bob * 0.8) * 0.04;
       // Cartoony putt-putts sprinkle through the drive at random
       // intervals so the engine reads as alive. No takeoff vroom —
       // it kept retriggering on direction changes mid-turn.
