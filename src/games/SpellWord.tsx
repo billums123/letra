@@ -5,7 +5,7 @@ import { HUD } from "../ui/HUD";
 import { audio } from "../audio/Player";
 import { playChime, playWoo } from "../audio/sfx";
 import { Engine } from "../engine/Engine";
-import { buildLetterCharacter, distanceXZ, loadFont } from "../engine/letters";
+import { buildLetterCharacter, distanceXZ, loadFont, makeSharedLetterAssets } from "../engine/letters";
 import { makeBurst } from "../engine/particles";
 import { pickClearSpawn } from "../engine/world";
 import { SPELL_WORDS } from "../audio/types";
@@ -140,10 +140,13 @@ function SpellWordRound({
       acc[L] = (acc[L] ?? 0) + 1;
       return acc;
     }, {});
+    // Shared bag of fixed-look letter materials/geometries reused
+    // across every letter in the word.
+    const sharedLetterAssets = makeSharedLetterAssets();
     const letters: LetterEntry[] = word.word.split("").map((L, i) => {
       const spawn = pickClearSpawn(engine.obstacles, taken, { minRadius: SPAWN_INNER, maxRadius: SPAWN_OUTER }, 1.0, rng, engine.isWalkable);
       const baseY = engine.terrainHeight?.(spawn.x, spawn.z) ?? 0;
-      const character = buildLetterCharacter(font, { letter: L, lowercase, baseY });
+      const character = buildLetterCharacter(font, { letter: L, lowercase, baseY, shared: sharedLetterAssets });
       character.group.position.set(spawn.x, baseY, spawn.z);
       const keepoutRadius = (letterCounts[L] ?? 1) > 1 ? 2.5 : 1.0;
       taken.push({ x: spawn.x, z: spawn.z, radius: keepoutRadius });

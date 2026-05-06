@@ -5,7 +5,7 @@ import { HUD } from "../ui/HUD";
 import { audio } from "../audio/Player";
 import { playChime, playWoo } from "../audio/sfx";
 import { Engine } from "../engine/Engine";
-import { buildLetterCharacter, distanceXZ, loadFont } from "../engine/letters";
+import { buildLetterCharacter, distanceXZ, loadFont, makeSharedLetterAssets } from "../engine/letters";
 import { makeBurst } from "../engine/particles";
 import { pickClearSpawn } from "../engine/world";
 import { ALPHABET } from "../audio/types";
@@ -165,6 +165,13 @@ export function SoundMatchGame() {
     // in (320ms tween + a beat of breathing room). On the first round
     // there is nothing to shrink, so we kick off immediately.
     const enterDelay = outgoing.length > 0 ? 0.36 : 0;
+    // Fresh shared bag each round. The previous round's bag would be
+    // disposed by the outgoing letters' per-letter cleanup once the
+    // exit tween completes — sharing a single bag across rounds would
+    // mean the new letters end up referencing disposed materials.
+    // Each round only allocates 7 materials/geometries vs. ~7 × N
+    // when each letter built its own.
+    const sharedLetterAssets = makeSharedLetterAssets();
     candidates.forEach((L, i) => {
       const spawn = pickClearSpawn(engine.obstacles, taken, { minRadius: minR, maxRadius: maxR }, 1.0, rng, engine.isWalkable);
       const baseY = engine.terrainHeight?.(spawn.x, spawn.z) ?? 0;
@@ -173,7 +180,7 @@ export function SoundMatchGame() {
       const lowercase =
         letterCase === "lowercase" ||
         (letterCase === "mixed" && Math.random() < 0.5);
-      const character = buildLetterCharacter(font, { letter: L, lowercase, baseY });
+      const character = buildLetterCharacter(font, { letter: L, lowercase, baseY, shared: sharedLetterAssets });
       character.group.position.set(spawn.x, baseY, spawn.z);
       taken.push({ x: spawn.x, z: spawn.z, radius: 1.0 });
       character.faceTowards(engine.camera.position.x, engine.camera.position.z);

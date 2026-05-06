@@ -23,6 +23,72 @@ export function freshSeed(): number {
 
 export const WORLD_RADIUS = 50;
 
+// Shared materials + geometries for procedural meadow props. Hoisting
+// the fixed-color materials (trunk brown, mushroom-stem cream, flower
+// stem green, butterfly body) and reusable geometries (cone leaf
+// shapes, stem cylinders, petal sphere) collapses hundreds of
+// per-prop allocations into a single pool. Per-instance varied colors
+// (leaf hue, mushroom cap hue, flower petal hue, butterfly wing hue)
+// stay per-instance — sharing those would kill the visual variety.
+//
+// Lifetime: the bag is created per buildMeadow / buildSkyIslands call
+// (i.e. per engine mount). On engine.dispose(), the scene traversal
+// disposes every material and geometry once via Three.js' idempotent
+// dispose(). Multiple Mesh objects pointing at the same shared
+// material just call dispose() multiple times — Three.js handles the
+// no-op cleanly. Next engine mount creates a fresh bag.
+export type MeadowSharedAssets = {
+  trunkMat: THREE.MeshStandardMaterial;
+  trunkGeo: THREE.CylinderGeometry;
+  // Three concentric cone sizes: index 0 is the base cone, 2 is the tip.
+  leafGeos: [THREE.ConeGeometry, THREE.ConeGeometry, THREE.ConeGeometry];
+  mushroomStemMat: THREE.MeshStandardMaterial;
+  mushroomStemGeo: THREE.CylinderGeometry;
+  mushroomSpotMat: THREE.MeshStandardMaterial;
+  mushroomSpotGeo: THREE.SphereGeometry;
+  mushroomCapGeo: THREE.SphereGeometry;
+  flowerStemMat: THREE.MeshStandardMaterial;
+  flowerStemGeo: THREE.CylinderGeometry;
+  flowerCentreMat: THREE.MeshStandardMaterial;
+  flowerCentreGeo: THREE.SphereGeometry;
+  flowerPetalGeo: THREE.SphereGeometry;
+  butterflyBodyMat: THREE.MeshStandardMaterial;
+  butterflyBodyGeo: THREE.CylinderGeometry;
+  butterflyWingGeo: THREE.SphereGeometry;
+};
+
+export function makeSharedMeadowAssets(): MeadowSharedAssets {
+  const trunkGeo = new THREE.CylinderGeometry(0.22, 0.32, 1.4, 8);
+  const mushroomStemGeo = new THREE.CylinderGeometry(0.18, 0.22, 0.6, 10);
+  // Open hemisphere — same shape every mushroom uses; per-instance
+  // color is on the material, not geometry.
+  const mushroomCapGeo = new THREE.SphereGeometry(0.5, 14, 10, 0, Math.PI * 2, 0, Math.PI / 2);
+  const butterflyWingGeo = new THREE.SphereGeometry(0.22, 10, 8);
+  butterflyWingGeo.scale(1, 0.05, 0.85);
+  return {
+    trunkMat: new THREE.MeshStandardMaterial({ color: 0x7a4a22, roughness: 1 }),
+    trunkGeo,
+    leafGeos: [
+      new THREE.ConeGeometry(1.2, 1.6, 8),
+      new THREE.ConeGeometry(0.9, 1.2, 8),
+      new THREE.ConeGeometry(0.6, 0.8, 8),
+    ],
+    mushroomStemMat: new THREE.MeshStandardMaterial({ color: 0xf6f1d6, roughness: 0.8 }),
+    mushroomStemGeo,
+    mushroomSpotMat: new THREE.MeshStandardMaterial({ color: 0xf6f1d6 }),
+    mushroomSpotGeo: new THREE.SphereGeometry(0.07, 8, 8),
+    mushroomCapGeo,
+    flowerStemMat: new THREE.MeshStandardMaterial({ color: 0x4f9b3a, roughness: 1 }),
+    flowerStemGeo: new THREE.CylinderGeometry(0.04, 0.05, 0.4, 6),
+    flowerCentreMat: new THREE.MeshStandardMaterial({ color: 0xffe066, roughness: 0.7 }),
+    flowerCentreGeo: new THREE.SphereGeometry(0.07, 10, 8),
+    flowerPetalGeo: new THREE.SphereGeometry(0.1, 8, 8),
+    butterflyBodyMat: new THREE.MeshStandardMaterial({ color: 0x3a2a14, roughness: 0.8 }),
+    butterflyBodyGeo: new THREE.CylinderGeometry(0.04, 0.04, 0.18, 6),
+    butterflyWingGeo,
+  };
+}
+
 // An obstacle the player and letters should avoid. We model every world
 // prop as a vertical cylinder (good enough for the round-ish shapes we
 // have: hills, trees, mushrooms). Only objects within the play zone end
@@ -137,6 +203,11 @@ export function buildWorld(
 // it uses already live in this module.
 export function buildMeadow(ctx: BiomeContext): void {
   const { group, obstacles, tick, worldRadius } = ctx;
+  // One shared pool of fixed-color materials + reusable geometries
+  // for the meadow's 100+ procedural props. Per-instance varied
+  // colors (leaf hue, mushroom cap, flower petals, butterfly wings)
+  // keep their own per-prop materials inside the factories.
+  const shared = makeSharedMeadowAssets();
 
   // Ground — large green disc
   const ground = new THREE.Mesh(
@@ -210,7 +281,7 @@ export function buildMeadow(ctx: BiomeContext): void {
     const spot = findOpenSpot(treeRand, worldRadius - 4, radius, obstacles, { minRadius: 8 });
     if (!spot) continue;
     const hue = 100 + treeRand() * 40;
-    const tree = makeTree(hue, scale);
+    const tree = makeTree(hue, scale, shared);
     tree.group.position.set(spot.x, 0, spot.z);
     tree.group.rotation.y = treeRand() * Math.PI * 2;
     group.add(tree.group);
@@ -225,7 +296,7 @@ export function buildMeadow(ctx: BiomeContext): void {
     const spot = findOpenSpot(mushRand, worldRadius - 4, radius, obstacles, { minRadius: 6 });
     if (!spot) continue;
     const hue = mushRand() * 360;
-    const m = makeMushroom(hue);
+    const m = makeMushroom(hue, shared);
     m.group.position.set(spot.x, 0, spot.z);
     m.group.rotation.y = mushRand() * Math.PI * 2;
     group.add(m.group);
@@ -258,7 +329,7 @@ export function buildMeadow(ctx: BiomeContext): void {
     const spot = findOpenSpot(flowerRand, worldRadius - 3, 0.3, obstacles, { minRadius: 0, pad: 0.1, maxAttempts: 12 });
     if (!spot) continue;
     const hue = flowerRand() * 360;
-    const f = makeFlower(hue);
+    const f = makeFlower(hue, shared);
     f.group.position.set(spot.x, 0, spot.z);
     f.group.rotation.y = flowerRand() * Math.PI * 2;
     group.add(f.group);
@@ -276,7 +347,7 @@ export function buildMeadow(ctx: BiomeContext): void {
     const phase = butterflyRand() * Math.PI * 2;
     const baseY = 1.0 + butterflyRand() * 1.5;
     const hue = butterflyRand() * 360;
-    const b = makeButterfly(hue);
+    const b = makeButterfly(hue, shared);
     group.add(b.group);
     tick.push((_dt, t) => {
       const ang = t * speed + phase;
@@ -427,13 +498,15 @@ export function pickClearSpawn(
 // shake-on-bump animation into the engine's actor loop. Foliage lives in
 // its own pivoting sub-group so the trunk stays planted while the leaves
 // wobble.
-export function makeTree(hue: number, scale: number) {
+export function makeTree(hue: number, scale: number, shared?: MeadowSharedAssets) {
   const g = new THREE.Group();
   g.scale.setScalar(scale);
-  const trunk = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.22, 0.32, 1.4, 8),
-    new THREE.MeshStandardMaterial({ color: 0x7a4a22, roughness: 1 })
-  );
+  // Trunk: fixed color + dimensions across every tree, so we always
+  // share when a pool is provided. Falling back to a fresh material +
+  // geometry preserves backward compat for callers that don't pool.
+  const trunkMat = shared?.trunkMat ?? new THREE.MeshStandardMaterial({ color: 0x7a4a22, roughness: 1 });
+  const trunkGeo = shared?.trunkGeo ?? new THREE.CylinderGeometry(0.22, 0.32, 1.4, 8);
+  const trunk = new THREE.Mesh(trunkGeo, trunkMat);
   trunk.position.y = 0.7;
   trunk.castShadow = true;
   trunk.receiveShadow = true;
@@ -444,10 +517,14 @@ export function makeTree(hue: number, scale: number) {
   foliage.position.y = 1.4;
   g.add(foliage);
 
+  // Leaf hue is per-tree, so the material stays per-instance. The
+  // three cone geometries are identical across every tree, though,
+  // so they come from the shared pool when available.
   const leafColor = new THREE.Color(`hsl(${hue}, 60%, 45%)`);
   const leafMat = new THREE.MeshStandardMaterial({ color: leafColor, roughness: 0.9 });
   for (let i = 0; i < 3; i++) {
-    const c = new THREE.Mesh(new THREE.ConeGeometry(1.2 - i * 0.3, 1.6 - i * 0.4, 8), leafMat);
+    const leafGeo = shared?.leafGeos[i] ?? new THREE.ConeGeometry(1.2 - i * 0.3, 1.6 - i * 0.4, 8);
+    const c = new THREE.Mesh(leafGeo, leafMat);
     // Original tree-space y was 2.0 + i*0.8; subtract the foliage pivot
     // (1.4) so the leaves end up at the same world heights.
     c.position.y = 0.6 + i * 0.8;
@@ -486,12 +563,12 @@ export function makeTree(hue: number, scale: number) {
   };
 }
 
-export function makeMushroom(hue: number) {
+export function makeMushroom(hue: number, shared?: MeadowSharedAssets) {
   const m = new THREE.Group();
-  const stem = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.18, 0.22, 0.6, 10),
-    new THREE.MeshStandardMaterial({ color: 0xf6f1d6, roughness: 0.8 })
-  );
+  // Stem: same cream color + cylinder dimensions every time → share.
+  const stemMat = shared?.mushroomStemMat ?? new THREE.MeshStandardMaterial({ color: 0xf6f1d6, roughness: 0.8 });
+  const stemGeo = shared?.mushroomStemGeo ?? new THREE.CylinderGeometry(0.18, 0.22, 0.6, 10);
+  const stem = new THREE.Mesh(stemGeo, stemMat);
   stem.position.y = 0.3;
   stem.castShadow = true;
   m.add(stem);
@@ -503,6 +580,9 @@ export function makeMushroom(hue: number) {
   capPivot.position.y = 0.6;
   m.add(capPivot);
 
+  // Cap color is per-mushroom (random hue), so the material stays
+  // per-instance. The hemisphere geometry is identical across all
+  // mushrooms — share when pool available.
   const capMat = new THREE.MeshStandardMaterial({
     color: new THREE.Color(`hsl(${hue}, 80%, 55%)`),
     roughness: 0.7,
@@ -513,18 +593,18 @@ export function makeMushroom(hue: number) {
   // DoubleSide on the shadow pass closes the shell for shadow
   // mapping while keeping the regular render unchanged.
   capMat.shadowSide = THREE.DoubleSide;
-  const cap = new THREE.Mesh(
-    new THREE.SphereGeometry(0.5, 14, 10, 0, Math.PI * 2, 0, Math.PI / 2),
-    capMat
-  );
+  const capGeo =
+    shared?.mushroomCapGeo ?? new THREE.SphereGeometry(0.5, 14, 10, 0, Math.PI * 2, 0, Math.PI / 2);
+  const cap = new THREE.Mesh(capGeo, capMat);
   cap.position.y = 0.15;
   cap.castShadow = true;
   capPivot.add(cap);
 
-  // Spots
-  const spotMat = new THREE.MeshStandardMaterial({ color: 0xf6f1d6 });
+  // Spots — same cream color + tiny sphere geometry every time → share.
+  const spotMat = shared?.mushroomSpotMat ?? new THREE.MeshStandardMaterial({ color: 0xf6f1d6 });
+  const spotGeo = shared?.mushroomSpotGeo ?? new THREE.SphereGeometry(0.07, 8, 8);
   for (let i = 0; i < 3; i++) {
-    const s = new THREE.Mesh(new THREE.SphereGeometry(0.07, 8, 8), spotMat);
+    const s = new THREE.Mesh(spotGeo, spotMat);
     s.position.set(
       Math.cos(i * 2.3) * 0.28,
       0.25,
@@ -828,31 +908,35 @@ export function makePond() {
 // Cute upright flower — stem + 5 petal-spheres + yellow centre. The
 // flower head sits in a pivot sub-group so it can wobble when a kid
 // drives over it without lifting the stem off the ground.
-export function makeFlower(hue: number) {
+export function makeFlower(hue: number, shared?: MeadowSharedAssets) {
   const g = new THREE.Group();
-  const stem = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.04, 0.05, 0.4, 6),
-    new THREE.MeshStandardMaterial({ color: 0x4f9b3a, roughness: 1 })
-  );
+  // Stem: fixed green + dimensions → share.
+  const stemMat = shared?.flowerStemMat ?? new THREE.MeshStandardMaterial({ color: 0x4f9b3a, roughness: 1 });
+  const stemGeo = shared?.flowerStemGeo ?? new THREE.CylinderGeometry(0.04, 0.05, 0.4, 6);
+  const stem = new THREE.Mesh(stemGeo, stemMat);
   stem.position.y = 0.2;
   stem.castShadow = true;
   g.add(stem);
   const headPivot = new THREE.Group();
   headPivot.position.y = 0.4;
   g.add(headPivot);
+  // Petal color is per-flower (random hue), so the material stays
+  // per-instance. The petal sphere geometry is identical across every
+  // flower — share when pool available.
   const petalColor = new THREE.Color(`hsl(${hue}, 80%, 70%)`);
   const petalMat = new THREE.MeshStandardMaterial({ color: petalColor, roughness: 0.8 });
+  const petalGeo = shared?.flowerPetalGeo ?? new THREE.SphereGeometry(0.1, 8, 8);
   for (let i = 0; i < 5; i++) {
     const a = (i / 5) * Math.PI * 2;
-    const petal = new THREE.Mesh(new THREE.SphereGeometry(0.1, 8, 8), petalMat);
+    const petal = new THREE.Mesh(petalGeo, petalMat);
     petal.position.set(Math.cos(a) * 0.13, 0.02, Math.sin(a) * 0.13);
     petal.castShadow = true;
     headPivot.add(petal);
   }
-  const centre = new THREE.Mesh(
-    new THREE.SphereGeometry(0.07, 10, 8),
-    new THREE.MeshStandardMaterial({ color: 0xffe066, roughness: 0.7 })
-  );
+  // Centre disc: fixed yellow + sphere → share.
+  const centreMat = shared?.flowerCentreMat ?? new THREE.MeshStandardMaterial({ color: 0xffe066, roughness: 0.7 });
+  const centreGeo = shared?.flowerCentreGeo ?? new THREE.SphereGeometry(0.07, 10, 8);
+  const centre = new THREE.Mesh(centreGeo, centreMat);
   centre.position.y = 0.04;
   centre.castShadow = true;
   headPivot.add(centre);
@@ -895,12 +979,14 @@ export function makeFlower(hue: number) {
 }
 
 // Butterfly — body + two flapping wings.
-export function makeButterfly(hue: number) {
+export function makeButterfly(hue: number, shared?: MeadowSharedAssets) {
   const group = new THREE.Group();
-  const body = new THREE.Mesh(
-    new THREE.CylinderGeometry(0.04, 0.04, 0.18, 6),
-    new THREE.MeshStandardMaterial({ color: 0x3a2a14, roughness: 0.8 })
-  );
+  // Body: fixed dark color + cylinder → share. Wings vary per-butterfly
+  // (random hue), so the material stays per-instance — but the squashed
+  // sphere geometry is identical and is shared when a pool is provided.
+  const bodyMat = shared?.butterflyBodyMat ?? new THREE.MeshStandardMaterial({ color: 0x3a2a14, roughness: 0.8 });
+  const bodyGeo = shared?.butterflyBodyGeo ?? new THREE.CylinderGeometry(0.04, 0.04, 0.18, 6);
+  const body = new THREE.Mesh(bodyGeo, bodyMat);
   body.rotation.x = Math.PI / 2;
   group.add(body);
   const wingMat = new THREE.MeshStandardMaterial({
@@ -908,8 +994,13 @@ export function makeButterfly(hue: number) {
     roughness: 0.7,
     side: THREE.DoubleSide,
   });
-  const wingGeo = new THREE.SphereGeometry(0.22, 10, 8);
-  wingGeo.scale(1, 0.05, 0.85);
+  let wingGeo: THREE.SphereGeometry;
+  if (shared?.butterflyWingGeo) {
+    wingGeo = shared.butterflyWingGeo;
+  } else {
+    wingGeo = new THREE.SphereGeometry(0.22, 10, 8);
+    wingGeo.scale(1, 0.05, 0.85);
+  }
   const wingL = new THREE.Group();
   const wingLMesh = new THREE.Mesh(wingGeo, wingMat);
   wingLMesh.position.x = -0.22;

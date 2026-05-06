@@ -7,7 +7,7 @@ import { music } from "../audio/music";
 import { CELEBRATION_TRACK, CELEBRATION_BPM, pickGameTrack } from "../audio/songs";
 import { playChime, playWoo } from "../audio/sfx";
 import { Engine } from "../engine/Engine";
-import { buildLetterCharacter, distanceXZ, loadFont } from "../engine/letters";
+import { buildLetterCharacter, distanceXZ, loadFont, makeSharedLetterAssets } from "../engine/letters";
 import { makeBurst, makeFirework } from "../engine/particles";
 import { pickClearSpawn } from "../engine/world";
 import { ALPHABET } from "../audio/types";
@@ -143,6 +143,9 @@ export function FindAlphabetGame() {
         return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
       };
     })();
+    // One shared bag of fixed-look letter materials/geometries reused
+    // across all 26 letter characters in this round.
+    const sharedLetterAssets = makeSharedLetterAssets();
 
     const letters: LetterEntry[] = ALPHABET.map((L, i) => {
       // displayLetters was decided at mount time so the HUD and the
@@ -155,7 +158,7 @@ export function FindAlphabetGame() {
       const maxR = Math.min(RING_OUTER, RING_INNER + t * (RING_OUTER - RING_INNER) + 6);
       const spawn = pickClearSpawn(engine.obstacles, taken, { minRadius: minR, maxRadius: maxR }, 1.0, rng, engine.isWalkable);
       const baseY = engine.terrainHeight?.(spawn.x, spawn.z) ?? 0;
-      const character = buildLetterCharacter(font, { letter: L, lowercase, baseY });
+      const character = buildLetterCharacter(font, { letter: L, lowercase, baseY, shared: sharedLetterAssets });
       character.group.position.set(spawn.x, baseY, spawn.z);
       taken.push({ x: spawn.x, z: spawn.z, radius: 1.0 });
       character.faceTowards(engine.camera.position.x, engine.camera.position.z);
