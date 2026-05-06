@@ -13,7 +13,6 @@ import { useEffect, useState } from "react";
 // styled to feel as tappable as anything in the game.
 
 const KOFI_URL = "https://ko-fi.com/playletra";
-const GITHUB_URL = "https://github.com/billums123/letra";
 const CONTACT_EMAIL = "hello@playletra.com";
 
 export function Landing() {
@@ -259,36 +258,23 @@ function Footer() {
             alignItems: "center",
           }}
         >
-          <FooterLink href={KOFI_URL} external>
-            ❤ Support Letra
+          <FooterLink href={KOFI_URL} external icon="❤️">
+            Support Letra
           </FooterLink>
-          <FooterLink href={`mailto:${CONTACT_EMAIL}?subject=Letra%20feedback`}>
-            ✉ {CONTACT_EMAIL}
-          </FooterLink>
-          <FooterLink href={GITHUB_URL} external>
-            ⌨ GitHub
+          <FooterLink
+            href={`mailto:${CONTACT_EMAIL}?subject=Letra%20feedback`}
+            icon="✉️"
+          >
+            {CONTACT_EMAIL}
           </FooterLink>
         </div>
 
         <p style={{ margin: 0, opacity: 0.75, fontSize: 14 }}>
-          Built by a dad for his kids · Powered by{" "}
-          <a
-            href="https://zed.dev"
-            target="_blank"
-            rel="noopener noreferrer"
-            style={{ color: "inherit", fontWeight: 600 }}
-          >
-            Zed
-          </a>{" "}
-          and{" "}
-          <a
-            href="https://elevenlabs.io"
-            target="_blank"
-            rel="noopener noreferrer"
-            style={{ color: "inherit", fontWeight: 600 }}
-          >
-            ElevenLabs
-          </a>
+          Suggestions, bug reports, or just a hi — always welcome.
+        </p>
+
+        <p style={{ margin: 0, opacity: 0.65, fontSize: 14 }}>
+          Built by a dad for his kids.
         </p>
       </div>
     </footer>
@@ -298,10 +284,12 @@ function Footer() {
 function FooterLink({
   href,
   external,
+  icon,
   children,
 }: {
   href: string;
   external?: boolean;
+  icon?: string;
   children: React.ReactNode;
 }) {
   return (
@@ -311,14 +299,34 @@ function FooterLink({
       style={{
         color: "#16314c",
         background: "white",
-        padding: "10px 18px",
+        padding: "12px 22px",
         borderRadius: 999,
         fontWeight: 700,
+        fontSize: 16,
         textDecoration: "none",
         boxShadow: "0 4px 0 rgba(0,0,0,0.12)",
+        display: "inline-flex",
+        alignItems: "center",
+        gap: 10,
       }}
     >
-      {children}
+      {icon && (
+        <span
+          aria-hidden
+          style={{
+            // Bigger emoji glyph than the surrounding text — gives the
+            // chip a visible "icon" rather than a thin Unicode mark.
+            // Variation selector U+FE0F on the emoji constants forces
+            // the colored emoji rendering on macOS/iOS instead of the
+            // monochrome text-style glyph.
+            fontSize: 22,
+            lineHeight: 1,
+          }}
+        >
+          {icon}
+        </span>
+      )}
+      <span>{children}</span>
     </a>
   );
 }
