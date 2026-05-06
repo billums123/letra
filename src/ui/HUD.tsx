@@ -1,6 +1,14 @@
 import { useGameStore } from "../state/store";
 import { audio } from "../audio/Player";
 import { useIsCompact } from "../util/useIsCompact";
+import { useSyncExternalStore } from "react";
+import { isDev } from "../util/isDev";
+import {
+  getForcedTOD,
+  setForcedTOD,
+  subscribeForcedTOD,
+  type TimeOfDay,
+} from "../engine/biomes/timeOfDay";
 
 // In-game heads-up display: title bar, prompt text, back button.
 // Pre-K kids can't read complicated UI, so we keep buttons huge with universal
@@ -154,12 +162,99 @@ export function HUD({ title, prompt, targets }: HUDProps) {
         )}
       </div>
 
+      {isDev() && <TODDevPicker />}
+
       <style>{`
         @keyframes letra-pulse {
           0%, 100% { transform: scale(1); }
           50% { transform: scale(1.18); }
         }
       `}</style>
+    </div>
+  );
+}
+
+// ─── Dev-only time-of-day picker ────────────────────────────────────
+// Small chip in the bottom-right that shows the current biome's mood
+// and lets the dev cycle through the biome's pool live — clicking
+// re-applies the biome's lights/sky/fog without leaving the game.
+// Only visible when isDev() is true (localhost / preview); a real
+// production build hides it from kids.
+
+const POOLS: Record<string, readonly TimeOfDay[]> = {
+  meadow: ["morning", "midday", "sunset", "dusk"],
+  moon: ["moon-night", "moon-earthlit"],
+  sky: ["sky-dawn", "sky-noon", "sky-sunset"],
+};
+
+function useForcedTOD(): TimeOfDay | null {
+  // useSyncExternalStore lets the chip's label re-render the moment a
+  // dev sets a new mood (or clears it). The Engine subscribes to the
+  // same source for its live re-apply.
+  return useSyncExternalStore(subscribeForcedTOD, getForcedTOD, () => null);
+}
+
+function TODDevPicker() {
+  const biomeId = useGameStore((s) => s.biomeId);
+  const pool = POOLS[biomeId];
+  const forced = useForcedTOD();
+  if (!pool) return null;
+  const currentInPool = forced && pool.includes(forced) ? forced : null;
+  const cycle = () => {
+    const idx = currentInPool ? pool.indexOf(currentInPool) : -1;
+    const next = pool[(idx + 1) % pool.length];
+    setForcedTOD(next);
+  };
+  const clear = () => setForcedTOD(null);
+  return (
+    <div
+      style={{
+        position: "absolute",
+        right: 10,
+        bottom: `calc(10px + env(safe-area-inset-bottom, 0px))`,
+        zIndex: 20,
+        display: "flex",
+        gap: 6,
+        pointerEvents: "auto",
+      }}
+    >
+      <button
+        type="button"
+        onClick={cycle}
+        title="Cycle to next time-of-day for this biome"
+        style={{
+          background: "rgba(0,0,0,0.65)",
+          color: "white",
+          border: "2px solid rgba(255,255,255,0.35)",
+          borderRadius: 10,
+          padding: "6px 10px",
+          fontSize: 12,
+          fontWeight: 700,
+          fontFamily: "ui-monospace, Menlo, monospace",
+          cursor: "pointer",
+        }}
+      >
+        TOD: {currentInPool ?? "random"} ↻
+      </button>
+      {currentInPool && (
+        <button
+          type="button"
+          onClick={clear}
+          title="Clear override (back to random rolls)"
+          style={{
+            background: "rgba(0,0,0,0.65)",
+            color: "white",
+            border: "2px solid rgba(255,255,255,0.35)",
+            borderRadius: 10,
+            padding: "6px 8px",
+            fontSize: 12,
+            fontWeight: 700,
+            cursor: "pointer",
+          }}
+        >
+          ✕
+        </button>
+      )}
     </div>
   );
 }

@@ -3,6 +3,8 @@ import { buildAvatar, type PlayerHandles } from "./player";
 import type { AvatarKind } from "../state/store";
 import { buildWorld, type Obstacle } from "./world";
 import { getBiome } from "./biomes";
+import type { Biome } from "./biomes/types";
+import { subscribeForcedTOD } from "./biomes/timeOfDay";
 import { readInput } from "../input/useInput";
 
 const PLAYER_RADIUS = 0.55;
@@ -53,7 +55,12 @@ export class Engine {
 
   // Cleanup hook the active biome registers via applyScene — runs in
   // dispose() so removing the engine takes the biome's lights with it.
+  // Also re-run when reapplyBiomeScene() swaps the time-of-day mood
+  // mid-session: tear down the old lights/sky/fog, then re-call
+  // applyScene to install the new mood.
   private disposeBiome: (() => void) | null = null;
+  private biome: Biome | null = null;
+  private unsubscribeTOD: (() => void) | null = null;
   // Optional ground-height sampler from the active biome. When set,
   // the per-frame loop offsets the player Y by it so e.g. the car
   // visibly dips into moon craters. Public so games can place spawn
@@ -102,7 +109,12 @@ export class Engine {
     // function the engine runs on dispose so swapping biomes between
     // mounts doesn't leak lights.
     const biome = getBiome(biomeId);
-    this.disposeBiome = biome.applyScene(this.scene);
+    this.biome = biome;
+    this.applyBiomeScene();
+    // Live-mood swaps: when a dev forces a different time-of-day via
+    // setForcedTOD(), re-apply the biome's scene so the new lighting
+    // takes effect without a page reload.
+    this.unsubscribeTOD = subscribeForcedTOD(() => this.reapplyBiomeScene());
 
     // World + player. The biome's tick callbacks may want to read the
     // player position (e.g. moon aliens that wave when bumped) — pass
@@ -125,17 +137,10 @@ export class Engine {
     this.player = buildAvatar(avatar);
     this.scene.add(this.player.group);
 
-    // Find every shadow-casting directional light the biome added and
-    // wire it up to follow the player. Targets need to be in the scene
-    // graph so their matrixWorld stays current — three.js doesn't add
-    // a light's default target automatically.
-    this.scene.traverse((obj) => {
-      if (obj instanceof THREE.DirectionalLight && obj.castShadow) {
-        if (!obj.target.parent) this.scene.add(obj.target);
-        const offset = obj.position.clone().sub(obj.target.position);
-        this.shadowSuns.push({ light: obj, offset });
-      }
-    });
+    // Wire every shadow-casting directional light the biome added up
+    // to follow the player. Re-run on biome-scene re-apply so a
+    // mood swap doesn't leave us holding a reference to a disposed sun.
+    this.collectShadowSuns();
 
     this.clock = new THREE.Clock();
 
@@ -286,11 +291,49 @@ export class Engine {
     this.events = events;
   }
 
+  // Install the active biome's lights / sky / fog. Safe to call on a
+  // fresh engine (constructor) or to swap in a new mood mid-game (the
+  // dev TOD picker calls reapplyBiomeScene which composes both halves).
+  private applyBiomeScene() {
+    if (!this.biome) return;
+    this.disposeBiome = this.biome.applyScene(this.scene);
+  }
+
+  // Re-roll and re-install the biome's scene without rebuilding world
+  // props. Used by the dev TOD picker so a kid can preview each mood
+  // without losing their place. Tears down old biome lights, re-adds
+  // fresh ones, then re-discovers shadow-casting suns so the per-frame
+  // shadow-follow loop tracks the new lights instead of disposed ones.
+  reapplyBiomeScene() {
+    if (!this.biome) return;
+    this.disposeBiome?.();
+    this.disposeBiome = null;
+    this.applyBiomeScene();
+    this.collectShadowSuns();
+  }
+
+  // Walk the scene and cache every shadow-casting directional light so
+  // the per-frame loop can keep their orthographic frustums centred on
+  // the player. Called from the constructor after the biome is applied
+  // and again whenever the biome scene is re-applied.
+  private collectShadowSuns() {
+    this.shadowSuns = [];
+    this.scene.traverse((obj) => {
+      if (obj instanceof THREE.DirectionalLight && obj.castShadow) {
+        if (!obj.target.parent) this.scene.add(obj.target);
+        const offset = obj.position.clone().sub(obj.target.position);
+        this.shadowSuns.push({ light: obj, offset });
+      }
+    });
+  }
+
   dispose() {
     this.disposed = true;
     cancelAnimationFrame(this.rafId);
     window.removeEventListener("resize", this.onResizeBound);
     this.resizeObserver.disconnect();
+    this.unsubscribeTOD?.();
+    this.unsubscribeTOD = null;
     // Avatars own continuous resources (e.g., the car's motor loop) —
     // give them a chance to tear down before we dispose meshes.
     this.player.dispose?.();
