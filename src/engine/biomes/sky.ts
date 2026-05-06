@@ -2,6 +2,7 @@ import * as THREE from "three";
 import type { Biome, BiomeContext } from "./types";
 import { freshSeed, makeFlower, makeMushroom, makeTree, mulberry32 } from "../world";
 import type { Obstacle } from "../world";
+import { rollTimeOfDay, type TimeOfDay } from "./timeOfDay";
 
 // Sky-islands biome. A handful of grassy floating islands at varying
 // heights, all connected by rainbow bridges. Designed so the kid
@@ -66,18 +67,18 @@ export const skyBiome: Biome = {
   applyScene(scene) {
     const prevBg = scene.background;
     const prevFog = scene.fog;
-    // Soft pink-into-blue gradient sky. Three.js's scene.background
-    // takes a Color; for the gradient we use a CanvasTexture painted
-    // top-to-bottom with the dawn palette. Fog shares the lower
-    // gradient colour so the horizon dissolves cleanly.
-    const skyTex = makeSkyGradient();
+    const tod = rollTimeOfDay("sky", SKY_POOL);
+    const m = SKY_MOODS[tod as keyof typeof SKY_MOODS];
+    // Three.js's scene.background takes a Color; for the gradient we
+    // use a CanvasTexture painted top-to-bottom from the chosen mood's
+    // palette. Fog shares the lower gradient colour so the horizon
+    // dissolves cleanly.
+    const skyTex = makeSkyGradient(m.skyStops);
     scene.background = skyTex;
-    scene.fog = new THREE.Fog(0xfde2c8, 80, 220);
+    scene.fog = new THREE.Fog(m.fogColor, 80, 220);
 
-    // Bright warm sun from the upper east, soft cool fill from below
-    // so the underside of every island doesn't go pure black.
-    const sun = new THREE.DirectionalLight(0xfff2d6, 1.4);
-    sun.position.set(18, 28, 12);
+    const sun = new THREE.DirectionalLight(m.sunColor, m.sunIntensity);
+    sun.position.set(m.sunPos[0], m.sunPos[1], m.sunPos[2]);
     sun.castShadow = true;
     sun.shadow.mapSize.set(1024, 1024);
     sun.shadow.camera.left = -28;
@@ -89,10 +90,10 @@ export const skyBiome: Biome = {
     sun.shadow.bias = -0.0005;
     scene.add(sun);
 
-    const fill = new THREE.HemisphereLight(0xffe3c0, 0xa8c8e0, 0.55);
+    const fill = new THREE.HemisphereLight(m.hemiSky, m.hemiGround, m.hemiIntensity);
     scene.add(fill);
 
-    const ambient = new THREE.AmbientLight(0xffffff, 0.35);
+    const ambient = new THREE.AmbientLight(0xffffff, m.ambientIntensity);
     scene.add(ambient);
 
     return () => {
@@ -107,6 +108,81 @@ export const skyBiome: Biome = {
   },
   buildProps,
 };
+
+// ─── Time-of-day moods ────────────────────────────────────────────────
+// Sky-island visits roll one of three palettes per mount. The geometry
+// (islands, rainbows, balloons) is unchanged — only the gradient,
+// fog, and lighting differ.
+
+type SkyMood = {
+  // Gradient stops painted top→bottom, length 4. Each is (offset, css color).
+  skyStops: Array<[number, string]>;
+  fogColor: number;
+  sunColor: number;
+  sunIntensity: number;
+  sunPos: [number, number, number];
+  hemiSky: number;
+  hemiGround: number;
+  hemiIntensity: number;
+  ambientIntensity: number;
+};
+
+const SKY_MOODS: Record<Extract<TimeOfDay, "sky-dawn" | "sky-noon" | "sky-sunset">, SkyMood> = {
+  // The original pink-dawn look — soft, warm, sun in the east.
+  "sky-dawn": {
+    skyStops: [
+      [0, "#9bc6f0"],
+      [0.45, "#fcd9e8"],
+      [0.85, "#fde2c8"],
+      [1, "#fde8d2"],
+    ],
+    fogColor: 0xfde2c8,
+    sunColor: 0xfff2d6,
+    sunIntensity: 1.4,
+    sunPos: [18, 28, 12],
+    hemiSky: 0xffe3c0,
+    hemiGround: 0xa8c8e0,
+    hemiIntensity: 0.55,
+    ambientIntensity: 0.35,
+  },
+  // High noon — clean blue gradient, white sun overhead, brighter fill.
+  "sky-noon": {
+    skyStops: [
+      [0, "#67aee8"],
+      [0.45, "#9fcaf0"],
+      [0.85, "#cfe6f6"],
+      [1, "#e5f1f9"],
+    ],
+    fogColor: 0xcfe6f6,
+    sunColor: 0xffffff,
+    sunIntensity: 1.55,
+    sunPos: [10, 32, 8],
+    hemiSky: 0xcfe6f6,
+    hemiGround: 0x9adf7d,
+    hemiIntensity: 0.6,
+    ambientIntensity: 0.4,
+  },
+  // Warm sunset — lavender at the zenith, orange near the horizon, low
+  // raking sun. Same readability as dawn, different palette.
+  "sky-sunset": {
+    skyStops: [
+      [0, "#7e6ab8"],
+      [0.4, "#e08aa8"],
+      [0.8, "#ffb074"],
+      [1, "#ffd2a6"],
+    ],
+    fogColor: 0xffb074,
+    sunColor: 0xff9a5a,
+    sunIntensity: 1.2,
+    sunPos: [26, 14, 6],
+    hemiSky: 0xffc59a,
+    hemiGround: 0x6f6692,
+    hemiIntensity: 0.5,
+    ambientIntensity: 0.4,
+  },
+};
+
+const SKY_POOL = ["sky-dawn", "sky-noon", "sky-sunset"] as const;
 
 function buildProps(ctx: BiomeContext): void {
   const { group, obstacles, tick, worldRadius, setTerrainHeight, setWalkable, setCelebrationCenter } = ctx;
@@ -429,16 +505,13 @@ function buildProps(ctx: BiomeContext): void {
 // A small canvas painted top-to-bottom with the dawn palette, used as
 // the scene background. CanvasTexture is the lightweight way to get a
 // gradient sky in three.js without writing a custom shader.
-function makeSkyGradient(): THREE.CanvasTexture {
+function makeSkyGradient(stops: Array<[number, string]>): THREE.CanvasTexture {
   const c = document.createElement("canvas");
   c.width = 4;
   c.height = 256;
   const g = c.getContext("2d")!;
   const grad = g.createLinearGradient(0, 0, 0, c.height);
-  grad.addColorStop(0, "#9bc6f0"); // pale blue zenith
-  grad.addColorStop(0.45, "#fcd9e8"); // pink mid
-  grad.addColorStop(0.85, "#fde2c8"); // peach near horizon
-  grad.addColorStop(1, "#fde8d2"); // soft horizon
+  for (const [offset, color] of stops) grad.addColorStop(offset, color);
   g.fillStyle = grad;
   g.fillRect(0, 0, c.width, c.height);
   const tex = new THREE.CanvasTexture(c);

@@ -3,12 +3,64 @@ import type { Biome, BiomeContext } from "./types";
 import { findOpenSpot, freshSeed, mulberry32 } from "../world";
 import { type AlienGeometry, DEFAULT_ALIEN_GEOMETRY, loadAlienGeometry } from "./alienConfig";
 import { playAlienWave } from "../../audio/sfx";
+import { rollTimeOfDay, type TimeOfDay } from "./timeOfDay";
 
 // Lunar surface biome. Cratered gray ground, deep starry sky, a big
 // blue Earth hanging in the distance, scattered moon rocks + a
 // planted flag for a landmark. No trees, no butterflies, no pond —
 // the moon is barren on purpose. Pairs nicely with the rocket
 // avatar.
+//
+// Two ambient moods rotate per mount: the original cold midnight, and
+// an "earthlit" pass where the Earth-side bounce light is warmer and
+// the direct sun is dimmer — like the moon is facing a full Earth.
+// Subtle but noticeable across visits.
+
+type MoonMood = {
+  bg: number;
+  fogColor: number;
+  sunColor: number;
+  sunIntensity: number;
+  sunPos: [number, number, number];
+  ambientColor: number;
+  ambientIntensity: number;
+  earthBounceSky: number;
+  earthBounceGround: number;
+  earthBounceIntensity: number;
+};
+
+const MOON_MOODS: Record<Extract<TimeOfDay, "moon-night" | "moon-earthlit">, MoonMood> = {
+  // The original deep-midnight look.
+  "moon-night": {
+    bg: 0x05060e,
+    fogColor: 0x05060e,
+    sunColor: 0xc8d8ff,
+    sunIntensity: 1.3,
+    sunPos: [-18, 22, 12],
+    ambientColor: 0x404870,
+    ambientIntensity: 0.45,
+    earthBounceSky: 0x4a7cb0,
+    earthBounceGround: 0x111626,
+    earthBounceIntensity: 0.35,
+  },
+  // Earthlit pass — warmer teal/blue glow, dimmer direct sun, slightly
+  // brighter horizon so the planet feels like a second light source.
+  "moon-earthlit": {
+    bg: 0x080d22,
+    fogColor: 0x080d22,
+    sunColor: 0xa8b8d6,
+    sunIntensity: 0.95,
+    sunPos: [22, 18, -8],
+    ambientColor: 0x4a6a90,
+    ambientIntensity: 0.55,
+    earthBounceSky: 0x6ea0d0,
+    earthBounceGround: 0x142238,
+    earthBounceIntensity: 0.55,
+  },
+};
+
+const MOON_POOL = ["moon-night", "moon-earthlit"] as const;
+
 export const moonBiome: Biome = {
   id: "moon",
   label: "Moon",
@@ -17,15 +69,14 @@ export const moonBiome: Biome = {
   applyScene(scene) {
     const prevBg = scene.background;
     const prevFog = scene.fog;
-    // Deep midnight blue sky, very subtle fog so the horizon doesn't
-    // clip hard against the boundary.
-    scene.background = new THREE.Color(0x05060e);
-    scene.fog = new THREE.Fog(0x05060e, 70, 220);
+    const tod = rollTimeOfDay("moon", MOON_POOL);
+    const m = MOON_MOODS[tod as keyof typeof MOON_MOODS];
 
-    // Cool moonlight rim — a single hard directional light from a low
-    // angle for crisp lunar shadows.
-    const sun = new THREE.DirectionalLight(0xc8d8ff, 1.3);
-    sun.position.set(-18, 22, 12);
+    scene.background = new THREE.Color(m.bg);
+    scene.fog = new THREE.Fog(m.fogColor, 70, 220);
+
+    const sun = new THREE.DirectionalLight(m.sunColor, m.sunIntensity);
+    sun.position.set(m.sunPos[0], m.sunPos[1], m.sunPos[2]);
     sun.castShadow = true;
     sun.shadow.mapSize.set(1024, 1024);
     sun.shadow.camera.left = -25;
@@ -37,14 +88,14 @@ export const moonBiome: Biome = {
     sun.shadow.bias = -0.0005;
     scene.add(sun);
 
-    // Cold low-fill ambient so the unlit side of every rock doesn't
-    // go fully black.
-    const ambient = new THREE.AmbientLight(0x404870, 0.45);
+    const ambient = new THREE.AmbientLight(m.ambientColor, m.ambientIntensity);
     scene.add(ambient);
 
-    // A subtle teal back-light bouncing up off Earth, so silhouettes
-    // read against the dark sky.
-    const earthBounce = new THREE.HemisphereLight(0x4a7cb0, 0x111626, 0.35);
+    const earthBounce = new THREE.HemisphereLight(
+      m.earthBounceSky,
+      m.earthBounceGround,
+      m.earthBounceIntensity,
+    );
     scene.add(earthBounce);
 
     return () => {
