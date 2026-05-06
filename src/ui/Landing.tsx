@@ -135,8 +135,7 @@ export function Landing() {
           }}
         >
           A free 3D letter-learning adventure for pre-K kids. Walk up to
-          letters, hear them, earn trophies. No ads, no accounts, no
-          tracking.
+          letters, hear them, earn trophies.
         </p>
 
         <PlayButton onClick={handlePlay} />
