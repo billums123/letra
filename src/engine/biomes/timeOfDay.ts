@@ -87,15 +87,59 @@ export function subscribeForcedTOD(cb: () => void): () => void {
   };
 }
 
-// Roll a fresh mood from the supplied pool, avoiding whichever one
-// played last for this biome. If the pool has only one entry we just
-// return it (no variety possible).
+// Map the player's local clock to a mood inside the supplied pool.
+// Each biome's pool contains a different set of moods, so we branch
+// on what the pool actually offers. Returns null if none of the
+// pool's members fit any time-band — the caller falls back to random
+// in that case.
+//
+// Hour bands are intentionally generous: a kid playing at 8am should
+// get "morning"; the same kid at 9pm should get "dusk" even though
+// it's technically dark out. The bands cover the wraparound to
+// overnight by treating evening as the "until 5am" catch-all.
+function realTimeTOD(pool: readonly TimeOfDay[]): TimeOfDay | null {
+  const hour = new Date().getHours();
+  // Meadow pool: morning / midday / sunset / dusk.
+  if (pool.includes("morning") || pool.includes("midday")) {
+    if (hour >= 5 && hour < 10) return inPool("morning", pool);
+    if (hour >= 10 && hour < 16) return inPool("midday", pool);
+    if (hour >= 16 && hour < 19) return inPool("sunset", pool);
+    return inPool("dusk", pool); // 19:00 – 04:59 (overnight)
+  }
+  // Moon pool: night vs. earthlit.
+  if (pool.includes("moon-night") || pool.includes("moon-earthlit")) {
+    if (hour >= 6 && hour < 18) return inPool("moon-earthlit", pool);
+    return inPool("moon-night", pool);
+  }
+  // Sky pool: dawn / noon / sunset. Overnight folds into sunset since
+  // it shares the warmer/dimmer palette.
+  if (pool.includes("sky-dawn") || pool.includes("sky-noon")) {
+    if (hour >= 5 && hour < 10) return inPool("sky-dawn", pool);
+    if (hour >= 10 && hour < 16) return inPool("sky-noon", pool);
+    return inPool("sky-sunset", pool); // 16:00 – 04:59
+  }
+  return null;
+}
+
+function inPool(t: TimeOfDay, pool: readonly TimeOfDay[]): TimeOfDay | null {
+  return pool.includes(t) ? t : null;
+}
+
+// Pick a mood for this biome. Order of precedence:
+//   1. Dev override (URL ?tod=… or the live picker)
+//   2. The player's local time of day
+//   3. Random with no-repeat (only used if the pool somehow has no
+//      time-band coverage — defensive)
 export function rollTimeOfDay(biomeId: string, pool: readonly TimeOfDay[]): TimeOfDay {
   if (pool.length === 0) throw new Error(`rollTimeOfDay: empty pool for ${biomeId}`);
-  // Forced override wins when it's a member of this biome's pool.
   if (forcedTOD && pool.includes(forcedTOD)) {
     lastByBiome.set(biomeId, forcedTOD);
     return forcedTOD;
+  }
+  const realTime = realTimeTOD(pool);
+  if (realTime) {
+    lastByBiome.set(biomeId, realTime);
+    return realTime;
   }
   if (pool.length === 1) {
     lastByBiome.set(biomeId, pool[0]);

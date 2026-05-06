@@ -234,13 +234,13 @@ function TODDevPicker() {
           cursor: "pointer",
         }}
       >
-        TOD: {currentInPool ?? "random"} ↻
+        TOD: {currentInPool ?? "auto (real time)"} ↻
       </button>
       {currentInPool && (
         <button
           type="button"
           onClick={clear}
-          title="Clear override (back to random rolls)"
+          title="Clear override (back to auto / real time)"
           style={{
             background: "rgba(0,0,0,0.65)",
             color: "white",
