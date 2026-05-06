@@ -485,10 +485,35 @@ export function FindAlphabetGame() {
       setFoundCount(ALPHABET.length - 1);
       lastProgressRef.current = performance.now();
       // Park the player ~3 units from Z so a single nudge collects it.
-      const z = letters[ALPHABET.length - 1];
-      if (z) {
-        const zp = z.character.positionXZ();
-        engine.player.group.position.set(zp.x + 3, 0, zp.z);
+      // Y must come from the biome's terrain (the sky islands' Z lives
+      // at island height, not 0), and the parked XZ must be walkable
+      // — picking +3 on the X axis blindly drops the player into the
+      // void on non-contiguous biomes. Try eight cardinal offsets and
+      // fall back to Z's own position if none of them are walkable.
+      const zEntry = letters[ALPHABET.length - 1];
+      if (zEntry) {
+        const zp = zEntry.character.positionXZ();
+        const offset = 3;
+        const candidates: Array<[number, number]> = [
+          [zp.x + offset, zp.z],
+          [zp.x - offset, zp.z],
+          [zp.x, zp.z + offset],
+          [zp.x, zp.z - offset],
+          [zp.x + offset * 0.7, zp.z + offset * 0.7],
+          [zp.x - offset * 0.7, zp.z + offset * 0.7],
+          [zp.x + offset * 0.7, zp.z - offset * 0.7],
+          [zp.x - offset * 0.7, zp.z - offset * 0.7],
+        ];
+        let chosen: [number, number] = [zp.x, zp.z];
+        for (const [cx, cz] of candidates) {
+          if (!engine.isWalkable || engine.isWalkable(cx, cz)) {
+            chosen = [cx, cz];
+            break;
+          }
+        }
+        const [px, pz] = chosen;
+        const py = engine.terrainHeight?.(px, pz) ?? 0;
+        engine.player.group.position.set(px, py, pz);
       }
     };
     window.addEventListener("keydown", onKey);
