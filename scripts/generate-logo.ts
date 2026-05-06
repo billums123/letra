@@ -142,14 +142,27 @@ const LOGOS: LogoSpec[] = [
     filename: "letra-icon.png",
     size: "1024x1024",
     prompt:
-      "A single chubby cartoon letter L character. The L is bright " +
-      "pink-coral, glossy, with soft rounded chunky bevelled edges. " +
-      "Two big friendly cartoon eyes near the top of the vertical " +
-      "stem with little white shine highlights and dark pupils, a " +
-      "wide smiley mouth, two pink cheek blush dots, two tiny noodle " +
-      "arms with rounded mitten hands waving cheerfully, two stubby " +
-      "feet at the base. Centered, square 1:1 composition, fills " +
-      "the frame edge-to-edge. " +
+      "A single chubby cartoon CAPITAL LETTER L character. The L " +
+      "silhouette is clearly recognizable: a tall vertical stroke on " +
+      "the LEFT and a wide thick HORIZONTAL FOOT extending to the " +
+      "right at the bottom — the foot is generously proportioned, " +
+      "comparable in visual mass to the vertical stroke, so the " +
+      "shape reads unambiguously as the letter L. " +
+      "CRITICAL FACE PLACEMENT: the friendly cartoon face — two big " +
+      "eyes with white shine highlights and dark pupils, a wide " +
+      "smiley mouth, and two pink cheek blush dots — is centered " +
+      "ON THE HORIZONTAL FOOT of the L, sitting inside the wide " +
+      "bottom rectangle. The face is NOT on the vertical stroke. " +
+      "The vertical stroke is a plain tall yellow column with no " +
+      "facial features, standing behind and above the foot. " +
+      "Sunny school-bus YELLOW, soft matte finish (not glossy), " +
+      "soft rounded chunky bevelled edges. Two tiny noodle arms " +
+      "with rounded mitten hands wave cheerfully outward from the " +
+      "sides of the horizontal foot near the face. Two stubby " +
+      "legs at the bottom of the horizontal foot. Centered, " +
+      "square 1:1 composition with a small breathing margin of " +
+      "transparent space around the letter — do NOT fill the frame " +
+      "edge-to-edge. " +
       STYLE_FRAMING,
   },
 ];
