@@ -242,7 +242,12 @@ function Footer() {
     >
       <div
         style={{
-          maxWidth: 720,
+          // Slightly wider than the chip row needs so the privacy line
+          // can fit on one row on common desktop widths (the sentence
+          // is ~100 chars at fontWeight 600, runs ~800-840 px). On
+          // narrower screens text-wrap: balance below splits it into
+          // evenly-sized lines instead of leaving an orphan.
+          maxWidth: 860,
           margin: "0 auto",
           display: "flex",
           flexDirection: "column",
@@ -250,7 +255,16 @@ function Footer() {
           textAlign: "center",
         }}
       >
-        <p style={{ margin: 0, fontWeight: 600 }}>
+        <p
+          style={{
+            margin: 0,
+            fontWeight: 600,
+            // Balance the line distribution when it wraps — avoids the
+            // case where "open" sat on the end of line 1 and "source."
+            // ended up alone on line 2.
+            textWrap: "balance",
+          }}
+        >
           Letra runs entirely on your device. No accounts, no tracking, no
           data collected from your kid —{" "}
           <a
@@ -263,6 +277,9 @@ function Footer() {
               textDecoration: "underline",
               textDecorationThickness: 2,
               textUnderlineOffset: 3,
+              // Keep "open source" together so the link can never split
+              // across two lines under any viewport width.
+              whiteSpace: "nowrap",
             }}
           >
             open source
