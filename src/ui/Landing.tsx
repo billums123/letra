@@ -29,6 +29,7 @@ function detectPlatform(): Platform {
 // styled to feel as tappable as anything in the game.
 
 const KOFI_URL = "https://ko-fi.com/hestermani";
+const GITHUB_URL = "https://github.com/billums123/letra";
 const CONTACT_EMAIL = "hello@playletra.com";
 
 export function Landing({ onPlay }: { onPlay: () => void }) {
@@ -251,7 +252,22 @@ function Footer() {
       >
         <p style={{ margin: 0, fontWeight: 600 }}>
           Letra runs entirely on your device. No accounts, no tracking, no
-          data collected from your kid.
+          data collected from your kid —{" "}
+          <a
+            href={GITHUB_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{
+              color: "#16314c",
+              fontWeight: 700,
+              textDecoration: "underline",
+              textDecorationThickness: 2,
+              textUnderlineOffset: 3,
+            }}
+          >
+            open source
+          </a>
+          .
         </p>
 
         <div
