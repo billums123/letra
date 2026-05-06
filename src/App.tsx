@@ -2,22 +2,42 @@ import { useEffect, useState } from "react";
 import { Game } from "./components/Game";
 import { Landing } from "./ui/Landing";
 
-// Lightweight pathname-based router. The parent-facing landing lives at
-// "/" and the game at "/play" (plus its sub-paths "/play/spell-word"
-// etc., synced from in-game state by Game.tsx for analytics). The
-// landing path is the SOLE entry where any external link, Ko-fi
-// button, contact email, or GitHub link appears — keeping those off
-// the game surface means a kid mashing the screen can't accidentally
-// exit to a payment flow or open a mail composer.
+// Feature flag for the parent-facing landing page at "/". When false,
+// "/" is silently rewritten to "/play" so visitors land directly in
+// the game — the Landing component still ships in the bundle (it's
+// tiny) but it never mounts. Flip back to true to restore the
+// on-ramp + Ko-fi / install-hint / contact-email surface.
 //
-// Navigation between landing and game is client-side via history.pushState
-// rather than a full window.location.assign, so the transition is
-// instant — no white flash from a fresh document load, and the
-// AudioContext + image preloads from the initial boot stay warm.
+// Typed as `boolean` (not the literal `false`) so TypeScript doesn't
+// narrow the conditional below to "always game" and start warning on
+// the Landing branch as unreachable.
+const SHOW_LANDING: boolean = false;
+
+// Lightweight pathname-based router. When the landing is shown, "/"
+// renders the parent-facing surface and "/play" (plus "/play/<mode>"
+// sub-paths synced from in-game state by Game.tsx for analytics)
+// renders the game. When the landing is hidden, every path is the
+// game — and "/" is normalized to "/play" so Game.tsx's own
+// SCREEN_PATHS pushState doesn't add a phantom history entry on top
+// of "/".
+//
+// Navigation between landing and game (when shown) is client-side via
+// history.pushState rather than a full window.location.assign, so
+// the transition is instant — no white flash from a fresh document
+// load, and the AudioContext + image preloads from the initial boot
+// stay warm.
 
 function readPath(): string {
   if (typeof window === "undefined") return "/";
-  return window.location.pathname;
+  const path = window.location.pathname;
+  if (!SHOW_LANDING && (path === "/" || path === "")) {
+    // replaceState (not pushState) so the URL bar shows /play
+    // immediately without a phantom "/" entry sitting in history
+    // that the browser back button would round-trip through.
+    window.history.replaceState({}, "", "/play");
+    return "/play";
+  }
+  return path;
 }
 
 export function App() {
@@ -41,7 +61,7 @@ export function App() {
     setPath("/play");
   };
 
-  if (path === "/" || path === "") {
+  if (SHOW_LANDING && (path === "/" || path === "")) {
     return <Landing onPlay={goToGame} />;
   }
   return <Game />;
