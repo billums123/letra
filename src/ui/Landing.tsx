@@ -1,5 +1,21 @@
 import { useEffect, useState } from "react";
 
+type Platform = "ios" | "android" | "other";
+
+// Synchronous platform detect — runs at first render so the install
+// card doesn't flash in/out after hydration. SSR-safe via the typeof
+// guard (Vite's dev server still renders server-side for the index).
+function detectPlatform(): Platform {
+  if (typeof navigator === "undefined") return "other";
+  const ua = navigator.userAgent;
+  if (/iPad|iPhone|iPod/.test(ua)) return "ios";
+  // iPadOS 13+ reports as Mac with touch points — distinguish from a
+  // real Mac by maxTouchPoints, which is 0 on every desktop Safari.
+  if (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1) return "ios";
+  if (/Android/i.test(ua)) return "android";
+  return "other";
+}
+
 // Parent-facing landing page served at "/". The game itself lives at
 // "/play" and stays a sealed box — no outbound links, no payment
 // surfaces, no email mailto's reachable from inside it. Every adult
@@ -16,20 +32,12 @@ const KOFI_URL = "https://ko-fi.com/playletra";
 const CONTACT_EMAIL = "hello@playletra.com";
 
 export function Landing() {
-  // Detect iOS so we can show the right "Add to Home Screen" copy. The
-  // Android / desktop equivalent is the omnibox install icon, which is
-  // less prescriptive — we only spell out the iOS path because that's
-  // the platform with the back-swipe accident risk we're defending
-  // against. Other platforms get a simpler "your browser will offer to
-  // install this" line.
-  const [isIOS, setIsIOS] = useState(false);
-  useEffect(() => {
-    const ua = navigator.userAgent;
-    const iOSDevice = /iPad|iPhone|iPod/.test(ua) ||
-      // iPadOS 13+ reports as Mac with touch points
-      (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
-    setIsIOS(iOSDevice);
-  }, []);
+  // Only show the install hint on iOS and Android — desktop browsers
+  // surface their own install prompt in the address bar, and a desktop
+  // kid is usually within arm's reach of a parent so the back-swipe /
+  // tab-out accident is much less of a real risk. iPad in Safari is
+  // the case the hint actually defends against.
+  const [platform] = useState<Platform>(detectPlatform);
 
   // The game canvas at /play wants the body locked at overflow:hidden +
   // touch-action:none (defined in index.html). The landing is a normal
@@ -133,7 +141,7 @@ export function Landing() {
 
         <PlayButton onClick={handlePlay} />
 
-        <InstallHint isIOS={isIOS} />
+        {platform !== "other" && <InstallHint platform={platform} />}
       </main>
 
       <Footer />
@@ -189,7 +197,7 @@ function PlayButton({ onClick }: { onClick: () => void }) {
   );
 }
 
-function InstallHint({ isIOS }: { isIOS: boolean }) {
+function InstallHint({ platform }: { platform: "ios" | "android" }) {
   return (
     <div
       style={{
@@ -205,7 +213,7 @@ function InstallHint({ isIOS }: { isIOS: boolean }) {
       }}
     >
       <strong style={{ fontWeight: 700 }}>For the safest kid-mode:</strong>{" "}
-      {isIOS ? (
+      {platform === "ios" ? (
         <>
           tap the <strong>Share</strong> button in Safari, then{" "}
           <strong>Add to Home Screen</strong>. Letra opens fullscreen with no
@@ -213,9 +221,9 @@ function InstallHint({ isIOS }: { isIOS: boolean }) {
         </>
       ) : (
         <>
-          your browser can install Letra as an app — look for the install icon
-          in the address bar, or use your browser's menu. Letra then opens in
-          its own window with no other tabs to wander into.
+          tap your browser's menu and choose{" "}
+          <strong>Install app</strong> (or <strong>Add to Home Screen</strong>).
+          Letra opens in its own window with no other tabs to wander into.
         </>
       )}
     </div>
