@@ -186,4 +186,9 @@ Audio is **pre-baked** to static MP3s — credits are precious, and a
 
 ## License
 
-All rights reserved. Built by [@billums123](https://github.com/billums123).
+Letra is licensed under the [PolyForm Noncommercial License 1.0.0](LICENSE).
+You're welcome to fork it, modify it, run it for your own kids, your
+classroom, your daycare, your library — basically anywhere it's not being
+sold or used to make money. See `LICENSE` for the full terms.
+
+Built by [@billums123](https://github.com/billums123).

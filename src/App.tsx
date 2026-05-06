@@ -11,7 +11,7 @@ import { Landing } from "./ui/Landing";
 // Typed as `boolean` (not the literal `false`) so TypeScript doesn't
 // narrow the conditional below to "always game" and start warning on
 // the Landing branch as unreachable.
-const SHOW_LANDING: boolean = false;
+const SHOW_LANDING: boolean = true;
 
 // Lightweight pathname-based router. When the landing is shown, "/"
 // renders the parent-facing surface and "/play" (plus "/play/<mode>"
