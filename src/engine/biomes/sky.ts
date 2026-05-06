@@ -551,7 +551,12 @@ function populateIsland(
   const propRand = mulberry32(Math.floor(Math.abs(isl.x * 31 + isl.z * 17 + 99)) | 1);
   // Larger islands get more props; the 7-radius central island has
   // more room than the 4.5-radius outer ones.
-  const propBudget = isl.id === "center" ? { trees: 3, mushrooms: 4, flowers: 18 } : { trees: 1, mushrooms: 2, flowers: 9 };
+  // Lighter prop counts so the islands stay easy to navigate around —
+  // letters need clear lanes between props for the kid to walk up to
+  // them. Flowers stay generous because they're soft (drive-through).
+  const propBudget = isl.id === "center"
+    ? { trees: 2, mushrooms: 2, flowers: 16 }
+    : { trees: 1, mushrooms: 1, flowers: 7 };
   const placed: Array<{ x: number; z: number; r: number }> = [];
 
   function findSpot(selfR: number): { x: number; z: number } | null {

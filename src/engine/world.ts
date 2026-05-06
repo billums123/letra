@@ -359,7 +359,63 @@ export function pickClearSpawn(
     }
     if (clear) return { x, z };
   }
-  // Last-resort: place on the inner ring along an angle that hasn't been used.
+  // Deterministic grid-sweep fallback. The random pass above can fail
+  // when most positions in the ring are non-walkable (e.g. sky-islands
+  // void) — this pass guarantees a walkable spot if one exists by
+  // visiting every (angle, radius) cell in a coarse grid. We accept
+  // overlapping a previously-taken letter spot before we'll ever
+  // return a non-walkable position, since "two letters near each
+  // other" is fixable in-game while "letter floating in the void" is
+  // permanently unreachable.
+  if (isWalkable) {
+    const STEPS = 36;
+    const RADII = 12;
+    // Two passes: first respecting taken+obstacles, then relaxed if
+    // nothing fit. Either way, isWalkable is non-negotiable.
+    for (let pass = 0; pass < 2; pass++) {
+      for (let ri = 0; ri < RADII; ri++) {
+        const dist = cappedMin + (ri / Math.max(1, RADII - 1)) * (cappedMax - cappedMin);
+        // Stagger the angle origin per radius so adjacent rings don't
+        // line up — keeps the fallback from clustering on a spoke.
+        const angleOffset = (ri * 0.137) * Math.PI * 2;
+        for (let ai = 0; ai < STEPS; ai++) {
+          const angle = angleOffset + (ai / STEPS) * Math.PI * 2;
+          const x = Math.cos(angle) * dist;
+          const z = Math.sin(angle) * dist;
+          if (!isWalkable(x, z)) continue;
+          let clear = true;
+          for (const o of obstacles) {
+            if (Math.hypot(x - o.x, z - o.z) < o.radius + selfRadius + 0.4) {
+              clear = false;
+              break;
+            }
+          }
+          if (clear && pass === 0) {
+            for (const t of taken) {
+              if (Math.hypot(x - t.x, z - t.z) < t.radius + selfRadius + 0.6) {
+                clear = false;
+                break;
+              }
+            }
+          }
+          if (clear) return { x, z };
+        }
+      }
+    }
+    // Truly desperate: any walkable point at all, ignoring obstacles
+    // and taken. Better than dropping into the void.
+    for (let ri = 0; ri < RADII; ri++) {
+      const dist = cappedMin + (ri / Math.max(1, RADII - 1)) * (cappedMax - cappedMin);
+      for (let ai = 0; ai < STEPS; ai++) {
+        const angle = (ai / STEPS) * Math.PI * 2;
+        const x = Math.cos(angle) * dist;
+        const z = Math.sin(angle) * dist;
+        if (isWalkable(x, z)) return { x, z };
+      }
+    }
+  }
+  // No walkable filter (or it found nothing in any pass): legacy
+  // fallback — drop on the inner ring.
   const fallbackAngle = rng() * Math.PI * 2;
   return {
     x: Math.cos(fallbackAngle) * cappedMin,
