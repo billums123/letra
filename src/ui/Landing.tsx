@@ -28,7 +28,7 @@ function detectPlatform(): Platform {
 // instead of the chunky game cards. The Play button is the one piece
 // styled to feel as tappable as anything in the game.
 
-const KOFI_URL = "https://ko-fi.com/playletra";
+const KOFI_URL = "https://ko-fi.com/hestermani";
 const CONTACT_EMAIL = "hello@playletra.com";
 
 export function Landing() {
