@@ -6,6 +6,13 @@ export type PlayerHandles = {
   group: THREE.Group;
   update: (dt: number, input: { x: number; y: number }) => void;
   position: () => THREE.Vector3;
+  // Current yaw in radians. The engine reads this to compose the
+  // avatar's full orientation (yaw + terrain tilt) — so avatars must
+  // NOT write to group.rotation.y themselves.
+  facing: () => number;
+  // Whether the engine should tilt this avatar to match the terrain
+  // incline. Hovering avatars (rocket) opt out by setting this false.
+  terrainAlign?: boolean;
   // Tear-down hook called by Engine.dispose(). Used by avatars that
   // own continuous resources (the car's motor loop, etc.).
   dispose?: () => void;
@@ -118,9 +125,8 @@ function buildKid(): PlayerHandles {
         facing += delta * TURN_LERP;
         // The character's face is built on local +Z. atan2(input.x, input.y)
         // gives the yaw whose forward (+Z after rotation) points along the
-        // movement vector — no offset needed. The previous +PI flipped the
-        // facing 180° so the character moonwalked.
-        group.rotation.y = facing;
+        // movement vector — no offset needed. Engine composes yaw + terrain
+        // tilt onto group.quaternion each frame; we just track facing here.
         bob += dt * 12;
       } else {
         bob += dt * 3;
@@ -140,6 +146,9 @@ function buildKid(): PlayerHandles {
     },
     position() {
       return group.position;
+    },
+    facing() {
+      return facing;
     },
   };
 }
@@ -373,7 +382,6 @@ function buildCar(): PlayerHandles {
         // Slightly snappier turn than the kid because a car turning
         // slowly looks lazier than a character.
         facing += delta * (TURN_LERP + 0.05);
-        group.rotation.y = facing;
         bob += dt * 18;
         // Spin wheels at travel speed. tire radius = 0.3, so radians per
         // second = linear speed / radius. We use SPEED directly because
@@ -442,6 +450,9 @@ function buildCar(): PlayerHandles {
     },
     position() {
       return group.position;
+    },
+    facing() {
+      return facing;
     },
     dispose() {
       motor.stop();
@@ -612,8 +623,8 @@ function buildRocket(): PlayerHandles {
       // Hover bob — gentle vertical oscillation.
       const bobAmt = isMoving ? 0.18 : 0.1;
       group.position.y = HOVER_Y + Math.sin(bob) * bobAmt;
-      // Yaw the whole group so the nose points along the velocity.
-      group.rotation.y = facing;
+      // Yaw is composed by the engine onto group.quaternion (along with
+      // terrain tilt for ground avatars; we opt out of that below).
       // Lean the body forward in the direction of travel. We compute
       // body-local lean: forward vector is +Z in body space because
       // the group is yawed to face that direction.
@@ -639,6 +650,11 @@ function buildRocket(): PlayerHandles {
     position() {
       return group.position;
     },
+    facing() {
+      return facing;
+    },
+    // Hovering avatar — terrain incline shouldn't tilt the rocket.
+    terrainAlign: false,
     dispose() {
       thrust.stop();
     },

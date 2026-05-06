@@ -35,6 +35,16 @@ export class Engine {
   private tmpVec = new THREE.Vector3();
   private disposed = false;
 
+  // Avatar orientation working state. Each frame the engine composes
+  // yaw (from the avatar) with a terrain-tilt quaternion (smoothed
+  // below) onto group.quaternion, so the kid leans into slopes
+  // instead of standing bolt upright on a rainbow arch.
+  private currentTilt = new THREE.Quaternion();
+  private tmpYawQuat = new THREE.Quaternion();
+  private tmpTargetTilt = new THREE.Quaternion();
+  private tmpNormal = new THREE.Vector3();
+  private static readonly WORLD_UP = new THREE.Vector3(0, 1, 0);
+
   // Game-mode hook: called every frame so modes can react to the player position.
   // The function decides whether anything happens; engine just calls it.
   tickHook?: (dt: number, t: number, playerPos: THREE.Vector3) => void;
@@ -251,6 +261,42 @@ export class Engine {
       if (this.terrainHeight) {
         pp.y += this.terrainHeight(pp.x, pp.z);
       }
+
+      // Avatar orientation — compose yaw (from the avatar) with a
+      // terrain-tilt quaternion that aligns the avatar's local +Y to
+      // the ground normal. We sample the height field with a small
+      // finite-difference stencil to estimate the gradient, fall back
+      // to the player's height for off-surface samples (so the void
+      // edge of a sky island doesn't yank the avatar sideways), and
+      // slerp toward the target so slope discontinuities don't snap.
+      this.tmpYawQuat.setFromAxisAngle(Engine.WORLD_UP, this.player.facing());
+      this.tmpTargetTilt.identity();
+      if (this.terrainHeight && this.player.terrainAlign !== false) {
+        const sample = this.terrainHeight;
+        const walkable = this.isWalkable;
+        const eps = 0.35;
+        const here = sample(pp.x, pp.z);
+        const safe = (x: number, z: number): number => {
+          if (walkable && !walkable(x, z)) return here;
+          const h = sample(x, z);
+          // Cap the apparent step against pathological gradients
+          // (e.g. a corridor sample that briefly exits the walk
+          // surface) so a single bad sample can't yank the tilt.
+          if (Math.abs(h - here) > 1.5) return here;
+          return h;
+        };
+        const dhdx = (safe(pp.x + eps, pp.z) - safe(pp.x - eps, pp.z)) / (2 * eps);
+        const dhdz = (safe(pp.x, pp.z + eps) - safe(pp.x, pp.z - eps)) / (2 * eps);
+        this.tmpNormal.set(-dhdx, 1, -dhdz).normalize();
+        this.tmpTargetTilt.setFromUnitVectors(Engine.WORLD_UP, this.tmpNormal);
+      }
+      // Smooth tilt across frames; yaw remains immediate because the
+      // avatar already lerps its own facing internally.
+      this.currentTilt.slerp(this.tmpTargetTilt, 0.2);
+      // Order matters: yaw first (in world frame), then tilt — this
+      // leaves local +Y along the normal and local +Z along the
+      // projection of the facing direction onto the slope plane.
+      this.player.group.quaternion.copy(this.currentTilt).multiply(this.tmpYawQuat);
 
       // Sun follow — keep each shadow camera centered on the player so
       // the directional-light frustum doesn't clip the player's shadow
