@@ -31,7 +31,7 @@ function detectPlatform(): Platform {
 const KOFI_URL = "https://ko-fi.com/hestermani";
 const CONTACT_EMAIL = "hello@playletra.com";
 
-export function Landing() {
+export function Landing({ onPlay }: { onPlay: () => void }) {
   // Only show the install hint on iOS and Android — desktop browsers
   // surface their own install prompt in the address bar, and a desktop
   // kid is usually within arm's reach of a parent so the back-swipe /
@@ -68,13 +68,10 @@ export function Landing() {
     };
   }, []);
 
-  const handlePlay = () => {
-    // Plain navigation rather than history.pushState — we want the game
-    // bundle to mount fresh at /play, and Cloudflare Pages serves the
-    // SPA fallback so this works as a top-level URL too (bookmarks,
-    // shared links, the PWA start_url).
-    window.location.assign("/play");
-  };
+  // The actual navigation is owned by App.tsx (history.pushState +
+  // setPath) so the Landing → Game transition is instant client-side
+  // instead of a full window.location.assign that flashes a white
+  // document tear-down between Landing and Game.
 
   return (
     <div
@@ -139,7 +136,7 @@ export function Landing() {
           tracking.
         </p>
 
-        <PlayButton onClick={handlePlay} />
+        <PlayButton onClick={onPlay} />
 
         {platform !== "other" && <InstallHint platform={platform} />}
       </main>
