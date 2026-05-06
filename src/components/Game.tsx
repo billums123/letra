@@ -22,9 +22,12 @@ import { isDev } from "../util/isDev";
 // Virtual URLs we sync the current screen to for analytics. Each game
 // mode gets its own path so Cloudflare Web Analytics treats it as a
 // distinct pageview. Dev screens are kept under /dev so they never
-// show up alongside real player traffic in the dashboard.
+// show up alongside real player traffic in the dashboard. The menu
+// lives at /play (the parent-facing landing owns / instead) so PWA
+// installs and shared /play links land in the game directly without a
+// landing-page bounce.
 const SCREEN_PATHS: Record<Screen, string> = {
-  "menu": "/",
+  "menu": "/play",
   "spell-word": "/play/spell-word",
   "find-alphabet": "/play/find-alphabet",
   "sound-match": "/play/sound-match",

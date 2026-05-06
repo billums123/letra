@@ -1,0 +1,6 @@
+# Cloudflare Pages SPA fallback. Every path that isn't a real file in
+# the build (e.g. /play, /play/spell-word, /play/find-alphabet, the
+# /dev/* tools) needs to serve index.html so the React app can read
+# location.pathname and route accordingly. Without this Cloudflare
+# returns a 404 for any URL except / and the asset paths.
+/*    /index.html    200

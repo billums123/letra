@@ -333,7 +333,11 @@ export default defineConfig({
         background_color: "#a8e2ff",
         display: "standalone",
         orientation: "any",
-        start_url: "/",
+        // Home-screen launches go straight to the game (start_url=/play),
+        // skipping the parent-facing landing at /. The landing is meant
+        // to be a one-time on-ramp for parents discovering Letra in a
+        // browser; once installed, the kid should never see it.
+        start_url: "/play",
         scope: "/",
         icons: [
           {
