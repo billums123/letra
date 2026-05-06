@@ -1,6 +1,14 @@
 import * as THREE from "three";
 import type { Biome, BiomeContext } from "./types";
-import { freshSeed, makeFlower, makeMushroom, makeTree, mulberry32 } from "../world";
+import {
+  freshSeed,
+  makeFlower,
+  makeMushroom,
+  makeSharedMeadowAssets,
+  makeTree,
+  mulberry32,
+  type MeadowSharedAssets,
+} from "../world";
 import type { Obstacle } from "../world";
 import { rollTimeOfDay, type TimeOfDay } from "./timeOfDay";
 
@@ -326,11 +334,14 @@ function buildProps(ctx: BiomeContext): void {
   // ── Island visuals ───────────────────────────────────────────────
   // Each island: green grass top disc, brown soil ring, conical
   // underside tapering to a point. Some scenery on top so the kid
-  // has a reason to drive around.
+  // has a reason to drive around. The shared meadow-prop pool is
+  // built once for the whole biome — every island reuses the same
+  // trunk / stem / petal materials and geometries.
+  const sharedMeadow = makeSharedMeadowAssets();
   for (const isl of ISLANDS) {
     const islandGroup = makeIsland(isl);
     group.add(islandGroup);
-    populateIsland(isl, group, obstacles, tick);
+    populateIsland(isl, group, obstacles, tick, sharedMeadow);
   }
 
   // ── Rainbows ─────────────────────────────────────────────────────
@@ -619,7 +630,8 @@ function populateIsland(
   isl: IslandSpec,
   group: THREE.Group,
   obstacles: Obstacle[],
-  tick: Array<(dt: number, t: number) => void>
+  tick: Array<(dt: number, t: number) => void>,
+  shared: MeadowSharedAssets,
 ): void {
   const propRand = mulberry32(Math.floor(Math.abs(isl.x * 31 + isl.z * 17 + 99)) | 1);
   // Larger islands get more props; the 7-radius central island has
@@ -662,7 +674,7 @@ function populateIsland(
     const spot = findSpot(radius);
     if (!spot) continue;
     const hue = 100 + propRand() * 40;
-    const tree = makeTree(hue, scale);
+    const tree = makeTree(hue, scale, shared);
     tree.group.position.set(spot.x, isl.height, spot.z);
     tree.group.rotation.y = propRand() * Math.PI * 2;
     group.add(tree.group);
@@ -675,7 +687,7 @@ function populateIsland(
     const spot = findSpot(radius);
     if (!spot) continue;
     const hue = propRand() * 360;
-    const m = makeMushroom(hue);
+    const m = makeMushroom(hue, shared);
     m.group.position.set(spot.x, isl.height, spot.z);
     m.group.rotation.y = propRand() * Math.PI * 2;
     group.add(m.group);
@@ -688,7 +700,7 @@ function populateIsland(
     const spot = findSpot(radius);
     if (!spot) continue;
     const hue = propRand() * 360;
-    const f = makeFlower(hue);
+    const f = makeFlower(hue, shared);
     f.group.position.set(spot.x, isl.height, spot.z);
     f.group.rotation.y = propRand() * Math.PI * 2;
     group.add(f.group);

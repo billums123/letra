@@ -563,7 +563,44 @@ export type LetterOptions = {
   // bob so letters in a moon crater sit at the crater floor instead of
   // floating at world Y=0. Defaults to 0 for biomes with flat terrain.
   baseY?: number;
+  // Optional pool of fixed-look materials + geometries shared across
+  // every letter built from one bag. Hoisting eye-white / pupil /
+  // shine / smile-brown / cheek-pink / foot-brown materials plus the
+  // arm + foot geometries collapses ~150 per-letter allocations into
+  // a single pool for a 26-letter alphabet round. Per-letter varied
+  // parts (body color, glyph shape, eye/smile sizing) stay per-instance.
+  shared?: LetterSharedAssets;
 };
+
+export type LetterSharedAssets = {
+  eyeWhiteMat: THREE.MeshStandardMaterial;
+  eyePupilMat: THREE.MeshStandardMaterial;
+  eyeShineMat: THREE.MeshBasicMaterial;
+  smileMat: THREE.MeshStandardMaterial;
+  cheekMat: THREE.MeshStandardMaterial;
+  footMat: THREE.MeshStandardMaterial;
+  // Both build paths use a fixed CapsuleGeometry for arms; the
+  // procedural path also uses a fixed SphereGeometry for feet.
+  armGeo: THREE.CapsuleGeometry;
+  footGeo: THREE.SphereGeometry;
+};
+
+// Build a fresh shared-asset pool. Each game-mount creates one bag
+// and passes it to every buildLetterCharacter call. Engine teardown
+// disposes via scene traversal — Three.js dispose() is idempotent so
+// the multiple references just no-op after the first.
+export function makeSharedLetterAssets(): LetterSharedAssets {
+  return {
+    eyeWhiteMat: new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.35 }),
+    eyePupilMat: new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.5 }),
+    eyeShineMat: new THREE.MeshBasicMaterial({ color: 0xffffff }),
+    smileMat: new THREE.MeshStandardMaterial({ color: 0x6b1d10 }),
+    cheekMat: new THREE.MeshStandardMaterial({ color: 0xff8aaa, transparent: true, opacity: 0.75 }),
+    footMat: new THREE.MeshStandardMaterial({ color: 0x3a2a14, roughness: 0.7 }),
+    armGeo: new THREE.CapsuleGeometry(0.1, 0.45, 4, 8),
+    footGeo: new THREE.SphereGeometry(0.16, 10, 8),
+  };
+}
 
 export function buildLetterCharacter(font: Font, opts: LetterOptions): LetterCharacter {
   const upper = opts.letter.toUpperCase();
@@ -576,7 +613,7 @@ export function buildLetterCharacter(font: Font, opts: LetterOptions): LetterCha
   // get its own fixtures later.
   const override = getLetterOverrides()[display];
   if (override) {
-    return buildFromOverride(font, display, upper, override, color, opts.baseY ?? 0);
+    return buildFromOverride(font, display, upper, override, color, opts.baseY ?? 0, opts.shared);
   }
 
   // Outer group: world position + Y-axis billboard.
@@ -615,10 +652,12 @@ export function buildLetterCharacter(font: Font, opts: LetterOptions): LetterCha
   const eyeOffset = Math.max(eyeRadius * 1.1, Math.min(half - eyeRadius * 1.05, half * 0.6));
 
   // Eyes — white sclera, dark pupil, plus a tiny "shine" highlight that
-  // really sells the googly cartoon vibe.
-  const eyeWhite = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.35 });
-  const eyePupil = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.5 });
-  const eyeShine = new THREE.MeshBasicMaterial({ color: 0xffffff });
+  // really sells the googly cartoon vibe. The three materials are
+  // identical across every letter, so they come from the shared pool
+  // when available.
+  const eyeWhite = opts.shared?.eyeWhiteMat ?? new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.35 });
+  const eyePupil = opts.shared?.eyePupilMat ?? new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.5 });
+  const eyeShine = opts.shared?.eyeShineMat ?? new THREE.MeshBasicMaterial({ color: 0xffffff });
   for (const dx of [-1, 1]) {
     const eye = new THREE.Mesh(new THREE.SphereGeometry(eyeRadius, 16, 12), eyeWhite);
     eye.position.set(dx * eyeOffset, eyeY, depthFront + eyeRadius * 0.4);
@@ -634,16 +673,21 @@ export function buildLetterCharacter(font: Font, opts: LetterOptions): LetterCha
   // Smile — half torus on the front face, sized to letter width.
   const smileRadius = Math.min(0.16, half * 0.5);
   const smileY = Math.max(eyeY - eyeRadius * 2.4, height * 0.36);
+  // Smile color is fixed brown across every letter; share when pool
+  // available. Geometry varies (smileRadius depends on letter width)
+  // so it stays per-letter.
+  const smileMat = opts.shared?.smileMat ?? new THREE.MeshStandardMaterial({ color: 0x6b1d10 });
   const smile = new THREE.Mesh(
     new THREE.TorusGeometry(smileRadius, Math.max(0.03, smileRadius * 0.22), 8, 16, Math.PI),
-    new THREE.MeshStandardMaterial({ color: 0x6b1d10 })
+    smileMat,
   );
   smile.position.set(0, smileY, depthFront + 0.03);
   smile.rotation.x = Math.PI / 2;
   inner.add(smile);
 
   // Rosy cheeks — flanking the smile within the glyph silhouette.
-  const cheekMat = new THREE.MeshStandardMaterial({ color: 0xff8aaa, transparent: true, opacity: 0.75 });
+  // Same pink across letters, share when pool available.
+  const cheekMat = opts.shared?.cheekMat ?? new THREE.MeshStandardMaterial({ color: 0xff8aaa, transparent: true, opacity: 0.75 });
   const cheekRadius = Math.min(0.1, half * 0.18);
   const cheekOffset = Math.min(half - cheekRadius, eyeOffset + cheekRadius * 1.2);
   for (const dx of [-1, 1]) {
@@ -655,9 +699,11 @@ export function buildLetterCharacter(font: Font, opts: LetterOptions): LetterCha
 
   // Arms — pivots just outside the letter so a wave reads from any angle.
   // Position scales to letter width so M/W get arms that really stretch
-  // out while I/L stay tucked.
+  // out while I/L stay tucked. limbMat carries the per-letter body
+  // color so it stays per-instance; the capsule geometry is identical
+  // across every letter and comes from the shared pool when available.
   const limbMat = new THREE.MeshStandardMaterial({ color, roughness: 0.5 });
-  const armGeo = new THREE.CapsuleGeometry(0.1, 0.45, 4, 8);
+  const armGeo = opts.shared?.armGeo ?? new THREE.CapsuleGeometry(0.1, 0.45, 4, 8);
   const armX = Math.max(half + 0.18, 0.36);
   const armY = Math.min(height * 0.55, height - 0.4);
   const armPivotR = new THREE.Group();
@@ -680,11 +726,14 @@ export function buildLetterCharacter(font: Font, opts: LetterOptions): LetterCha
 
   // Feet — two black blobs centred under the glyph. We anchor them to the
   // letter centre rather than to "half" so they don't get pushed too far
-  // apart on wide letters; for narrow letters they tuck in close.
-  const footMat = new THREE.MeshStandardMaterial({ color: 0x3a2a14, roughness: 0.7 });
+  // apart on wide letters; for narrow letters they tuck in close. Both
+  // material and sphere geometry are identical across every letter, so
+  // they come from the shared pool when available.
+  const footMat = opts.shared?.footMat ?? new THREE.MeshStandardMaterial({ color: 0x3a2a14, roughness: 0.7 });
+  const footGeo = opts.shared?.footGeo ?? new THREE.SphereGeometry(0.16, 10, 8);
   const footOffset = Math.max(0.18, Math.min(half * 0.4, 0.32));
   for (const dx of [-1, 1]) {
-    const foot = new THREE.Mesh(new THREE.SphereGeometry(0.16, 10, 8), footMat);
+    const foot = new THREE.Mesh(footGeo, footMat);
     foot.position.set(dx * footOffset, 0.05, 0.2);
     foot.scale.set(1, 0.6, 1.2);
     foot.castShadow = true;
@@ -852,7 +901,8 @@ function buildFromOverride(
   upperKey: string,
   parts: EditableParts,
   color: THREE.Color,
-  baseY: number
+  baseY: number,
+  shared?: LetterSharedAssets
 ): LetterCharacter {
   const group = new THREE.Group();
   const inner = new THREE.Group();
@@ -887,14 +937,14 @@ function buildFromOverride(
     if (isVisibleSize(parts.eyeRadius)) {
       const sclera = new THREE.Mesh(
         new THREE.SphereGeometry(parts.eyeRadius, 16, 12),
-        new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.35 })
+        shared?.eyeWhiteMat ?? new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.35 }),
       );
       eyeGroup.add(sclera);
     }
     if (!isHidden(`pupil:${sideKey}`) && isVisibleSize(parts.pupilRadius)) {
       const pupil = new THREE.Mesh(
         new THREE.SphereGeometry(parts.pupilRadius, 12, 10),
-        new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.5 })
+        shared?.eyePupilMat ?? new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.5 }),
       );
       pupil.position.set(pupilT.pos.x, pupilT.pos.y, pupilT.pos.z);
       setRot(pupil, pupilT.rot);
@@ -903,7 +953,7 @@ function buildFromOverride(
     if (!isHidden(`shine:${sideKey}`) && isVisibleSize(parts.shineRadius)) {
       const shine = new THREE.Mesh(
         new THREE.SphereGeometry(parts.shineRadius, 8, 6),
-        new THREE.MeshBasicMaterial({ color: 0xffffff })
+        shared?.eyeShineMat ?? new THREE.MeshBasicMaterial({ color: 0xffffff }),
       );
       shine.position.set(shineT.pos.x, shineT.pos.y, shineT.pos.z);
       setRot(shine, shineT.rot);
@@ -914,18 +964,20 @@ function buildFromOverride(
   buildEye(parts.eye.R, parts.pupil.R, parts.shine.R, "R");
   buildEye(parts.eye.L, parts.pupil.L, parts.shine.L, "L");
 
-  // Mouth
+  // Mouth — color is fixed brown across letters, so the material is
+  // shared. Mouth shape geometry is built per-letter inside makeMouth.
   if (!isHidden("smile") && isVisibleSize(parts.smileRadius)) {
-    const mouthMat = new THREE.MeshStandardMaterial({ color: 0x6b1d10 });
+    const mouthMat = shared?.smileMat ?? new THREE.MeshStandardMaterial({ color: 0x6b1d10 });
     const mouthGroup = makeMouth(parts.mouthShape, parts.smileRadius, mouthMat);
     mouthGroup.position.set(parts.smile.pos.x, parts.smile.pos.y, parts.smile.pos.z);
     setRot(mouthGroup, parts.smile.rot);
     inner.add(mouthGroup);
   }
 
-  // Cheeks
+  // Cheeks — pink + opacity fixed across letters; share material.
+  // Sphere geometry uses per-letter cheekRadius so it stays per-instance.
   if (isVisibleSize(parts.cheekRadius)) {
-    const cheekMat = new THREE.MeshStandardMaterial({ color: 0xff8aaa, transparent: true, opacity: 0.75 });
+    const cheekMat = shared?.cheekMat ?? new THREE.MeshStandardMaterial({ color: 0xff8aaa, transparent: true, opacity: 0.75 });
     const cheekGeo = new THREE.SphereGeometry(parts.cheekRadius, 10, 8);
     if (!isHidden("cheek:R")) {
       const cheekR = new THREE.Mesh(cheekGeo, cheekMat);
@@ -946,9 +998,10 @@ function buildFromOverride(
   // Arms — pivots are always created so the animation code can write to
   // them without null checks; we only suppress adding them to the scene
   // when hidden. Authored rest rotation is captured for restoring after
-  // celebrations / waves.
+  // celebrations / waves. limbMat carries the per-letter body color so
+  // it stays per-instance; the arm capsule geometry is shared.
   const limbMat = new THREE.MeshStandardMaterial({ color, roughness: 0.5 });
-  const armGeo = new THREE.CapsuleGeometry(0.1, 0.45, 4, 8);
+  const armGeo = shared?.armGeo ?? new THREE.CapsuleGeometry(0.1, 0.45, 4, 8);
   const armPivotR = new THREE.Group();
   armPivotR.position.set(parts.arm.R.pos.x, parts.arm.R.pos.y, parts.arm.R.pos.z);
   setRot(armPivotR, parts.arm.R.rot);
@@ -973,9 +1026,12 @@ function buildFromOverride(
   const armRestR = { ...parts.arm.R.rot };
   const armRestL = { ...parts.arm.L.rot };
 
-  // Feet
+  // Feet — material is fixed brown across letters; share. The override
+  // path lets each letter author its own footRadius so the sphere
+  // geometry stays per-letter (the procedural path's foot radius is
+  // fixed and uses shared.footGeo).
   if (isVisibleSize(parts.footRadius)) {
-    const footMat = new THREE.MeshStandardMaterial({ color: 0x3a2a14, roughness: 0.7 });
+    const footMat = shared?.footMat ?? new THREE.MeshStandardMaterial({ color: 0x3a2a14, roughness: 0.7 });
     const footGeo = new THREE.SphereGeometry(parts.footRadius, 10, 8);
     if (!isHidden("foot:R")) {
       const footR = new THREE.Mesh(footGeo, footMat);

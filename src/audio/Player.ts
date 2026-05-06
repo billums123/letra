@@ -54,6 +54,15 @@ class AudioPlayer {
   // particular voice can call setPreferredVoice before init.
   private preferredSlug: string | null = null;
 
+  // Tracks the in-flight init() so play() / playSequence() / enqueue()
+  // can await it before resolving their mode. Without this, bootstrap
+  // code that fires within ~100 ms of page load (e.g. a game's 250 ms
+  // setTimeout intro prompt landing on a deep-link reload) races init
+  // and falls back to the Web Speech voice — the wrong voice for the
+  // very first prompt the kid hears. Multiple init() calls return the
+  // same promise so they don't trigger duplicate manifest fetches.
+  private initPromise: Promise<void> | null = null;
+
   setPreferredVoice(slug: string | null): void {
     this.preferredSlug = slug;
   }
@@ -110,7 +119,15 @@ class AudioPlayer {
     for (const l of this.listeners) l();
   }
 
-  async init(): Promise<void> {
+  init(): Promise<void> {
+    // Memoize so repeated init() calls (e.g. from React StrictMode
+    // double-invoke or HMR re-mounts) reuse the original promise.
+    if (this.initPromise) return this.initPromise;
+    this.initPromise = this._init();
+    return this.initPromise;
+  }
+
+  private async _init(): Promise<void> {
     // Try the registry first.
     try {
       const regRes = await fetch("/audio/voices.json", { cache: "no-store" });
@@ -265,6 +282,9 @@ class AudioPlayer {
   // Plays a clip by id (key into the manifest). Returns a promise that resolves
   // when the clip finishes (or immediately on error so callers don't deadlock).
   async play(id: string, opts: { interrupt?: boolean } = {}): Promise<void> {
+    // Wait out any in-flight init so the first prompt after page load
+    // doesn't ship under the wrong (speech-fallback) mode.
+    if (this.initPromise) await this.initPromise;
     if (this.mode === "muted") return;
     if (opts.interrupt !== false) this.stop();
     if (this.mode === "elevenlabs") {
