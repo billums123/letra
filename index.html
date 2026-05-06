@@ -6,6 +6,17 @@
          manual recovery; we don't link it here because some browsers
          prefer SVG over PNG and would override the new icon. -->
     <link rel="icon" type="image/png" href="/letra-icon.png" />
+    <!-- iOS home-screen icon. Without this, "Add to Home Screen" in
+         Safari falls back to a screenshot of the page or a generic
+         tile — branded icon is the difference between Letra looking
+         like an app vs. looking like a bookmark. iOS scales the
+         256×256 PNG down to the 180×180 it actually displays. -->
+    <link rel="apple-touch-icon" href="/letra-icon.png" />
+    <!-- Make the installed PWA open in real standalone mode on iOS
+         and use a translucent status bar that lets the sky-blue
+         background bleed under it for a fullscreen feel. -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
     <meta name="theme-color" content="#7ec8ff" />
     <meta name="description" content="Letra — a cute 3D letter-learning adventure for pre-K kids." />
