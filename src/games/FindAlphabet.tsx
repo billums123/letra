@@ -170,6 +170,13 @@ export function FindAlphabetGame() {
     engine.tickHook = (_dt, _t, playerPos) => {
       for (const entry of lettersRef.current) {
         entry.character.faceTowards(engine.camera.position.x, engine.camera.position.z);
+        // Proximity push drives the soft greeting wave + glow boost when
+        // the kid wanders close. Skip during the dance-party finale so
+        // every letter doesn't bob mid-choreography.
+        if (!danceModeRef.current) {
+          const d = distanceXZ(playerPos, entry.character.positionXZ());
+          entry.character.setPlayerProximity(d);
+        }
       }
       if (danceModeRef.current) {
         runDanceTick(engine, playerPos);
