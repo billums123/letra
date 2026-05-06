@@ -354,7 +354,7 @@ export default defineConfig({
           // for Android Chrome to install Letra with the right icon.
           {
             src: "letra-icon.png",
-            sizes: "1024x1024",
+            sizes: "512x512",
             type: "image/png",
             purpose: "any",
           },
@@ -431,5 +431,23 @@ export default defineConfig({
   preview: {
     port: 4173,
     strictPort: false,
+  },
+  build: {
+    rollupOptions: {
+      output: {
+        // Split Three.js into its own long-lived chunk. Three rarely
+        // changes between deploys — when our app code ships, returning
+        // kids only re-fetch the ~100 KB of changed app code instead
+        // of the full ~250 KB gzipped bundle. The chunk's content hash
+        // only flips when the three dep itself updates, so HTTP caches
+        // hit reliably across deploys. Dev-only editor chunks
+        // (LetterEditor, AlienEditor, etc.) keep splitting via React.lazy
+        // because anything not matched here falls into the default
+        // bundling rules.
+        manualChunks(id) {
+          if (id.includes("node_modules/three/")) return "three";
+        },
+      },
+    },
   },
 });

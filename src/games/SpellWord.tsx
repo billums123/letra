@@ -10,6 +10,11 @@ import { makeBurst } from "../engine/particles";
 import { pickClearSpawn } from "../engine/world";
 import { SPELL_WORDS } from "../audio/types";
 import { useGameStore } from "../state/store";
+import {
+  getWordAsset,
+  loadCreatureGeometry,
+  type WordAssetHandles,
+} from "../engine/wordAssets";
 
 // "Spell-the-Word" adventure: pick a missing-pet word, scatter the letters
 // around the world avoiding obstacles, and walk over them in order. On
@@ -97,6 +102,12 @@ function SpellWordRound({
   // together (the TREE/BOOK problem) don't collapse into a single
   // stand-still chain-collect.
   const lastCollectPosRef = useRef<{ x: number; z: number } | null>(null);
+  // Optional 3D payoff (cat / dog / etc.) spawned when the kid finishes
+  // spelling the word. Held in a ref so the unmount cleanup can dispose
+  // it even if the kid taps Next-Word mid-animation. Words without an
+  // entry in WORD_ASSETS just keep the existing audio-only reveal.
+  const payoffRef = useRef<WordAssetHandles | null>(null);
+  const payoffActorRef = useRef<{ update: (dt: number, t: number) => void } | null>(null);
 
   const onEngineReady = (engine: Engine) => {
     engineRef.current = engine;
@@ -231,6 +242,10 @@ function SpellWordRound({
       // ×2 after 10, etc.). The store also auto-fires Word Wizard
       // when the kid crosses 25 total completions across any words.
       useGameStore.getState().recordSpellCompletion(word.word);
+      // 3D payoff — words with a registered WordAsset (cat, dog, …)
+      // spawn the creature in front of the kid and animate it in.
+      // Words without an asset keep the existing audio-only reveal.
+      spawnPayoff(engine, playerPos);
       // playSequence respects the audio Player's sequenceVersion guard,
       // so when the kid taps "Next word" mid-reveal the celebration
       // clip won't fire afterwards and clobber the next round's prompt.
@@ -257,9 +272,51 @@ function SpellWordRound({
         dispose?.();
       }
       lettersRef.current = [];
+      // Tear down the optional 3D payoff. The actor wrapper above just
+      // forwards ticks; we drop both halves so HMR and Next-Word
+      // remounts don't leave a creature standing in the world.
+      if (payoffActorRef.current) {
+        engine.removeActor(payoffActorRef.current);
+        payoffActorRef.current = null;
+      }
+      if (payoffRef.current) {
+        engine.scene.remove(payoffRef.current.group);
+        payoffRef.current.dispose();
+        payoffRef.current = null;
+      }
       engine.tickHook = undefined;
     };
   }, []);
+
+  // Build + mount the 3D payoff for this word, if one is registered.
+  // Spawns at the player's current position, oriented so the creature
+  // walks toward the camera (negative Z) on entry. No-op for words
+  // without a WordAsset entry.
+  const spawnPayoff = (engine: Engine, playerPos: THREE.Vector3) => {
+    const asset = getWordAsset(word.word);
+    if (!asset) return;
+    const geometry = loadCreatureGeometry(word.word);
+    const handles = asset.build(geometry);
+    // Spawn point: a couple metres in front of the kid (world +Z is
+    // toward the chase camera). Walker translates along its local +X
+    // so the creature trots in from camera-left and lands centred on
+    // this spot. We rotate slightly so the face angles toward the
+    // camera once it stops, instead of staring sideways across the
+    // frame.
+    const endX = playerPos.x;
+    const endZ = playerPos.z + 2;
+    handles.group.position.set(endX, engine.terrainHeight?.(endX, endZ) ?? 0, endZ);
+    handles.group.rotation.y = -Math.PI / 6;
+    engine.scene.add(handles.group);
+    payoffRef.current = handles;
+    const actor = {
+      update(dt: number, t: number) {
+        handles.tick(dt, t);
+      },
+    };
+    engine.addActor(actor);
+    payoffActorRef.current = actor;
+  };
 
   const targets = displayWord.split("").map((L, i) => ({ letter: L, found: i < foundCount }));
 

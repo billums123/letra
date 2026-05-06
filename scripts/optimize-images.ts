@@ -19,7 +19,12 @@ import sharp from "sharp";
 
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "..");
 const PUBLIC = path.join(ROOT, "public");
-const BACKUP = path.join(PUBLIC, "_originals");
+// Source-of-truth originals live OUTSIDE public/ so Vite doesn't ship
+// them to production (Vite copies all of public/ into dist/, and the
+// PWA service worker's globPatterns precaches every PNG in dist/ —
+// 30+ MB of unused originals would otherwise land in every kid's
+// device cache on first install).
+const BACKUP = path.join(ROOT, "assets-source", "_originals");
 
 type Spec = {
   rel: string;          // path relative to public/
@@ -37,8 +42,11 @@ const SPECS: Spec[] = [
   // Aspect is 3:2 (~390 CSS px wide), so 1536 covers ~4× retina without
   // upscaling beyond what the original asset gave us.
   { rel: "letra-title.png", maxLong: 1536 },
-  // Square favicon — small target footprint.
-  { rel: "letra-icon.png", maxLong: 256 },
+  // Square favicon + PWA icon. 512² is the sweet spot: still ≤200 KB
+  // when re-encoded by sharp, and big enough that Android adaptive
+  // icons (≥432² for full mask coverage) and iOS apple-touch-icon
+  // (180² minimum) both render crisp without upscaling.
+  { rel: "letra-icon.png", maxLong: 512 },
   // Wide case-picker tiles, displayed up to 150 CSS px tall. The
   // gpt-image-1 source consistently lets characters touch (or clip
   // through) the canvas edges no matter how the prompt yells about
@@ -138,7 +146,7 @@ async function main() {
   console.log(
     `\nTotal: ${(totalBefore / 1024 / 1024).toFixed(2)} MB → ${(totalAfter / 1024 / 1024).toFixed(2)} MB  (-${pct}%)`,
   );
-  console.log(`Originals backed up under public/_originals/.`);
+  console.log(`Originals backed up under assets-source/_originals/.`);
 }
 
 main().catch((err) => {
