@@ -354,7 +354,7 @@ export default defineConfig({
           // for Android Chrome to install Letra with the right icon.
           {
             src: "letra-icon.png",
-            sizes: "1024x1024",
+            sizes: "512x512",
             type: "image/png",
             purpose: "any",
           },

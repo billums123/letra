@@ -88,7 +88,7 @@ export function installIOSKeepalive(): void {
         artist: "Letra — Learn Letters in 3D",
         album: "Letra",
         artwork: [
-          { src: "/letra-icon.png", sizes: "1024x1024", type: "image/png" },
+          { src: "/letra-icon.png", sizes: "512x512", type: "image/png" },
         ],
       });
       // Treat play / pause from the lock screen as no-ops — we don't

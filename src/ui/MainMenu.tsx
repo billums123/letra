@@ -498,6 +498,14 @@ export function MainMenu() {
           >
             {compact ? "📝" : "📝 Word"}
           </button>
+          <button
+            type="button"
+            onClick={() => setScreen("word-asset-editor")}
+            aria-label="Open the word-asset (cat / dog) editor"
+            style={compact ? compactCornerBtn : cornerBtn}
+          >
+            {compact ? "🐾" : "🐾 Asset"}
+          </button>
         </div>
       )}
 

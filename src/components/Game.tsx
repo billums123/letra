@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { lazy, Suspense, useEffect } from "react";
 import { useGameStore, type Screen } from "../state/store";
 import { useInputBootstrap } from "../input/useInput";
 import { VirtualJoystick } from "../input/VirtualJoystick";
@@ -9,15 +9,50 @@ import { MENU_TRACK, pickGameTrack } from "../audio/songs";
 import { SpellWordGame } from "../games/SpellWord";
 import { FindAlphabetGame } from "../games/FindAlphabet";
 import { SoundMatchGame } from "../games/SoundMatch";
-import { LetterTest } from "../ui/LetterTest";
-import { LetterEditor } from "../ui/LetterEditor";
-import { AlienEditor } from "../ui/AlienEditor";
-import { QTailEditor } from "../ui/QTailEditor";
-import { TrophyLab } from "../ui/TrophyLab";
-import { AudioTester } from "../ui/AudioTester";
-import { SpellWordBuilder } from "../ui/SpellWordBuilder";
 import { EarnedTrophyModal } from "../ui/EarnedTrophyModal";
 import { isDev } from "../util/isDev";
+
+// Dev-only screens are code-split: their bundles only fetch when an
+// authoring screen actually mounts (i.e. on a localhost / preview
+// build, after a dev clicks the corresponding menu button). In a
+// production build, isDev() returns false at runtime so these chunks
+// never load for kids — and crucially, the dynamic import() also keeps
+// them out of the eager prod bundle, where they used to add ~150-300 KB
+// of code that never executed.
+const LetterTest = lazy(() => import("../ui/LetterTest").then((m) => ({ default: m.LetterTest })));
+const LetterEditor = lazy(() => import("../ui/LetterEditor").then((m) => ({ default: m.LetterEditor })));
+const AlienEditor = lazy(() => import("../ui/AlienEditor").then((m) => ({ default: m.AlienEditor })));
+const QTailEditor = lazy(() => import("../ui/QTailEditor").then((m) => ({ default: m.QTailEditor })));
+const TrophyLab = lazy(() => import("../ui/TrophyLab").then((m) => ({ default: m.TrophyLab })));
+const AudioTester = lazy(() => import("../ui/AudioTester").then((m) => ({ default: m.AudioTester })));
+const SpellWordBuilder = lazy(() =>
+  import("../ui/SpellWordBuilder").then((m) => ({ default: m.SpellWordBuilder })),
+);
+const WordAssetEditor = lazy(() =>
+  import("../ui/WordAssetEditor").then((m) => ({ default: m.WordAssetEditor })),
+);
+
+// Minimal full-screen fallback while a dev editor's chunk loads. On
+// localhost the chunk is ready in <50 ms; this just prevents a blank
+// flash while it streams.
+function DevLoading() {
+  return (
+    <div
+      style={{
+        position: "absolute",
+        inset: 0,
+        display: "grid",
+        placeItems: "center",
+        background: "#1a1f2c",
+        color: "#9aa3b8",
+        fontSize: 14,
+        fontFamily: "ui-monospace, Menlo, monospace",
+      }}
+    >
+      Loading editor…
+    </div>
+  );
+}
 
 // Virtual URLs we sync the current screen to for analytics. Each game
 // mode gets its own path so Cloudflare Web Analytics treats it as a
@@ -38,6 +73,7 @@ const SCREEN_PATHS: Record<Screen, string> = {
   "trophy-lab": "/dev/trophy-lab",
   "audio-tester": "/dev/audio-tester",
   "word-builder": "/dev/word-builder",
+  "word-asset-editor": "/dev/word-asset-editor",
 };
 
 export function Game() {
@@ -103,7 +139,8 @@ export function Game() {
         screen === "q-tail-editor" ||
         screen === "trophy-lab" ||
         screen === "audio-tester" ||
-        screen === "word-builder")
+        screen === "word-builder" ||
+        screen === "word-asset-editor")
     ) {
       goToMenu();
     }
@@ -127,7 +164,8 @@ export function Game() {
       screen === "q-tail-editor" ||
       screen === "trophy-lab" ||
       screen === "audio-tester" ||
-      screen === "word-builder"
+      screen === "word-builder" ||
+      screen === "word-asset-editor"
     ) {
       music.stop();
     } else {
@@ -141,13 +179,26 @@ export function Game() {
       {screen === "spell-word" && <SpellWordGame />}
       {screen === "find-alphabet" && <FindAlphabetGame />}
       {screen === "sound-match" && <SoundMatchGame />}
-      {dev && screen === "letter-test" && <LetterTest />}
-      {dev && screen === "letter-editor" && <LetterEditor />}
-      {dev && screen === "alien-editor" && <AlienEditor />}
-      {dev && screen === "q-tail-editor" && <QTailEditor />}
-      {dev && screen === "trophy-lab" && <TrophyLab />}
-      {dev && screen === "audio-tester" && <AudioTester />}
-      {dev && screen === "word-builder" && <SpellWordBuilder />}
+      {dev &&
+        (screen === "letter-test" ||
+          screen === "letter-editor" ||
+          screen === "alien-editor" ||
+          screen === "q-tail-editor" ||
+          screen === "trophy-lab" ||
+          screen === "audio-tester" ||
+          screen === "word-builder" ||
+          screen === "word-asset-editor") && (
+          <Suspense fallback={<DevLoading />}>
+            {screen === "letter-test" && <LetterTest />}
+            {screen === "letter-editor" && <LetterEditor />}
+            {screen === "alien-editor" && <AlienEditor />}
+            {screen === "q-tail-editor" && <QTailEditor />}
+            {screen === "trophy-lab" && <TrophyLab />}
+            {screen === "audio-tester" && <AudioTester />}
+            {screen === "word-builder" && <SpellWordBuilder />}
+            {screen === "word-asset-editor" && <WordAssetEditor />}
+          </Suspense>
+        )}
       <VirtualJoystick visible={screen !== "menu" && screen !== "trophy-lab"} />
       {/* Mounted at the app root so trophy-earn celebrations fire over
           any screen — gameplay, menu, or the trophy lab itself. */}
