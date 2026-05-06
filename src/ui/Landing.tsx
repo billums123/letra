@@ -134,8 +134,9 @@ export function Landing() {
             color: "#16314c",
           }}
         >
-          A free 3D letter-learning adventure for pre-K kids. Walk up to
-          letters, hear them, earn trophies.
+          A free 3D game that helps pre-K kids learn the shape and sound
+          of letters and spell basic words. No ads, no accounts, no
+          tracking.
         </p>
 
         <PlayButton onClick={handlePlay} />
