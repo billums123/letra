@@ -145,9 +145,13 @@ function SpellWordRound({
     lettersRef.current = letters;
 
     engine.tickHook = (_dt, _t, playerPos) => {
-      // Keep every letter facing the camera every frame.
+      // Keep every letter facing the camera every frame, and push the
+      // current player distance in so each letter can react softly when
+      // the kid approaches (subtle glow boost + one-shot greeting wave).
       for (const entry of lettersRef.current) {
         entry.character.faceTowards(engine.camera.position.x, engine.camera.position.z);
+        const d = distanceXZ(playerPos, entry.character.positionXZ());
+        entry.character.setPlayerProximity(d);
       }
       // After a pickup, gate the next collection on the player having
       // physically walked out of the previous letter's radius. Without

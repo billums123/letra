@@ -220,9 +220,13 @@ export function SoundMatchGame() {
     buildRound(engine, font, 1);
 
     engine.tickHook = (_dt, _t, playerPos) => {
-      // Billboard every letter toward the camera each frame.
+      // Billboard every letter toward the camera each frame, and push
+      // proximity so each letter glows + waves softly as the kid walks
+      // up (rising-edge greeting only — no wave-spam if they hover).
       for (const entry of lettersRef.current) {
         entry.character.faceTowards(engine.camera.position.x, engine.camera.position.z);
+        const d = distanceXZ(playerPos, entry.character.positionXZ());
+        entry.character.setPlayerProximity(d);
       }
       if (lockRef.current) return;
       const target = targetRef.current;

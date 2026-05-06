@@ -478,7 +478,81 @@ export type LetterCharacter = {
   // affects the outer Y-axis pivot — the inner animation group keeps its
   // own bob/spin animation separate so they never fight.
   faceTowards: (x: number, z: number) => void;
+  // Tell the letter how far away the player is so it can react: a soft
+  // glow boost as the kid approaches, plus a one-shot greeting wave the
+  // first time they cross into noticing range. Re-arms once the player
+  // walks back outside the wider reset radius.
+  setPlayerProximity: (distance: number) => void;
 };
+
+// Proximity reaction tuning. Distances are in world units.
+//   NEAR/FAR drive the smooth glow boost — full at NEAR, none past FAR.
+//   NOTICE_ENTER fires the one-shot greeting (rising edge only).
+//   NOTICE_RESET re-arms the greeting once the player walks back out.
+//   GREET_DURATION_S controls how long the wave + small hop runs.
+const PROX_NEAR = 2.5;
+const PROX_FAR = 6.5;
+const NOTICE_ENTER = 4.0;
+const NOTICE_RESET = 6.0;
+const GREET_DURATION_S = 0.7;
+
+type ProximityState = {
+  // Smoothed 0..1: 1 = right next to letter, 0 = past PROX_FAR.
+  smooth: number;
+  // 0 = idle, in (0, 1] = greeting playing (advances at 1/duration per second).
+  greetT: number;
+  // Once a greeting completes the letter sits quiet until the player
+  // walks back outside NOTICE_RESET — keeps it from spamming the wave
+  // every time the kid wiggles around the threshold.
+  greetLocked: boolean;
+  // Latest distance pushed in by the game; -1 = never set yet.
+  lastDistance: number;
+};
+
+function makeProximityState(): ProximityState {
+  return { smooth: 0, greetT: 0, greetLocked: false, lastDistance: -1 };
+}
+
+// Advance the smoothing + greeting state machine. Call once per frame
+// per letter from update(). Distance < 0 means "not driven this frame";
+// in that case we treat it as far so the letter relaxes back to idle.
+function tickProximityState(state: ProximityState, dt: number) {
+  const dist = state.lastDistance < 0 ? Infinity : state.lastDistance;
+
+  // Smoothed glow proximity. Linear ramp from FAR→NEAR, then a soft
+  // exponential blend so we don't snap on/off as the kid walks past.
+  const target = Math.max(0, Math.min(1, 1 - (dist - PROX_NEAR) / (PROX_FAR - PROX_NEAR)));
+  const k = Math.min(1, dt * 5);
+  state.smooth += (target - state.smooth) * k;
+
+  // Greeting state machine.
+  if (state.greetT > 0) {
+    state.greetT += dt / GREET_DURATION_S;
+    if (state.greetT >= 1) {
+      state.greetT = 0;
+      state.greetLocked = true;
+    }
+  } else if (state.greetLocked) {
+    if (dist > NOTICE_RESET) state.greetLocked = false;
+  } else if (dist < NOTICE_ENTER) {
+    state.greetT = 0.0001;
+  }
+}
+
+// Extra Y-offset for the greeting hop. Single sin lobe across the
+// greeting's lifetime so the letter pops up and settles back down.
+function greetHop(state: ProximityState): number {
+  if (state.greetT <= 0) return 0;
+  return Math.sin(state.greetT * Math.PI) * 0.35;
+}
+
+// Extra arm-swing for the greeting. A few quick oscillations enveloped
+// by a sin lobe so the wave fades in and out smoothly.
+function greetArmSwing(state: ProximityState): number {
+  if (state.greetT <= 0) return 0;
+  const env = Math.sin(state.greetT * Math.PI);
+  return Math.sin(state.greetT * Math.PI * 6) * env * 0.9;
+}
 
 export type LetterOptions = {
   letter: string;
@@ -641,6 +715,12 @@ export function buildLetterCharacter(font: Font, opts: LetterOptions): LetterCha
   let celebrationT = -1;
   let baseY = opts.baseY ?? 0;
   let isCollected = false;
+  const proximity = makeProximityState();
+  // Capture the glow's authored radius / opacity so the proximity boost
+  // is applied as a multiplier each frame rather than accumulating.
+  const glowMat = glow.material as THREE.MeshBasicMaterial;
+  const glowBaseOpacity = glowMat.opacity;
+  const glowBaseScale = glow.scale.x;
 
   const character: LetterCharacter = {
     group,
@@ -657,6 +737,7 @@ export function buildLetterCharacter(font: Font, opts: LetterOptions): LetterCha
     update(dt, _t) {
       bobPhase += dt * 2;
       swayPhase += dt * 1.4;
+      tickProximityState(proximity, dt);
       // Idle: gentle bob (height) and a small Z-axis sway. We deliberately
       // don't touch group.rotation.y here — that's owned by faceTowards()
       // for camera billboarding. A tiny rotation.z gives the "alive" feel
@@ -671,6 +752,13 @@ export function buildLetterCharacter(font: Font, opts: LetterOptions): LetterCha
       // Arms swing slightly idle
       armPivotR.rotation.z = Math.sin(bobPhase * 1.2) * 0.12;
       armPivotL.rotation.z = -Math.sin(bobPhase * 1.2) * 0.12;
+
+      // Proximity glow — keep this even during celebration since the
+      // ground glow lives on the outer group anyway.
+      const glowK = proximity.smooth;
+      glowMat.opacity = glowBaseOpacity * (1 + 0.6 * glowK);
+      const glowScale = glowBaseScale * (1 + 0.18 * glowK);
+      glow.scale.set(glowScale, glowScale, 1);
 
       if (celebrationT >= 0) {
         celebrationT += dt;
@@ -691,6 +779,17 @@ export function buildLetterCharacter(font: Font, opts: LetterOptions): LetterCha
         }
       } else {
         inner.scale.setScalar(1);
+        // Greeting overlay — only applied when not celebrating, so the
+        // big payoff animation never has to compete with a tiny wave.
+        const hop = greetHop(proximity);
+        if (hop > 0) {
+          group.position.y = baseY + baseBob + hop;
+          const wave = greetArmSwing(proximity);
+          // Right arm waves a touch more than the left so it reads as a
+          // friendly hello rather than two identical robot arms.
+          armPivotR.rotation.z = Math.sin(bobPhase * 1.2) * 0.12 + wave;
+          armPivotL.rotation.z = -Math.sin(bobPhase * 1.2) * 0.12 - wave * 0.4;
+        }
       }
     },
     celebrate() {
@@ -705,6 +804,9 @@ export function buildLetterCharacter(font: Font, opts: LetterOptions): LetterCha
       // Letters are built with their face on local +Z. atan2(dx, dz) yields
       // the yaw that aligns +Z with (dx, dz).
       group.rotation.y = Math.atan2(dx, dz);
+    },
+    setPlayerProximity(distance) {
+      proximity.lastDistance = distance;
     },
   };
 
@@ -918,6 +1020,10 @@ function buildFromOverride(
   let isCollected = false;
   let mutableBaseY = baseY;
   const wave = parts.wave ?? DEFAULT_WAVE;
+  const proximity = makeProximityState();
+  const glowMat = glow.material as THREE.MeshBasicMaterial;
+  const glowBaseOpacity = glowMat.opacity;
+  const glowBaseScale = glow.scale.x;
 
   const character: LetterCharacter = {
     group,
@@ -930,6 +1036,7 @@ function buildFromOverride(
     update(dt, _t) {
       bobPhase += dt * 2;
       swayPhase += dt * 1.4;
+      tickProximityState(proximity, dt);
       // Bob upward only — Math.abs keeps the lower half of the sine wave
       // out of the equation so feet never sink through the ground.
       const baseBob = Math.abs(Math.sin(bobPhase)) * 0.12;
@@ -943,6 +1050,11 @@ function buildFromOverride(
       const idleSwing = Math.sin(bobPhase * 1.2) * 0.12;
       armPivotR.rotation.set(armRestR.x, armRestR.y, armRestR.z + idleSwing);
       armPivotL.rotation.set(armRestL.x, armRestL.y, armRestL.z - idleSwing);
+
+      const glowK = proximity.smooth;
+      glowMat.opacity = glowBaseOpacity * (1 + 0.6 * glowK);
+      const glowScale = glowBaseScale * (1 + 0.18 * glowK);
+      glow.scale.set(glowScale, glowScale, 1);
 
       if (celebrationT >= 0) {
         celebrationT += dt;
@@ -963,6 +1075,15 @@ function buildFromOverride(
         }
       } else {
         inner.scale.setScalar(1);
+        // Greeting overlay — adds a small hop and an extra arm wave on
+        // top of the authored rest pose, only when not celebrating.
+        const hop = greetHop(proximity);
+        if (hop > 0) {
+          group.position.y = mutableBaseY + baseBob + hop;
+          const extra = greetArmSwing(proximity);
+          armPivotR.rotation.set(armRestR.x, armRestR.y, armRestR.z + idleSwing + extra);
+          armPivotL.rotation.set(armRestL.x, armRestL.y, armRestL.z - idleSwing - extra * 0.4);
+        }
       }
     },
     celebrate() {
@@ -975,6 +1096,9 @@ function buildFromOverride(
       const dx = x - group.position.x;
       const dz = z - group.position.z;
       group.rotation.y = Math.atan2(dx, dz);
+    },
+    setPlayerProximity(distance) {
+      proximity.lastDistance = distance;
     },
   };
 
