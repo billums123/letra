@@ -3,6 +3,7 @@ import { useGameStore, type LetterCase } from "../state/store";
 import { audio } from "../audio/Player";
 import { StickerBook } from "./StickerBook";
 import { TrophyShelf } from "./TrophyShelf";
+import { ParentSettings } from "./ParentSettings";
 import { TROPHIES } from "../state/trophies";
 import { ALPHABET } from "../audio/types";
 import { isDev } from "../util/isDev";
@@ -236,6 +237,7 @@ export function MainMenu() {
   const setLetterCase = useGameStore((s) => s.setLetterCase);
   const [showStickers, setShowStickers] = useState(false);
   const [showTrophyShelf, setShowTrophyShelf] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
   const trophies = useGameStore((s) => s.trophies);
   const earnedTrophyCount = TROPHIES.filter(
     (t) => (trophies[t.id] ?? 0) > 0,
@@ -430,18 +432,31 @@ export function MainMenu() {
         {SHOW_VOICE_PICKER && <VoicePicker audioMode={audioMode} />}
       </footer>
 
-      {/* Authoring tools — only mounted on localhost / dev builds, never
-          shown to actual kid users. See src/util/isDev.ts. */}
-      {isDev() && (
-        <div
-          style={{
-            position: "absolute",
-            top: compact ? 12 : 24,
-            left: compact ? 12 : 24,
-            display: "flex",
-            gap: 8,
-          }}
+      {/* Top-left corner row. Always renders the parent-settings gear;
+          authoring tools sit beside it only on localhost / dev builds
+          (see src/util/isDev.ts) and never ship to kid users. */}
+      <div
+        style={{
+          position: "absolute",
+          top: compact ? 12 : 24,
+          left: compact ? 12 : 24,
+          display: "flex",
+          gap: 8,
+          alignItems: "center",
+        }}
+      >
+        <button
+          type="button"
+          onClick={() => setShowSettings(true)}
+          aria-label="Open parent settings"
+          style={compact ? compactGearBtn : gearBtn}
         >
+          <span aria-hidden style={{ display: "block", lineHeight: 1 }}>
+            ⚙️
+          </span>
+        </button>
+        {isDev() && (
+          <>
           <button
             type="button"
             onClick={() => setScreen("letter-test")}
@@ -506,8 +521,9 @@ export function MainMenu() {
           >
             {compact ? "🐾" : "🐾 Asset"}
           </button>
-        </div>
-      )}
+          </>
+        )}
+      </div>
 
       {/* Trophy-shelf button — top-right corner of the menu. Always
           visible (the shelf displays locked silhouettes for unearned
@@ -580,6 +596,10 @@ export function MainMenu() {
       <TrophyShelf
         open={showTrophyShelf}
         onClose={() => setShowTrophyShelf(false)}
+      />
+      <ParentSettings
+        open={showSettings}
+        onClose={() => setShowSettings(false)}
       />
 
       {SHOW_TROPHIES && (
@@ -1330,6 +1350,33 @@ const cornerBtn: React.CSSProperties = {
   fontWeight: 800,
   cursor: "pointer",
   boxShadow: "0 4px 0 rgba(0,0,0,0.12)",
+};
+
+// Parent-settings gear button — same toy-button language as the
+// dev tools, but a circular icon-only chip so it reads as
+// "preferences" rather than another authoring control.
+const gearBtn: React.CSSProperties = {
+  appearance: "none",
+  border: "4px solid white",
+  background: "rgba(255,255,255,0.85)",
+  color: "#3a2a14",
+  borderRadius: "50%",
+  width: 48,
+  height: 48,
+  fontSize: 22,
+  cursor: "pointer",
+  boxShadow: "0 4px 0 rgba(0,0,0,0.12)",
+  display: "grid",
+  placeItems: "center",
+  padding: 0,
+};
+
+const compactGearBtn: React.CSSProperties = {
+  ...gearBtn,
+  width: 40,
+  height: 40,
+  fontSize: 18,
+  borderWidth: 3,
 };
 
 // Compact icon-only variant for the dev tools on phone — same affordance,

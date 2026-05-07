@@ -80,6 +80,16 @@ type GameState = {
   letterCase: LetterCase;
   setLetterCase: (c: LetterCase) => void;
 
+  // Master audio mix, set by the parent-gated settings panel. Volume
+  // is 0..1; mute hard-silences voice + music + sfx; musicEnabled
+  // toggles only the background score (voice + sfx still play).
+  audioVolume: number;
+  setAudioVolume: (v: number) => void;
+  musicEnabled: boolean;
+  setMusicEnabled: (e: boolean) => void;
+  audioMuted: boolean;
+  setAudioMuted: (m: boolean) => void;
+
   // Trophy state. trophies[id] is the count of times the kid has earned
   // that trophy (0 = unearned). Stack trophies grow indefinitely;
   // milestone trophies cap at 1.
@@ -129,6 +139,66 @@ const LETTER_CASE_KEY = "letra:letterCase";
 const TROPHIES_KEY = "letra:trophies";
 const SOUND_MATCH_COUNT_KEY = "letra:soundMatchCount";
 const SPELL_WORD_COUNTS_KEY = "letra:spellWordCounts";
+const AUDIO_VOLUME_KEY = "letra:audioVolume";
+const MUSIC_ENABLED_KEY = "letra:musicEnabled";
+const AUDIO_MUTED_KEY = "letra:audioMuted";
+
+function loadAudioVolume(): number {
+  try {
+    const raw = localStorage.getItem(AUDIO_VOLUME_KEY);
+    if (raw === null) return 1;
+    const n = Number(raw);
+    if (Number.isFinite(n) && n >= 0 && n <= 1) return n;
+  } catch {
+    // ignore
+  }
+  return 1;
+}
+
+function saveAudioVolume(v: number) {
+  try {
+    localStorage.setItem(AUDIO_VOLUME_KEY, String(v));
+  } catch {
+    // Non-fatal.
+  }
+}
+
+function loadMusicEnabled(): boolean {
+  try {
+    const raw = localStorage.getItem(MUSIC_ENABLED_KEY);
+    if (raw === "0") return false;
+    if (raw === "1") return true;
+  } catch {
+    // ignore
+  }
+  return true;
+}
+
+function saveMusicEnabled(e: boolean) {
+  try {
+    localStorage.setItem(MUSIC_ENABLED_KEY, e ? "1" : "0");
+  } catch {
+    // Non-fatal.
+  }
+}
+
+function loadAudioMuted(): boolean {
+  try {
+    const raw = localStorage.getItem(AUDIO_MUTED_KEY);
+    if (raw === "1") return true;
+  } catch {
+    // ignore
+  }
+  return false;
+}
+
+function saveAudioMuted(m: boolean) {
+  try {
+    localStorage.setItem(AUDIO_MUTED_KEY, m ? "1" : "0");
+  } catch {
+    // Non-fatal.
+  }
+}
 
 function loadAvatar(): AvatarKind {
   try {
@@ -342,6 +412,23 @@ export const useGameStore = create<GameState>((set, get) => ({
   setLetterCase: (c) => {
     saveLetterCase(c);
     set({ letterCase: c });
+  },
+
+  audioVolume: loadAudioVolume(),
+  setAudioVolume: (v) => {
+    const clamped = Math.max(0, Math.min(1, v));
+    saveAudioVolume(clamped);
+    set({ audioVolume: clamped });
+  },
+  musicEnabled: loadMusicEnabled(),
+  setMusicEnabled: (e) => {
+    saveMusicEnabled(e);
+    set({ musicEnabled: e });
+  },
+  audioMuted: loadAudioMuted(),
+  setAudioMuted: (m) => {
+    saveAudioMuted(m);
+    set({ audioMuted: m });
   },
 
   trophies: loadTrophies(),

@@ -20,6 +20,12 @@ class AudioPlayer {
   manifest: AudioManifest | null = null;
   voices: VoiceRegistryEntry[] = [];
   activeVoice: VoiceRegistryEntry | null = null;
+  // User-side master volume and mute, driven by the parent settings
+  // panel. Kept separate from `mode` so toggling mute doesn't lose the
+  // underlying ElevenLabs/speech selection — a mute is a runtime
+  // veto, not a capability change.
+  private userVolume = 1;
+  private userMuted = false;
   // Subscribers receive notifications when init/voice changes complete.
   private listeners = new Set<() => void>();
   // Single, reused HTMLAudioElement for every voice clip. iOS only
@@ -65,6 +71,16 @@ class AudioPlayer {
 
   setPreferredVoice(slug: string | null): void {
     this.preferredSlug = slug;
+  }
+
+  setVolume(v: number): void {
+    this.userVolume = Math.max(0, Math.min(1, v));
+    if (this.audioEl) this.audioEl.volume = this.userVolume;
+  }
+
+  setMuted(m: boolean): void {
+    this.userMuted = m;
+    if (m) this.stop();
   }
 
   // Lazily create + cache the single audio element. Setting playsinline
@@ -285,7 +301,7 @@ class AudioPlayer {
     // Wait out any in-flight init so the first prompt after page load
     // doesn't ship under the wrong (speech-fallback) mode.
     if (this.initPromise) await this.initPromise;
-    if (this.mode === "muted") return;
+    if (this.mode === "muted" || this.userMuted) return;
     if (opts.interrupt !== false) this.stop();
     if (this.mode === "elevenlabs") {
       // Yield once to let the AbortError from the just-paused previous
@@ -301,6 +317,7 @@ class AudioPlayer {
         // Swap the src on the cached element rather than creating a
         // new Audio — keeps the iOS unlock state intact across plays.
         a.src = this.clipUrl(id);
+        a.volume = this.userVolume;
         // Fast-forward to start in case the element was paused
         // mid-clip by a previous stop().
         try { a.currentTime = 0; } catch { /* not always settable until loadedmetadata */ }
@@ -331,7 +348,7 @@ class AudioPlayer {
 
   // Speak arbitrary text — used by speech-synthesis fallback or for debug.
   speak(text: string): Promise<void> {
-    if (this.mode === "muted") return Promise.resolve();
+    if (this.mode === "muted" || this.userMuted) return Promise.resolve();
     if (this.mode === "elevenlabs") {
       // No live synthesis path on ElevenLabs — for arbitrary text we just
       // resolve immediately. Use play() for known clip ids instead.
@@ -343,6 +360,7 @@ class AudioPlayer {
       if (this.speechVoice) utter.voice = this.speechVoice;
       utter.rate = 0.95;
       utter.pitch = 1.1;
+      utter.volume = this.userVolume;
       utter.onend = () => resolve();
       utter.onerror = () => resolve();
       window.speechSynthesis.speak(utter);

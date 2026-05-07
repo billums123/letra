@@ -5,6 +5,7 @@ import { VirtualJoystick } from "../input/VirtualJoystick";
 import { MainMenu } from "../ui/MainMenu";
 import { audio } from "../audio/Player";
 import { music } from "../audio/music";
+import { setSfxGain } from "../audio/sfx";
 import { MENU_TRACK, pickGameTrack } from "../audio/songs";
 import { SpellWordGame } from "../games/SpellWord";
 import { FindAlphabetGame } from "../games/FindAlphabet";
@@ -82,6 +83,9 @@ export function Game() {
   const setAudioMode = useGameStore((s) => s.setAudioMode);
   const goToMenu = useGameStore((s) => s.goToMenu);
   const voiceSlug = useGameStore((s) => s.voiceSlug);
+  const audioVolume = useGameStore((s) => s.audioVolume);
+  const audioMuted = useGameStore((s) => s.audioMuted);
+  const musicEnabled = useGameStore((s) => s.musicEnabled);
   const dev = isDev();
 
   // One-shot audio init at app boot. The store-resolved voice slug (if
@@ -154,7 +158,17 @@ export function Game() {
   // suspended AudioContext on the user's first gesture, so the source
   // we schedule here will start playing as soon as they tap anywhere
   // — no separate "prime" listener needed.
+  //
+  // Parent-settings overrides: musicEnabled=false silences the score
+  // entirely while still letting voice + sfx through; audioMuted=true
+  // silences the whole mix (voice mute is handled separately below,
+  // but we also stop music here so a long-decoded track doesn't keep
+  // playing from the moment the parent flips the switch).
   useEffect(() => {
+    if (audioMuted || !musicEnabled) {
+      music.stop();
+      return;
+    }
     if (screen === "menu") {
       void music.play(MENU_TRACK, 0.18);
     } else if (
@@ -171,7 +185,25 @@ export function Game() {
     } else {
       void music.play(pickGameTrack(), 0.16);
     }
-  }, [screen]);
+  }, [screen, audioMuted, musicEnabled]);
+
+  // Volume slider — fan out to every audio subsystem. Each one stores
+  // the factor and applies it to anything currently playing as well as
+  // to clips scheduled later, so a parent dragging the slider hears
+  // the change live.
+  useEffect(() => {
+    audio.setVolume(audioVolume);
+    music.setUserVolume(audioVolume);
+    setSfxGain(audioVolume);
+  }, [audioVolume]);
+
+  // Master mute. Voice + sfx route through user-level vetoes; music is
+  // stopped by the music effect above, but we kill the SFX bus here so
+  // any chime already mid-decay doesn't outlast the toggle.
+  useEffect(() => {
+    audio.setMuted(audioMuted);
+    setSfxGain(audioMuted ? 0 : audioVolume);
+  }, [audioMuted, audioVolume]);
 
   return (
     <div style={{ position: "absolute", inset: 0 }}>

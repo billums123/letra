@@ -5,6 +5,39 @@
 
 import { getMusicCtx as getCtx } from "./audioCtx";
 
+// Shared SFX gain bus. Every procedural cue (chimes, kid step, motor,
+// thrust, fireworks, alien wave) routes through this single node so
+// the parent settings panel can scale or mute the entire SFX layer
+// in one place. The bus base gain is 0.85 (acts as a soft limiter so
+// stacked bursts can't clip); the user-side volume slider multiplies
+// that down to 0 on full mute.
+const SFX_BUS_BASE = 0.85;
+let sfxBus: GainNode | null = null;
+let sfxUserVolume = 1;
+
+function getSfxBus(c: AudioContext): GainNode {
+  if (sfxBus) return sfxBus;
+  sfxBus = c.createGain();
+  sfxBus.gain.value = SFX_BUS_BASE * sfxUserVolume;
+  sfxBus.connect(c.destination);
+  return sfxBus;
+}
+
+// Set the global SFX volume factor (0..1). Persists across context
+// re-creations because we re-apply on bus creation. Callers should
+// pass 0 for a hard mute — the bus stops emitting on the next ramp.
+export function setSfxGain(v: number): void {
+  sfxUserVolume = Math.max(0, Math.min(1, v));
+  if (!sfxBus) return;
+  const c = getCtx();
+  if (!c) return;
+  const g = sfxBus.gain;
+  const target = SFX_BUS_BASE * sfxUserVolume;
+  g.cancelScheduledValues(c.currentTime);
+  g.setValueAtTime(g.value, c.currentTime);
+  g.linearRampToValueAtTime(Math.max(target, 0.0001), c.currentTime + 0.05);
+}
+
 // Lightweight tone helper. `wave` defaults to triangle which sounds friendly
 // (no harsh harmonics like sawtooth, no buzz like square).
 function tone(
@@ -26,7 +59,7 @@ function tone(
   gain.gain.setValueAtTime(0.0001, t0);
   gain.gain.exponentialRampToValueAtTime(gainPeak, t0 + 0.01);
   gain.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
-  osc.connect(gain).connect(c.destination);
+  osc.connect(gain).connect(getSfxBus(c));
   osc.start(t0);
   osc.stop(t0 + dur + 0.05);
 }
@@ -52,7 +85,7 @@ function glide(
   gain.gain.setValueAtTime(0.0001, t0);
   gain.gain.exponentialRampToValueAtTime(gainPeak, t0 + 0.01);
   gain.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
-  osc.connect(gain).connect(c.destination);
+  osc.connect(gain).connect(getSfxBus(c));
   osc.start(t0);
   osc.stop(t0 + dur + 0.05);
 }
@@ -170,7 +203,7 @@ export function playKidStep() {
   gain.gain.setValueAtTime(0.0001, t0);
   gain.gain.exponentialRampToValueAtTime(0.04, t0 + 0.005);
   gain.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.1);
-  osc.connect(gain).connect(c.destination);
+  osc.connect(gain).connect(getSfxBus(c));
   osc.start(t0);
   osc.stop(t0 + 0.15);
 }
@@ -222,7 +255,7 @@ function makeMotor(): Motor {
       master.gain.value = 0.35;
       rumbleGain.connect(master);
       buzzGain.connect(master);
-      master.connect(c.destination);
+      master.connect(getSfxBus(c));
 
       rumble.start();
       buzz.start();
@@ -314,7 +347,7 @@ function makeThrust(): Thrust {
       master.gain.value = 0.4;
       noiseGain.connect(master);
       rumbleGain.connect(master);
-      master.connect(c.destination);
+      master.connect(getSfxBus(c));
 
       noise.start();
       rumble.start();
@@ -393,16 +426,11 @@ function startNoise(c: AudioContext, startTime: number, stopTime: number): Audio
   return src;
 }
 
-// Master gain limiter for fireworks — one shared gain bus capped at
-// 0.85 so simultaneous launches/bursts can't pile up into clipping.
-let fxBus: GainNode | null = null;
-function getFxBus(c: AudioContext): GainNode {
-  if (fxBus) return fxBus;
-  fxBus = c.createGain();
-  fxBus.gain.value = 0.85;
-  fxBus.connect(c.destination);
-  return fxBus;
-}
+// Fireworks/aliens used to own a private master bus to soft-limit
+// stacked bursts. Now everything routes through the global SFX bus
+// (defined at the top of this file) so a single user-side volume +
+// mute control reaches every procedural cue, not just the fireworks.
+const getFxBus = getSfxBus;
 
 // Aerial mortar launch. Two phases:
 //   1) Brief THOOMP at t0 — sub-bass sine drop + short bandpassed

@@ -36,9 +36,13 @@ class MusicPlayer {
   private bufferCache = new Map<string, Promise<AudioBuffer | null>>();
   // Last-requested track + volume. We keep these around so the iOS
   // resume handler can re-play the same track after a long
-  // interruption (lock screen, app switch, scroll suspend).
+  // interruption (lock screen, app switch, scroll suspend). The
+  // intendedVolume is the per-track "natural" mix level requested by
+  // Game.tsx (e.g. 0.18 for the menu theme); userVolume is the
+  // settings-panel multiplier on top of that.
   private intendedTrack: Track | null = null;
   private intendedVolume = 0.18;
+  private userVolume = 1;
   // Set true when the context goes suspended/interrupted; on the
   // next return-to-running we know to re-trigger playback because
   // the source node may have been killed.
@@ -55,7 +59,7 @@ class MusicPlayer {
     this.intendedTrack = track;
     this.intendedVolume = volume;
     if (this.active && this.active.track.id === track.id && !this.interrupted) {
-      this.fadeTo(volume);
+      this.fadeTo(volume * this.userVolume);
       return;
     }
     const c = getMusicCtx();
@@ -85,7 +89,7 @@ class MusicPlayer {
     const master = c.createGain();
     master.gain.value = 0.0001;
     master.connect(c.destination);
-    master.gain.linearRampToValueAtTime(volume, startAt + 0.04);
+    master.gain.linearRampToValueAtTime(volume * this.userVolume, startAt + 0.04);
     const source = c.createBufferSource();
     source.buffer = buffer;
     source.loop = true;
@@ -165,6 +169,16 @@ class MusicPlayer {
     g.cancelScheduledValues(c.currentTime);
     g.setValueAtTime(g.value, c.currentTime);
     g.linearRampToValueAtTime(Math.max(volume, 0.0001), c.currentTime + 0.2);
+  }
+
+  // Settings-panel master volume multiplier (0..1). Scales the
+  // currently-playing track without disturbing its intended per-track
+  // mix level, and is stored so the next play() inherits the factor.
+  setUserVolume(v: number): void {
+    this.userVolume = Math.max(0, Math.min(1, v));
+    if (this.active) {
+      this.fadeTo(this.intendedVolume * this.userVolume);
+    }
   }
 
   private fadeOutAndStop(active: ActiveTrack, fadeSec: number): void {
