@@ -596,52 +596,22 @@ function makeIsland(isl: IslandSpec): THREE.Group {
   soil.castShadow = true;
   g.add(soil);
 
-  // Underside — a clean low-poly cone styled as an upside-down
-  // mountain. Few radial segments + flat shading give it polygonal
-  // facets; a vertical colour gradient (warm soil at the rim → grey
-  // rock through the body → snowy white at the tip) sells the
-  // mountain read. No vertex displacement, no detached chunks — we
-  // want a clean silhouette, not crumbled geometry.
-  const coneHeight = isl.radius * 1.6;
-  const coneGeo = new THREE.ConeGeometry(isl.radius * 0.72, coneHeight, 10, 4, false);
-  const positions = coneGeo.attributes.position;
-  const colors = new Float32Array(positions.count * 3);
-  const soilEdge = new THREE.Color(0x7a4f2a);
-  const midRock = new THREE.Color(0x6a6058);
-  const snowTip = new THREE.Color(0xeae3da);
-  const mountainColor = new THREE.Color();
-  for (let i = 0; i < positions.count; i++) {
-    const y = positions.getY(i);
-    // tipFactor: 0 at the tip (which becomes the bottom after flip),
-    // 1 at the rim (which meets the soil ring above).
-    const tipFactor = (y + coneHeight * 0.5) / coneHeight;
-    if (tipFactor > 0.55) {
-      // Top half: blend grey rock up into warm soil at the rim.
-      const t = (tipFactor - 0.55) / 0.45;
-      mountainColor.copy(midRock).lerp(soilEdge, t * t);
-    } else if (tipFactor > 0.18) {
-      mountainColor.copy(midRock);
-    } else {
-      // Bottom band: snow cap on the inverted peak.
-      const t = (0.18 - tipFactor) / 0.18;
-      mountainColor.copy(midRock).lerp(snowTip, Math.min(1, t * 1.4));
-    }
-    colors[i * 3 + 0] = mountainColor.r;
-    colors[i * 3 + 1] = mountainColor.g;
-    colors[i * 3 + 2] = mountainColor.b;
-  }
-  coneGeo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
-  const rockMat = new THREE.MeshStandardMaterial({
-    vertexColors: true,
-    color: 0xffffff,
+  // Underside cone — long cone tapering to a point so the island
+  // reads as a chunk of land that's been ripped from the ground and
+  // floated up into the sky.
+  const coneHeight = isl.radius * 1.3;
+  const coneGeo = new THREE.ConeGeometry(isl.radius * 0.7, coneHeight, 18, 1, true);
+  const coneMat = new THREE.MeshStandardMaterial({
+    color: 0x6a4220,
     roughness: 1,
-    flatShading: true,
+    side: THREE.DoubleSide,
   });
-  const rock = new THREE.Mesh(coneGeo, rockMat);
-  rock.position.set(isl.x, isl.height - topThickness - soilHeight - coneHeight * 0.5, isl.z);
-  rock.rotation.x = Math.PI;
-  rock.castShadow = true;
-  g.add(rock);
+  const cone = new THREE.Mesh(coneGeo, coneMat);
+  cone.position.set(isl.x, isl.height - topThickness - soilHeight - coneHeight * 0.5, isl.z);
+  // Cone points up by default; flip so the tip is below.
+  cone.rotation.x = Math.PI;
+  cone.castShadow = true;
+  g.add(cone);
 
   // Pebble fringe along the rim where soil meets grass — small
   // rocks scattered around the edge, breaks up the silhouette.
