@@ -54,7 +54,12 @@ export function ParentSettings({ open, onClose }: Props) {
         }
       }}
       style={{
-        position: "absolute",
+        // position: fixed (not absolute) anchors the scrim to the
+        // viewport. The MainMenu wrapper is overflow:auto on phones,
+        // so an absolutely-positioned child scrolls with its content
+        // and the dim layer disappears the moment a parent scrolls
+        // the menu down. fixed pins it to the screen regardless.
+        position: "fixed",
         inset: 0,
         background: "rgba(0,0,0,0.55)",
         display: "grid",
