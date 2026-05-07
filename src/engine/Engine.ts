@@ -371,8 +371,14 @@ export class Engine {
     this.rafId = requestAnimationFrame(tick);
   }
 
-  setEvents(events: EngineEvents) {
-    this.events = events;
+  // Merge instead of replace. Earlier this overwrote this.events
+  // wholesale, which made constructor-only callbacks (notably
+  // onContextLost) get wiped the first time a host re-keyed an
+  // ergonomic callback like onPlayerPosition. Partial<> here lets
+  // hosts update one key at a time without having to re-pass
+  // every other event they previously registered.
+  setEvents(events: Partial<EngineEvents>) {
+    this.events = { ...this.events, ...events };
   }
 
   // Install the active biome's lights / sky / fog. Safe to call on a
