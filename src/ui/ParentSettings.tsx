@@ -354,34 +354,57 @@ function SettingsPanel({ onDone }: { onDone: () => void }) {
       </p>
 
       <Section title="Sound">
-        <Row>
+        {/* On phones, the [Label][slider][%] inline row overflowed the
+            card because Label's 130px reserve + the slider's 120px
+            min-width + the percentage span totalled more than the
+            modal interior could hold. On compact we stack the slider
+            below its label so each piece gets the full row width. */}
+        <div
+          style={{
+            display: "flex",
+            flexDirection: compact ? "column" : "row",
+            alignItems: compact ? "stretch" : "center",
+            gap: compact ? 6 : 12,
+          }}
+        >
           <Label>Volume</Label>
-          <input
-            type="range"
-            min={0}
-            max={100}
-            step={1}
-            value={Math.round(audioVolume * 100)}
-            onChange={(e) => setAudioVolume(Number(e.target.value) / 100)}
-            aria-label="Master volume"
+          <div
             style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 12,
               flex: 1,
-              accentColor: "#1c3550",
-              minWidth: 120,
-            }}
-          />
-          <span
-            style={{
-              minWidth: 38,
-              textAlign: "right",
-              fontVariantNumeric: "tabular-nums",
-              fontWeight: 600,
-              color: "#1c3550",
+              minWidth: 0,
             }}
           >
-            {Math.round(audioVolume * 100)}%
-          </span>
-        </Row>
+            <input
+              type="range"
+              min={0}
+              max={100}
+              step={1}
+              value={Math.round(audioVolume * 100)}
+              onChange={(e) => setAudioVolume(Number(e.target.value) / 100)}
+              aria-label="Master volume"
+              style={{
+                flex: 1,
+                minWidth: 0,
+                accentColor: "#1c3550",
+              }}
+            />
+            <span
+              style={{
+                minWidth: 38,
+                textAlign: "right",
+                fontVariantNumeric: "tabular-nums",
+                fontWeight: 600,
+                color: "#1c3550",
+                flexShrink: 0,
+              }}
+            >
+              {Math.round(audioVolume * 100)}%
+            </span>
+          </div>
+        </div>
         <Row>
           <Label>Mute everything</Label>
           <Toggle checked={audioMuted} onChange={setAudioMuted} ariaLabel="Mute all sound" />
