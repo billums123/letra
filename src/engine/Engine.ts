@@ -103,9 +103,9 @@ export class Engine {
   celebrationCenter: { x: number; z: number; ringRadius?: number } | null = null;
 
   // Directional lights with castShadow that we move with the player so
-  // the orthographic shadow frustum (typically ~50 units across) always
-  // covers them. Without this the player's shadow gets clipped at a
-  // hard rectangle once they wander past ~25 units from origin.
+  // the orthographic shadow frustum (~90 units across) always covers
+  // them. Without this the player's shadow gets clipped at a hard
+  // rectangle once they wander past the frustum half-width from origin.
   // Each entry caches the original position→target offset so we keep
   // the sun direction constant while the camera follows.
   private shadowSuns: { light: THREE.DirectionalLight; offset: THREE.Vector3 }[] = [];

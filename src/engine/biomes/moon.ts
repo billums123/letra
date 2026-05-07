@@ -78,13 +78,13 @@ export const moonBiome: Biome = {
     const sun = new THREE.DirectionalLight(m.sunColor, m.sunIntensity);
     sun.position.set(m.sunPos[0], m.sunPos[1], m.sunPos[2]);
     sun.castShadow = true;
-    sun.shadow.mapSize.set(1024, 1024);
-    sun.shadow.camera.left = -25;
-    sun.shadow.camera.right = 25;
-    sun.shadow.camera.top = 25;
-    sun.shadow.camera.bottom = -25;
+    sun.shadow.mapSize.set(2048, 2048);
+    sun.shadow.camera.left = -45;
+    sun.shadow.camera.right = 45;
+    sun.shadow.camera.top = 45;
+    sun.shadow.camera.bottom = -45;
     sun.shadow.camera.near = 1;
-    sun.shadow.camera.far = 80;
+    sun.shadow.camera.far = 120;
     sun.shadow.bias = -0.0005;
     scene.add(sun);
 
