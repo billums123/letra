@@ -89,6 +89,360 @@ export function makeSharedMeadowAssets(): MeadowSharedAssets {
   };
 }
 
+// ─── Ground-texture helpers ──────────────────────────────────────────
+// The meadow ground and the sky-island grass tops both started life as
+// flat single-colour discs and read as bland next to the chunkier
+// props. These helpers give both biomes the same toolkit: a heavily
+// tessellated disc geometry that can carry vertex-colour variation,
+// an overlay of small grass tufts (tiny upright triangular blades
+// merged into one Mesh per scatter), and an overlay of low-poly
+// ground patches (lighter grass, longer grass, exposed dirt). Used
+// together, the floor reads as living texture instead of paint.
+
+export type GrassPalette = {
+  base: number;       // dominant green
+  light: number;      // sun-bleached highlight
+  dark: number;       // shaded undergrowth
+  patchLight: number; // pale clover-ish patch
+  patchDark: number;  // long-grass patch
+  patchDirt: number;  // exposed-earth patch
+};
+
+export const MEADOW_GRASS_PALETTE: GrassPalette = {
+  base: 0x86d36a,
+  light: 0xb8e696,
+  dark: 0x5fa84a,
+  patchLight: 0xd4ecaa,
+  patchDark: 0x4f8c3a,
+  patchDirt: 0x9c7a4e,
+};
+
+export const SKY_GRASS_PALETTE: GrassPalette = {
+  base: 0x7fcf66,
+  light: 0xb1de8a,
+  dark: 0x5fa850,
+  patchLight: 0xc9e89e,
+  patchDark: 0x4d8c3a,
+  patchDirt: 0x9c7a4e,
+};
+
+// Tessellated horizontal disc — concentric rings of vertices so vertex
+// colours and per-vertex displacements can paint patterns across the
+// interior. THREE.CircleGeometry only puts one vertex at the centre
+// and the rest on the rim, which is why a CircleGeometry-based ground
+// can't hold any vertex-driven texture inside the play zone.
+//
+// Geometry is built directly in the XZ plane (y = 0). Caller does NOT
+// rotate the resulting mesh — it's already horizontal.
+export function makeGrassyDiscGeometry(radius: number, rings: number, segments: number): THREE.BufferGeometry {
+  const positions: number[] = [];
+  const indices: number[] = [];
+  positions.push(0, 0, 0);
+  for (let r = 1; r <= rings; r++) {
+    const ringR = (r / rings) * radius;
+    for (let s = 0; s < segments; s++) {
+      const theta = (s / segments) * Math.PI * 2;
+      positions.push(Math.cos(theta) * ringR, 0, Math.sin(theta) * ringR);
+    }
+  }
+  // Inner fan — centre to first ring. Winding (centre, b, a) where b
+  // is the larger-angle vertex faces +Y, given XZ angles increase CCW
+  // when viewed from +Y.
+  for (let s = 0; s < segments; s++) {
+    const a = 1 + s;
+    const b = 1 + ((s + 1) % segments);
+    indices.push(0, b, a);
+  }
+  // Outer rings — quad strips between consecutive rings, two triangles
+  // each. Winding chosen so the upper face points +Y.
+  for (let r = 1; r < rings; r++) {
+    const innerStart = 1 + (r - 1) * segments;
+    const outerStart = 1 + r * segments;
+    for (let s = 0; s < segments; s++) {
+      const i0 = innerStart + s;
+      const i1 = innerStart + ((s + 1) % segments);
+      const o0 = outerStart + s;
+      const o1 = outerStart + ((s + 1) % segments);
+      indices.push(i0, i1, o1);
+      indices.push(i0, o1, o0);
+    }
+  }
+  const geom = new THREE.BufferGeometry();
+  geom.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+  geom.setIndex(indices);
+  geom.computeVertexNormals();
+  return geom;
+}
+
+// Paints the supplied tessellated geometry with grass-coloured vertex
+// variation. Two layers of low-frequency sin noise pick the dominant
+// blend (light highlights vs. dark shade), and a sparse "patch"
+// overlay tints occasional clusters toward the palette's accent
+// colours. Result: even before tufts/patches land on top, the disc
+// reads as textured grass instead of a flat solid colour.
+//
+// `featureScale` stretches the noise period; pass > 1 for very large
+// discs so the pattern doesn't repeat too often, < 1 for small
+// island tops so the variation actually shows up at that size.
+export function paintGrassVertexColors(
+  geom: THREE.BufferGeometry,
+  palette: GrassPalette,
+  featureScale: number = 1
+): void {
+  const pos = geom.attributes.position;
+  const colors = new Float32Array(pos.count * 3);
+  const tmp = new THREE.Color();
+  const cBase = new THREE.Color(palette.base);
+  const cLight = new THREE.Color(palette.light);
+  const cDark = new THREE.Color(palette.dark);
+  const cPatchLight = new THREE.Color(palette.patchLight);
+  const cPatchDark = new THREE.Color(palette.patchDark);
+  const cDirt = new THREE.Color(palette.patchDirt);
+  const f1 = 0.18 / featureScale;
+  const f2 = 0.42 / featureScale;
+  const f3 = 0.85 / featureScale;
+  for (let i = 0; i < pos.count; i++) {
+    const x = pos.getX(i);
+    const z = pos.getZ(i);
+    const n1 = Math.sin(x * f1 + z * f1 * 0.7) * 0.5 + 0.5;
+    const n2 = Math.sin(x * f2 - z * f2 * 0.9 + 1.7) * 0.5 + 0.5;
+    const n3 = Math.sin(x * f3 + z * f3 * 1.1 + 4.2) * 0.5 + 0.5;
+    const blend = n1 * 0.6 + n2 * 0.3 + n3 * 0.1;
+    tmp.copy(cBase);
+    // Halved the lerp coefficients vs. the first pass so the base
+    // ground reads as gently variegated grass rather than zoned
+    // light/dark bands. The dedicated patch overlay is what carries
+    // the louder hue work — keeping the floor itself quiet means
+    // patches and tufts have somewhere to read against.
+    if (blend > 0.6) tmp.lerp(cLight, Math.min(0.6, (blend - 0.6) * 1.2));
+    else if (blend < 0.38) tmp.lerp(cDark, Math.min(0.6, (0.38 - blend) * 1.1));
+    // Sparse accent tinting where two noise layers happen to peak
+    // together. The strength is dialled down (~0.28 ceiling) so this
+    // adds soft hue drift rather than punching through as a second
+    // layer of patches — the scatter mesh is already doing that job.
+    const patchScore = (n2 - 0.65) + (n3 - 0.7);
+    if (patchScore > 0.18) {
+      const bucket = (n1 + n3) % 1;
+      const target = bucket < 0.5 ? cPatchLight : bucket < 0.85 ? cPatchDark : cDirt;
+      tmp.lerp(target, Math.min(0.28, patchScore * 0.7));
+    }
+    colors[i * 3 + 0] = tmp.r;
+    colors[i * 3 + 1] = tmp.g;
+    colors[i * 3 + 2] = tmp.b;
+  }
+  geom.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+}
+
+// Builds one combined Mesh holding every blade of a scatter of grass
+// tufts. A tuft is a small clump of upright triangular blades fanning
+// outward from a centre — blade count, height, lean, and hue all
+// jitter per tuft so no two clumps look stamped from the same prop.
+// The cubic bias on the size jitter pushes most tufts toward "small
+// sprig", so the field reads as a quiet base layer with occasional
+// taller clumps rather than a uniform carpet.
+export function makeGrassTufts(
+  positions: Array<{ x: number; z: number; y: number }>,
+  palette: GrassPalette,
+  rng: () => number,
+): THREE.Mesh {
+  const verts: number[] = [];
+  const idx: number[] = [];
+  const colors: number[] = [];
+  const cBase = new THREE.Color(palette.dark);
+  const cTip = new THREE.Color(palette.light);
+  const cBaseTuft = new THREE.Color();
+  const cTipTuft = new THREE.Color();
+  const tipMix = new THREE.Color();
+  for (const { x, y, z } of positions) {
+    const yaw = rng() * Math.PI * 2;
+    // Cubic bias on the size sample — most tufts are tiny sprigs (≈
+    // 0.45 scale), the long tail produces the occasional taller clump.
+    const r0 = rng();
+    const sizeJitter = 0.45 + r0 * r0 * r0 * 1.15;
+    // Variable blade count (2–5) so density varies tuft to tuft.
+    const bladesPerTuft = 2 + ((rng() * 4) | 0);
+    // Per-tuft hue + lightness jitter so the field is a spread of
+    // greens (yellower vs. bluer, brighter vs. shaded) rather than
+    // one uniform palette green stamped repeatedly. ±0.05 hue is
+    // enough variation to read without breaking palette cohesion.
+    const hueShift = (rng() - 0.5) * 0.10;
+    const lightShift = (rng() - 0.5) * 0.10;
+    cBaseTuft.copy(cBase).offsetHSL(hueShift, 0, lightShift);
+    cTipTuft.copy(cTip).offsetHSL(hueShift, 0, lightShift);
+    const baseHalf = 0.030 + rng() * 0.020;
+    for (let b = 0; b < bladesPerTuft; b++) {
+      // Yaw jitter on each blade's angle breaks up any visible
+      // rotational symmetry — the four-blades-at-90° pattern of the
+      // old tufts is gone.
+      const a = yaw + (b / bladesPerTuft) * Math.PI * 2 + (rng() - 0.5) * 0.55;
+      const dirX = Math.cos(a);
+      const dirZ = Math.sin(a);
+      const offset = 0.020 + rng() * 0.04;
+      const bcx = x + dirX * offset;
+      const bcz = z + dirZ * offset;
+      const perpX = -dirZ;
+      const perpZ = dirX;
+      const tipHeight = (0.16 + rng() * 0.22) * sizeJitter;
+      const tipLean = (0.04 + rng() * 0.06) * sizeJitter;
+      const baseY = y;
+      const tipY = y + tipHeight;
+      const i0 = verts.length / 3;
+      verts.push(
+        bcx + perpX * baseHalf, baseY, bcz + perpZ * baseHalf, // base left
+        bcx - perpX * baseHalf, baseY, bcz - perpZ * baseHalf, // base right
+        bcx + dirX * tipLean,   tipY,  bcz + dirZ * tipLean,   // tip
+      );
+      idx.push(i0, i0 + 1, i0 + 2);
+      const tipShade = 0.55 + rng() * 0.45;
+      tipMix.copy(cBaseTuft).lerp(cTipTuft, tipShade);
+      colors.push(cBaseTuft.r, cBaseTuft.g, cBaseTuft.b);
+      colors.push(cBaseTuft.r, cBaseTuft.g, cBaseTuft.b);
+      colors.push(tipMix.r, tipMix.g, tipMix.b);
+    }
+  }
+  const geom = new THREE.BufferGeometry();
+  geom.setAttribute("position", new THREE.Float32BufferAttribute(verts, 3));
+  geom.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
+  geom.setIndex(idx);
+  geom.computeVertexNormals();
+  const mat = new THREE.MeshStandardMaterial({
+    vertexColors: true,
+    color: 0xffffff,
+    roughness: 1,
+    side: THREE.DoubleSide,
+  });
+  const mesh = new THREE.Mesh(geom, mat);
+  mesh.castShadow = false;
+  mesh.receiveShadow = false;
+  return mesh;
+}
+
+export type GroundPatchKind = "light" | "dark" | "dirt";
+
+// Builds one combined Mesh of soft tinted blobs that fade into the
+// surrounding grass. Each patch is two concentric rings — a tinted
+// inner core, and an outer ring whose vertex colour is lerped almost
+// all the way back to the base grass tint. The result reads as a
+// pigment wash bleeding into the soil rather than a stamped sticker;
+// the polygonal "lined blotch" silhouette of a coarse one-ring fan
+// disappears because by the time the geometry hits its outer edge
+// the colour difference from the surrounding grass is sub-perceptual.
+//
+// 24 segments + a low-amplitude radial wobble keep each blob's
+// silhouette curved and irregular without any visible facets.
+export function makeGroundPatches(
+  positions: Array<{ x: number; z: number; y: number; radius: number; kind: GroundPatchKind }>,
+  palette: GrassPalette,
+  rng: () => number,
+): THREE.Mesh {
+  const verts: number[] = [];
+  const idx: number[] = [];
+  const colors: number[] = [];
+  const colorByKind: Record<GroundPatchKind, THREE.Color> = {
+    light: new THREE.Color(palette.patchLight),
+    dark: new THREE.Color(palette.patchDark),
+    dirt: new THREE.Color(palette.patchDirt),
+  };
+  const cBase = new THREE.Color(palette.base);
+  const tmp = new THREE.Color();
+  const SEGS = 24;
+  // Inner ring sits at ~0.45 of the patch radius. Most of the
+  // silhouette is therefore "fading rim", which is what produces the
+  // gradient look — the geometry is still a fan, but the colour
+  // gradient kills any visible polygon edge.
+  const INNER_FRAC = 0.45;
+  for (const p of positions) {
+    const c = colorByKind[p.kind];
+    const startIdx = verts.length / 3;
+    const phase = rng() * Math.PI * 2;
+    // Per-patch tint strength so the field has both bold and barely-
+    // visible blends rather than every patch reading at one
+    // intensity. Dirt stays a touch stronger so "exposed earth"
+    // still parses as a different kind of mark than shaded grass.
+    const baseStrength = p.kind === "dirt" ? 0.45 : 0.30;
+    const strength = baseStrength + rng() * 0.18;
+    // Centre vertex — strongest tint of the patch, with a hair more
+    // saturation so the gradient has somewhere to fall from.
+    tmp.copy(cBase).lerp(c, Math.min(1, strength * 1.15));
+    verts.push(p.x, p.y, p.z);
+    colors.push(tmp.r, tmp.g, tmp.b);
+    // Inner ring — full strength, with tiny per-vertex shade jitter
+    // so the core isn't a perfectly flat disc of colour.
+    for (let s = 0; s < SEGS; s++) {
+      const theta = phase + (s / SEGS) * Math.PI * 2;
+      const wob = 1 + 0.06 * Math.sin(theta * 3 + phase * 1.7)
+                    + 0.04 * Math.sin(theta * 5 + phase * 0.4);
+      const r = p.radius * INNER_FRAC * wob;
+      tmp.copy(cBase).lerp(c, strength * (0.85 + rng() * 0.10));
+      verts.push(p.x + Math.cos(theta) * r, p.y, p.z + Math.sin(theta) * r);
+      colors.push(tmp.r, tmp.g, tmp.b);
+    }
+    // Outer ring — radius wobbles harder here for an organic
+    // perimeter, but the colour is lerped almost all the way back to
+    // base grass so the edge dissolves rather than ending in a hard
+    // line. 8–18% of the tint at the rim is the sweet spot: visible
+    // as the "edge of a blend" but not as a discrete shape.
+    for (let s = 0; s < SEGS; s++) {
+      const theta = phase + (s / SEGS) * Math.PI * 2;
+      const wob = 1 + 0.10 * Math.sin(theta * 2 + phase * 1.2)
+                    + 0.06 * Math.sin(theta * 5 + phase * 0.6)
+                    + 0.04 * Math.sin(theta * 9 + phase * 2.1);
+      const r = p.radius * wob;
+      const edgeMix = strength * (0.08 + rng() * 0.10);
+      tmp.copy(cBase).lerp(c, edgeMix);
+      verts.push(p.x + Math.cos(theta) * r, p.y, p.z + Math.sin(theta) * r);
+      colors.push(tmp.r, tmp.g, tmp.b);
+    }
+    // Triangulate. Centre = startIdx; inner ring follows; outer ring
+    // after that. Inner cap (centre, b, a) faces +Y; quad strip from
+    // inner to outer uses the same +Y winding as the disc helper.
+    const innerStart = startIdx + 1;
+    const outerStart = startIdx + 1 + SEGS;
+    for (let s = 0; s < SEGS; s++) {
+      const a = innerStart + s;
+      const b = innerStart + ((s + 1) % SEGS);
+      idx.push(startIdx, b, a);
+      const oa = outerStart + s;
+      const ob = outerStart + ((s + 1) % SEGS);
+      idx.push(a, b, ob);
+      idx.push(a, ob, oa);
+    }
+  }
+  const geom = new THREE.BufferGeometry();
+  geom.setAttribute("position", new THREE.Float32BufferAttribute(verts, 3));
+  geom.setAttribute("color", new THREE.Float32BufferAttribute(colors, 3));
+  geom.setIndex(idx);
+  geom.computeVertexNormals();
+  // polygonOffset pushes the patch's depth values toward the camera so
+  // it always wins the z-test against the flat ground sitting just
+  // below it. Without this, the tiny Y separation (~0.01–0.02) is
+  // smaller than the depth buffer's per-pixel precision at typical
+  // play distances and the two surfaces flicker against each other —
+  // visible as cloudy/jittery noise that swims around as the camera
+  // moves.
+  const mat = new THREE.MeshStandardMaterial({
+    vertexColors: true,
+    color: 0xffffff,
+    roughness: 1,
+    polygonOffset: true,
+    polygonOffsetFactor: -1,
+    polygonOffsetUnits: -1,
+  });
+  const mesh = new THREE.Mesh(geom, mat);
+  // No receiveShadow — these patches are decorative colour washes
+  // sitting fractions of a unit above the underlying ground, and
+  // having them participate in shadow comparison produces shadow
+  // acne (sparkly cross-hatched flicker) on the patch surface as
+  // tree / mushroom shadows pass over it. The colour gradient
+  // itself already conveys the "darker" patches; missing real-time
+  // shadow on a thin tinted blob isn't perceptible.
+  mesh.receiveShadow = false;
+  // castShadow stays false (default) — flat blobs casting shadows on
+  // themselves is the same problem in reverse, and they're too thin
+  // to throw a meaningful shadow anyway.
+  return mesh;
+}
+
 // An obstacle the player and letters should avoid. We model every world
 // prop as a vertical cylinder (good enough for the round-ish shapes we
 // have: hills, trees, mushrooms). Only objects within the play zone end
@@ -209,12 +563,19 @@ export function buildMeadow(ctx: BiomeContext): void {
   // keep their own per-prop materials inside the factories.
   const shared = makeSharedMeadowAssets();
 
-  // Ground — large green disc
+  // Ground — tessellated grass disc with vertex-coloured variation so
+  // the play surface reads as living grass instead of a paint-bucket
+  // green. 18 rings × 64 segments puts ~1100 verts on the floor —
+  // tiny next to letters and props, but enough resolution for the
+  // noise pattern to actually paint visible patches across the
+  // interior. See paintGrassVertexColors for the noise mix.
+  const groundRadius = worldRadius + 30;
+  const groundGeo = makeGrassyDiscGeometry(groundRadius, 18, 64);
+  paintGrassVertexColors(groundGeo, MEADOW_GRASS_PALETTE, 1);
   const ground = new THREE.Mesh(
-    new THREE.CircleGeometry(worldRadius + 30, 64),
-    new THREE.MeshStandardMaterial({ color: 0x86d36a, roughness: 1 })
+    groundGeo,
+    new THREE.MeshStandardMaterial({ vertexColors: true, color: 0xffffff, roughness: 1 }),
   );
-  ground.rotation.x = -Math.PI / 2;
   ground.receiveShadow = true;
   group.add(ground);
 
@@ -241,6 +602,41 @@ export function buildMeadow(ctx: BiomeContext): void {
   group.add(pond.group);
   obstacles.push({ x: pondPos.x, z: pondPos.z, radius: pond.radius });
   tick.push(pond.tick);
+
+  // Soft ground patches inside the play zone — gradient-blended tints
+  // (greener, darker, dirt-brown) that fade smoothly into the
+  // surrounding grass. The earlier scatter of blade-tufts read as
+  // origami sprigs stamped on the floor rather than real grass, so
+  // the textured-ground job is now done by patches + the vertex-
+  // colour variation baked into the ground disc.
+  const PLAY_OUTER = worldRadius - 1.5;
+  const POND_BUFFER = pond.radius + 1.0;
+  const patchRand = mulberry32(freshSeed());
+  const patchPositions: Array<{ x: number; z: number; y: number; radius: number; kind: GroundPatchKind }> = [];
+  let patchAttempts = 0;
+  // Fewer, larger blobs vs. the previous denser-but-smaller layout —
+  // because the new gradient style fades into the background, larger
+  // soft washes read better than many small ones (which would just
+  // dissolve back into the grass). Light/dark grass blends carry the
+  // hue work; dirt is intentionally rare so it lands as a focal scuff.
+  while (patchPositions.length < 22 && patchAttempts < 220) {
+    patchAttempts++;
+    const angle = patchRand() * Math.PI * 2;
+    const dist = Math.sqrt(patchRand()) * PLAY_OUTER;
+    const x = Math.cos(angle) * dist;
+    const z = Math.sin(angle) * dist;
+    if (Math.hypot(x - pondPos.x, z - pondPos.z) < POND_BUFFER) continue;
+    const r = patchRand();
+    const kind: GroundPatchKind = r < 0.55 ? "light" : r < 0.92 ? "dark" : "dirt";
+    patchPositions.push({
+      x, z,
+      y: 0.012,
+      radius: 1.1 + patchRand() * 1.7,
+      kind,
+    });
+  }
+  const patches = makeGroundPatches(patchPositions, MEADOW_GRASS_PALETTE, patchRand);
+  group.add(patches);
 
   // Hills — soft spheres in the distance. We push them fully outside
   // the play area (inner edge ≥ WORLD_RADIUS + 4) so the kid can't
@@ -269,6 +665,99 @@ export function buildMeadow(ctx: BiomeContext): void {
     hill.receiveShadow = true;
     group.add(hill);
     hillsPlaced++;
+  }
+
+  // ── Distant scenery ─────────────────────────────────────────────────
+  // Trees, boulders, mushrooms and flower clumps scattered beyond the
+  // play boundary so the area outside the invisible wall reads as a
+  // continuing landscape instead of empty grass. None of these props
+  // are added to `obstacles` (the kid can never reach them) or to
+  // `tick` (no shake animation needed) — they exist purely as visual
+  // background. They share the same factories as the foreground props
+  // so the silhouette language is consistent; the only differences
+  // are placement (always outside WORLD_RADIUS) and a slightly muted
+  // hue range so the eye still picks the play zone as the primary
+  // surface.
+  //
+  // Inner radius matches the hill rule (WORLD_RADIUS + 4) so distant
+  // props sit just beyond the boundary, with a generous outer
+  // sampling box so the band feels deep rather than ringed. A simple
+  // overlap check against existing scenery prevents distant trees
+  // from spawning on top of a hill.
+  type DistantSpot = { x: number; z: number; radius: number };
+  const distantSpots: DistantSpot[] = [];
+  function findDistantSpot(rand: () => number, selfR: number, attempts = 30): DistantSpot | null {
+    for (let i = 0; i < attempts; i++) {
+      const x = (rand() - 0.5) * 200;
+      const z = (rand() - 0.5) * 200;
+      const d = Math.hypot(x, z);
+      if (d < WORLD_RADIUS + 4 + selfR) continue;
+      if (d > 95) continue; // beyond fog-fade — placing further is wasted
+      let clear = true;
+      for (const s of distantSpots) {
+        if (Math.hypot(x - s.x, z - s.z) < s.radius + selfR + 1.0) {
+          clear = false;
+          break;
+        }
+      }
+      if (!clear) continue;
+      const spot = { x, z, radius: selfR };
+      distantSpots.push(spot);
+      return spot;
+    }
+    return null;
+  }
+
+  // Distant trees — slightly smaller scale band and a leaf hue
+  // pushed toward the cooler/blue end so they recede visually.
+  const distantTreeRand = mulberry32(freshSeed());
+  for (let i = 0; i < 32; i++) {
+    const scale = 0.85 + distantTreeRand() * 0.7;
+    const spot = findDistantSpot(distantTreeRand, 1.6 * scale);
+    if (!spot) continue;
+    // 95–135° leans toward blue-green, which atmospheric perspective
+    // would do anyway — fakes distance fade without an extra shader.
+    const hue = 95 + distantTreeRand() * 40;
+    const tree = makeTree(hue, scale, shared);
+    tree.group.position.set(spot.x, 0, spot.z);
+    tree.group.rotation.y = distantTreeRand() * Math.PI * 2;
+    group.add(tree.group);
+  }
+
+  // Distant boulders — same factory as foreground rocks, larger
+  // overall size range so they read at distance without crowding.
+  const distantBoulderRand = mulberry32(freshSeed());
+  for (let i = 0; i < 14; i++) {
+    const size = 1.0 + distantBoulderRand() * 1.4;
+    const spot = findDistantSpot(distantBoulderRand, size * 0.9);
+    if (!spot) continue;
+    const hue = (distantBoulderRand() * 360) | 0;
+    const b = makeBoulder(size, hue);
+    b.position.set(spot.x, 0, spot.z);
+    b.rotation.y = distantBoulderRand() * Math.PI * 2;
+    group.add(b);
+  }
+
+  // Distant mushroom clumps — placed in tight pairs/triples so they
+  // read as natural clusters in the far field rather than evenly
+  // spaced singletons.
+  const distantMushRand = mulberry32(freshSeed());
+  for (let i = 0; i < 10; i++) {
+    const anchor = findDistantSpot(distantMushRand, 1.2);
+    if (!anchor) continue;
+    const clusterCount = 2 + ((distantMushRand() * 3) | 0); // 2–4 mushrooms per cluster
+    for (let j = 0; j < clusterCount; j++) {
+      const ox = (distantMushRand() - 0.5) * 1.8;
+      const oz = (distantMushRand() - 0.5) * 1.8;
+      const hue = distantMushRand() * 360;
+      const m = makeMushroom(hue, shared);
+      m.group.position.set(anchor.x + ox, 0, anchor.z + oz);
+      m.group.rotation.y = distantMushRand() * Math.PI * 2;
+      // Slight scale jitter so cluster members aren't identical.
+      const ms = 0.85 + distantMushRand() * 0.45;
+      m.group.scale.setScalar(ms);
+      group.add(m.group);
+    }
   }
 
   // Trees — packed inside the boundary ring. Each one wraps its foliage

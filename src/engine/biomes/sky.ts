@@ -7,6 +7,7 @@ import {
   makeSharedMeadowAssets,
   makeTree,
   mulberry32,
+  SKY_GRASS_PALETTE,
   type MeadowSharedAssets,
 } from "../world";
 import type { Obstacle } from "../world";
@@ -535,17 +536,20 @@ function makeSkyGradient(stops: Array<[number, string]>): THREE.CanvasTexture {
 function makeIsland(isl: IslandSpec): THREE.Group {
   const g = new THREE.Group();
 
-  // Grass top — a short cylinder with the vertices on the top face
-  // displaced slightly outward so the grass edge ruffles. We bake
-  // some vertex-colour variation in too so the top isn't a flat
-  // green slab.
+  // Grass slab — a short cylinder forms the side band (visible as the
+  // green strip just below the rim) and gives the slab thickness when
+  // viewed from below. The actual walkable top is a separate
+  // tessellated disc layered just above the cylinder so vertex
+  // colours can paint patches across the interior. Without that
+  // overlay the cylinder's top face is a fan-from-rim with no
+  // interior vertices, which read as a single solid colour.
   const topThickness = 0.6;
   const grassGeo = new THREE.CylinderGeometry(isl.radius, isl.radius * 0.94, topThickness, 32, 1, false);
   const grassPositions = grassGeo.attributes.position;
   const grassColors = new Float32Array(grassPositions.count * 3);
-  const baseGreen = new THREE.Color(0x7fcf66);
-  const lightGreen = new THREE.Color(0xa8e08a);
-  const darkGreen = new THREE.Color(0x5fae50);
+  const baseGreen = new THREE.Color(SKY_GRASS_PALETTE.base);
+  const lightGreen = new THREE.Color(SKY_GRASS_PALETTE.light);
+  const darkGreen = new THREE.Color(SKY_GRASS_PALETTE.dark);
   const tmpC = new THREE.Color();
   for (let i = 0; i < grassPositions.count; i++) {
     const x = grassPositions.getX(i);
@@ -570,6 +574,15 @@ function makeIsland(isl: IslandSpec): THREE.Group {
   grass.castShadow = true;
   g.add(grass);
 
+  // (Earlier versions layered a tessellated grass-topper disc just
+  // above the cylinder cap so vertex-colour noise could paint across
+  // the interior of the island. That stack of two near-coincident
+  // horizontal surfaces caused depth-buffer + shadow-map flicker as
+  // the camera moved — polygonOffset only fixes the main-render z-
+  // test, not the shadow pass. Removed in favour of letting the
+  // cylinder cap stand alone; the soft ground patches scattered on
+  // top, plus the tinted patches in `populateIsland`, carry all the
+  // surface variation now.)
   // Soil ring — fat cylinder under the grass, tapering inward.
   const soilHeight = 1.4;
   const soilGeo = new THREE.CylinderGeometry(isl.radius * 0.94, isl.radius * 0.7, soilHeight, 24, 1, false);
@@ -583,22 +596,52 @@ function makeIsland(isl: IslandSpec): THREE.Group {
   soil.castShadow = true;
   g.add(soil);
 
-  // Underside cone — long cone tapering to a point so the island
-  // reads as a chunk of land that's been ripped from the ground and
-  // floated up into the sky.
-  const coneHeight = isl.radius * 1.3;
-  const coneGeo = new THREE.ConeGeometry(isl.radius * 0.7, coneHeight, 18, 1, true);
-  const coneMat = new THREE.MeshStandardMaterial({
-    color: 0x6a4220,
+  // Underside — a clean low-poly cone styled as an upside-down
+  // mountain. Few radial segments + flat shading give it polygonal
+  // facets; a vertical colour gradient (warm soil at the rim → grey
+  // rock through the body → snowy white at the tip) sells the
+  // mountain read. No vertex displacement, no detached chunks — we
+  // want a clean silhouette, not crumbled geometry.
+  const coneHeight = isl.radius * 1.6;
+  const coneGeo = new THREE.ConeGeometry(isl.radius * 0.72, coneHeight, 10, 4, false);
+  const positions = coneGeo.attributes.position;
+  const colors = new Float32Array(positions.count * 3);
+  const soilEdge = new THREE.Color(0x7a4f2a);
+  const midRock = new THREE.Color(0x6a6058);
+  const snowTip = new THREE.Color(0xeae3da);
+  const mountainColor = new THREE.Color();
+  for (let i = 0; i < positions.count; i++) {
+    const y = positions.getY(i);
+    // tipFactor: 0 at the tip (which becomes the bottom after flip),
+    // 1 at the rim (which meets the soil ring above).
+    const tipFactor = (y + coneHeight * 0.5) / coneHeight;
+    if (tipFactor > 0.55) {
+      // Top half: blend grey rock up into warm soil at the rim.
+      const t = (tipFactor - 0.55) / 0.45;
+      mountainColor.copy(midRock).lerp(soilEdge, t * t);
+    } else if (tipFactor > 0.18) {
+      mountainColor.copy(midRock);
+    } else {
+      // Bottom band: snow cap on the inverted peak.
+      const t = (0.18 - tipFactor) / 0.18;
+      mountainColor.copy(midRock).lerp(snowTip, Math.min(1, t * 1.4));
+    }
+    colors[i * 3 + 0] = mountainColor.r;
+    colors[i * 3 + 1] = mountainColor.g;
+    colors[i * 3 + 2] = mountainColor.b;
+  }
+  coneGeo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+  const rockMat = new THREE.MeshStandardMaterial({
+    vertexColors: true,
+    color: 0xffffff,
     roughness: 1,
-    side: THREE.DoubleSide,
+    flatShading: true,
   });
-  const cone = new THREE.Mesh(coneGeo, coneMat);
-  cone.position.set(isl.x, isl.height - topThickness - soilHeight - coneHeight * 0.5, isl.z);
-  // Cone points up by default; flip so the tip is below.
-  cone.rotation.x = Math.PI;
-  cone.castShadow = true;
-  g.add(cone);
+  const rock = new THREE.Mesh(coneGeo, rockMat);
+  rock.position.set(isl.x, isl.height - topThickness - soilHeight - coneHeight * 0.5, isl.z);
+  rock.rotation.x = Math.PI;
+  rock.castShadow = true;
+  g.add(rock);
 
   // Pebble fringe along the rim where soil meets grass — small
   // rocks scattered around the edge, breaks up the silhouette.
@@ -707,6 +750,15 @@ function populateIsland(
     obstacles.push({ x: spot.x, z: spot.z, radius: 0.32, onBump: f.shake, solid: false });
     tick.push(f.update);
   }
+
+  // (No ground patches on the sky islands. The meadow uses
+  // makeGroundPatches cleanly, but on the small sky-biome surfaces
+  // those gradient blobs flickered with shadow-map noise as
+  // tree/mushroom/letter shadows passed over them — even with
+  // receiveShadow disabled and a generous Y offset the camera here
+  // orbits close enough to the ground that any thin overlay surface
+  // read glitchy. The cylinder cap's vertex-coloured rim plus the
+  // existing props already give each island enough character.)
 }
 
 // ─── Rainbow visuals ──────────────────────────────────────────────────
