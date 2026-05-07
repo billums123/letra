@@ -288,14 +288,27 @@ Return JSON in this exact schema:
 }
 
 // Cloudflare Web Analytics — privacy-friendly visitor count + visit-duration
-// reporting. Picks up the token from CLOUDFLARE_ANALYTICS_TOKEN at build time
-// (set it on Railway → no secret to commit). When the env var is unset the
-// plugin is a no-op, so local builds and forks don't ping Cloudflare.
-function cloudflareWebAnalytics(token: string | undefined): PluginOption {
+// reporting on the public web (playletra.com). Picks up the token from
+// CLOUDFLARE_ANALYTICS_TOKEN at build time (set it on the web host →
+// no secret to commit). When the env var is unset the plugin is a
+// no-op, so local builds and forks don't ping Cloudflare.
+//
+// IMPORTANT: this MUST be skipped for App Store builds. Apple's "Made
+// for Kids" guideline 5.1.1 prohibits third-party analytics — even
+// privacy-friendly ones — in apps that ship to the Kids category.
+// Capacitor builds invoked via `VITE_TARGET=mobile npm run build`
+// short-circuit this plugin to a no-op so the rendered index.html
+// has zero trace of the beacon. The web build (no env override)
+// still injects normally — that's how we measure the TikTok funnel.
+function cloudflareWebAnalytics(
+  token: string | undefined,
+  isMobileBuild: boolean,
+): PluginOption {
   return {
     name: "cloudflare-web-analytics",
     apply: "build",
     transformIndexHtml(html) {
+      if (isMobileBuild) return html;
       if (!token) return html;
       const config = JSON.stringify({ token });
       const tag = `<script defer src="https://static.cloudflareinsights.com/beacon.min.js" data-cf-beacon='${config}'></script>`;
@@ -304,12 +317,18 @@ function cloudflareWebAnalytics(token: string | undefined): PluginOption {
   };
 }
 
+// Capacitor / native-app build flag. The mobile build pipeline runs
+// `VITE_TARGET=mobile npm run build` so we can tree-shake any web-only
+// surfaces (analytics, the parent-facing landing on /) that would
+// otherwise slip into the App Store bundle.
+const isMobileBuild = process.env.VITE_TARGET === "mobile";
+
 // Letra dev server. Default port 5173; falls through to next free port.
 export default defineConfig({
   plugins: [
     react(),
     devAudioPlugin(),
-    cloudflareWebAnalytics(process.env.CLOUDFLARE_ANALYTICS_TOKEN),
+    cloudflareWebAnalytics(process.env.CLOUDFLARE_ANALYTICS_TOKEN, isMobileBuild),
     // PWA: makes Letra installable to the home screen on phones / Chromebooks
     // and lets the game work offline once everything's been loaded once. The
     // service worker auto-updates so a deployed change rolls out without the

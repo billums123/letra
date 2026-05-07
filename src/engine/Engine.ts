@@ -15,6 +15,12 @@ const PLAYER_RADIUS = 0.55;
 export type EngineEvents = {
   onPlayerPosition?: (pos: THREE.Vector3) => void;
   onTick?: (dt: number, t: number) => void;
+  // iOS Safari aggressively kills WebGL on backgrounding / memory
+  // pressure. Without context-loss handling the canvas freezes silently.
+  // The host (Game.tsx) listens to surface a "tap to resume" overlay
+  // and remount the engine, since restoring a fully populated Three.js
+  // scene cleanly is harder than rebuilding it.
+  onContextLost?: () => void;
 };
 
 export class Engine {
@@ -53,6 +59,14 @@ export class Engine {
   // can fire the obstacle's onBump callback once on the rising edge of
   // a collision instead of every frame the player is wedged against it.
   private prevOverlap = new Set<Obstacle>();
+
+  // WebGL context-loss bookkeeping. iOS Safari silently kills the GL
+  // context when the tab backgrounds or memory pressure spikes; without
+  // listeners the canvas freezes with no recovery path. We pause the
+  // tick loop on loss and notify the host so it can remount.
+  private onContextLostBound: ((e: Event) => void) | null = null;
+  private onContextRestoredBound: (() => void) | null = null;
+  private contextLost = false;
 
   // Actors with their own per-frame update (letter characters, particles, etc.).
   private actors = new Set<{ update: (dt: number, t: number) => void }>();
@@ -161,6 +175,25 @@ export class Engine {
     if (canvas.parentElement) this.resizeObserver.observe(canvas.parentElement);
     this.onResize();
 
+    // WebGL context-loss handling. preventDefault() is what tells the
+    // browser we'll restore manually — without it the canvas is
+    // permanently dead. We pause the tick loop and let the host remount
+    // a fresh Engine; restoring a populated scene in place is more
+    // fragile than rebuilding it.
+    this.onContextLostBound = (e: Event) => {
+      e.preventDefault();
+      this.contextLost = true;
+      cancelAnimationFrame(this.rafId);
+      this.events.onContextLost?.();
+    };
+    this.onContextRestoredBound = () => {
+      // Intentionally no-op: the host's onContextLost handler tears
+      // this engine down and mounts a new one. If a host wants in-place
+      // restore later, it can swap that strategy in here.
+    };
+    canvas.addEventListener("webglcontextlost", this.onContextLostBound, false);
+    canvas.addEventListener("webglcontextrestored", this.onContextRestoredBound, false);
+
     this.start();
   }
 
@@ -176,6 +209,11 @@ export class Engine {
   private start() {
     const tick = () => {
       if (this.disposed) return;
+      // If the GL context was lost (iOS background / memory pressure),
+      // the tick loop must not call renderer.render — that would throw
+      // on a dead context. We've already fired onContextLost so the
+      // host is responsible for remounting.
+      if (this.contextLost) return;
       const dt = Math.min(this.clock.getDelta(), 0.1);
       const t = this.clock.elapsedTime;
 
@@ -378,6 +416,14 @@ export class Engine {
     cancelAnimationFrame(this.rafId);
     window.removeEventListener("resize", this.onResizeBound);
     this.resizeObserver.disconnect();
+    if (this.onContextLostBound) {
+      this.renderer.domElement.removeEventListener("webglcontextlost", this.onContextLostBound);
+      this.onContextLostBound = null;
+    }
+    if (this.onContextRestoredBound) {
+      this.renderer.domElement.removeEventListener("webglcontextrestored", this.onContextRestoredBound);
+      this.onContextRestoredBound = null;
+    }
     this.unsubscribeTOD?.();
     this.unsubscribeTOD = null;
     // Avatars own continuous resources (e.g., the car's motor loop) —
