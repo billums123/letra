@@ -26,6 +26,12 @@ export type TrophyId =
   | "spell-sun"
   | "spell-bus"
   | "spell-pig"
+  | "spell-tree"
+  | "spell-star"
+  | "spell-book"
+  | "spell-ball"
+  | "spell-cake"
+  | "spell-hen"
   | "sound-match"
   | "word-wizard";
 
@@ -113,6 +119,54 @@ export const TROPHIES: TrophySpec[] = [
     fallbackEmoji: "🐷",
   },
   {
+    id: "spell-tree",
+    name: "Tree Friend",
+    tileColor: "#a8e0a8", // soft leaf green
+    trigger: "Spell TREE five times",
+    kind: "stack",
+    fallbackEmoji: "🌳",
+  },
+  {
+    id: "spell-star",
+    name: "Shooting Star",
+    tileColor: "#b8d4ff", // sky blue
+    trigger: "Spell STAR five times",
+    kind: "stack",
+    fallbackEmoji: "⭐",
+  },
+  {
+    id: "spell-book",
+    name: "Bookworm",
+    tileColor: "#e8c08c", // warm parchment tan
+    trigger: "Spell BOOK five times",
+    kind: "stack",
+    fallbackEmoji: "📖",
+  },
+  {
+    id: "spell-ball",
+    name: "Ball Champ",
+    tileColor: "#ff9a8a", // coral
+    trigger: "Spell BALL five times",
+    kind: "stack",
+    fallbackEmoji: "⚽",
+  },
+  {
+    id: "spell-cake",
+    name: "Cake Day",
+    tileColor: "#ffd6e3", // pale frosting pink
+    trigger: "Spell CAKE five times",
+    kind: "stack",
+    fallbackEmoji: "🎂",
+  },
+  {
+    id: "spell-hen",
+    name: "Hen Buddy",
+    tileColor: "#f0b878", // apricot
+    trigger: "Spell HEN five times",
+    kind: "stack",
+    fallbackEmoji: "🐔",
+  },
+  {
     id: "sound-match",
     name: "Listening Star",
     tileColor: "#ff8aaa",
@@ -163,4 +217,10 @@ export const SPELL_TROPHY_IDS: TrophyId[] = [
   "spell-sun",
   "spell-bus",
   "spell-pig",
+  "spell-tree",
+  "spell-star",
+  "spell-book",
+  "spell-ball",
+  "spell-cake",
+  "spell-hen",
 ];

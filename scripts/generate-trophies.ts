@@ -169,6 +169,74 @@ const TROPHIES: TrophySpec[] = [
       "podium. " +
       STYLE_FRAMING,
   },
+  {
+    id: "spell-tree",
+    // Spell TREE.
+    prompt:
+      "A chubby cartoon happy tree character with a stout brown trunk, " +
+      "a big round fluffy green leafy canopy, two big friendly eyes on " +
+      "the trunk and a wide smile, two tiny branch arms waving. A " +
+      "single ripe red apple peeks out from the leaves. The tree sits " +
+      "on the small glossy gold-and-white podium. " +
+      STYLE_FRAMING,
+  },
+  {
+    id: "spell-star",
+    // Spell STAR.
+    prompt:
+      "A chubby cartoon yellow five-point star character with rounded " +
+      "tips, big friendly eyes and a wide proud smile, rosy cheeks. A " +
+      "soft sparkly trail tail curls behind it as if it just shot " +
+      "through the sky. Glowing golden highlights. The star sits on " +
+      "the small glossy gold-and-white podium. " +
+      STYLE_FRAMING,
+  },
+  {
+    id: "spell-book",
+    // Spell BOOK.
+    prompt:
+      "A chubby cartoon picture book character standing upright, " +
+      "slightly open with two cute blank cream pages visible. A big " +
+      "smiling face on the front cover with two big friendly eyes. " +
+      "Glossy red hardcover, gold corner trim, a small red ribbon " +
+      "bookmark dangling from the top. The book sits on the small " +
+      "glossy gold-and-white podium. " +
+      STYLE_FRAMING,
+  },
+  {
+    id: "spell-ball",
+    // Spell BALL.
+    prompt:
+      "A chubby cartoon bouncy beach ball character with alternating " +
+      "bright red and white panels, a big friendly face with two big " +
+      "eyes and a wide smile, glossy highlight on top. The ball does " +
+      "a tiny hop with a small white motion-puff sparkle underneath. " +
+      "The ball sits on the small glossy gold-and-white podium. " +
+      STYLE_FRAMING,
+  },
+  {
+    id: "spell-cake",
+    // Spell CAKE.
+    prompt:
+      "A chubby cartoon birthday cake character — single round tier " +
+      "of pale-pink-frosted cake with a smiling face on the front, " +
+      "three lit yellow candles standing on top with little orange " +
+      "flames, soft drips of frosting around the edge, colourful " +
+      "sprinkles scattered across the top. The cake sits on the small " +
+      "glossy gold-and-white podium. " +
+      STYLE_FRAMING,
+  },
+  {
+    id: "spell-hen",
+    // Spell HEN.
+    prompt:
+      "A chubby cartoon brown-and-white hen with a small bright red " +
+      "comb and wattle, soft round fluffy body, two big friendly eyes " +
+      "and a tiny smiley yellow beak, one little wing slightly raised " +
+      "in a wave. The hen sits on the small glossy gold-and-white " +
+      "podium. " +
+      STYLE_FRAMING,
+  },
 
   // ── Sound Match: stackable trophy ────────────────────────────────
   {
