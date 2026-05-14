@@ -218,6 +218,7 @@ export const SPELL_WORDS: { word: string; intro: string; reveal: string }[] = [
   { word: "MILK", intro: "Let's spell MILK! M, I, L, K!", reveal: "You spelled MILK!" },
   { word: "BOOK", intro: "Oh no! A book is missing! Let's find the book. B, O, O, K!", reveal: "We found the book!" },
   { word: "STAR", intro: "Did you see that shooting star? Let's spell star. S, T, A, R!", reveal: "You spelled STAR!" },
+  { word: "CAKE", intro: "Let's spell CAKE! C, A, K, E!", reveal: "You spelled CAKE!" },
 ];
 
 export function buildEntries(): AudioEntry[] {
