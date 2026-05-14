@@ -213,6 +213,7 @@ export const SPELL_WORDS: { word: string; intro: string; reveal: string }[] = [
   { word: "BED", intro: "It's time for a nap! Let's find the bed. B, E, D!", reveal: "We found the bed!" },
   { word: "HEN", intro: "The hen is hiding! Let's find the hen. H, E, N!", reveal: "There's the hen!" },
   { word: "DIG", intro: "Let's spell DIG! D, I, G!", reveal: "You spelled DIG!" },
+  { word: "ZIP", intro: "Let's spell ZIP! Z, I, P!", reveal: "You spelled ZIP!" },
 ];
 
 export function buildEntries(): AudioEntry[] {
