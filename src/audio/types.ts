@@ -215,6 +215,7 @@ export const SPELL_WORDS: { word: string; intro: string; reveal: string }[] = [
   { word: "DIG", intro: "Let's spell DIG! D, I, G!", reveal: "You spelled DIG!" },
   { word: "ZIP", intro: "Let's spell ZIP! Z, I, P!", reveal: "You spelled ZIP!" },
   { word: "BOX", intro: "Let's spell BOX! B, O, X!", reveal: "You spelled BOX!" },
+  { word: "MILK", intro: "Let's spell MILK! M, I, L, K!", reveal: "You spelled MILK!" },
 ];
 
 export function buildEntries(): AudioEntry[] {
