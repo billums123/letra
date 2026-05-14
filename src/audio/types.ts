@@ -211,6 +211,7 @@ export const SPELL_WORDS: { word: string; intro: string; reveal: string }[] = [
   { word: "BAG", intro: "Let's spell BAG! B, A, G!", reveal: "You spelled BAG!" },
   { word: "MAP", intro: "Oh no! We need a map! M, A, P!", reveal: "We found the map!" },
   { word: "BED", intro: "It's time for a nap! Let's find the bed. B, E, D!", reveal: "We found the bed!" },
+  { word: "HEN", intro: "The hen is hiding! Let's find the hen. H, E, N!", reveal: "There's the hen!" },
 ];
 
 export function buildEntries(): AudioEntry[] {
