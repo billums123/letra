@@ -221,6 +221,31 @@ export const SPELL_WORDS: { word: string; intro: string; reveal: string }[] = [
   { word: "CAKE", intro: "Let's spell CAKE! C, A, K, E!", reveal: "You spelled CAKE!" },
   { word: "BALL", intro: "Let's spell BALL! B, A, L, L!", reveal: "You spelled BALL!" },
   { word: "JUMP", intro: "Let's spell JUMP! J, U, M, P!", reveal: "You spelled JUMP!" },
+  // 2-letter — easiest, good for the youngest / a confidence round.
+  { word: "GO", intro: "Ready, set... go! let's spell GO! G, O!", reveal: "You spelled GO!" },
+  { word: "UP", intro: "Reach for the sky! Let's spell UP! U, P!", reveal: "You spelled UP!" },
+  { word: "ON", intro: "Let's spell ON! O, N!", reveal: "You spelled ON!" },
+  { word: "IN", intro: "Let's see if you can spell in. I, N!", reveal: "You spelled the word IN!" },
+  { word: "AT", intro: "Let's spell the word AT.  A, T!", reveal: "You spelled the word at!" },
+  { word: "OX", intro: "Can you spell the word ox? O, X!", reveal: "Awesome job, you spelled ox!" },
+  // 3-letter (CVC)
+  { word: "FOX", intro: "Let's spell the word fox. F, O, X!", reveal: "Nice work! You spelled fox!" },
+  { word: "BUG", intro: "Let's see if you can spell the word bug. B, U, G!", reveal: "You spelled bug!" },
+  { word: "CUP", intro: "Can you spell the word cup? C, U, P!", reveal: "Awesome job spelling the word cup!" },
+  { word: "PEN", intro: "Can you spell the word pen? P, E, N!", reveal: "Great job spelling the word pen!" },
+  { word: "POT", intro: "Can you spell the word pot? P, O, T!", reveal: "You spelled the word pot!" },
+  { word: "VAN", intro: "Beep beep! Let's find the van. V, A, N!", reveal: "Great work spelling the word van!" },
+  { word: "JET", intro: "Let's see if you can spell jet. J, E, T!", reveal: "Nice job spelling jet!" },
+  { word: "FAN", intro: "It's so hot! Let's find the fan. F, A, N!", reveal: "Ahh, the fan!" },
+  // 4-letter
+  { word: "FROG", intro: "Ribbit, ribbit! Let's find the frog. F, R, O, G!", reveal: "You spelled frog!" },
+  { word: "DUCK", intro: "Quack quack! Let's spell duck. D, U, C, K!", reveal: "We found the duck!" },
+  { word: "FISH", intro: "Splish splash! Let's spell the word fish. F, I, S, H!", reveal: "You spelled fish! Awesome!" },
+  { word: "MOON", intro: "Let's try and spell moon. M, O, O, N!", reveal: "Nicely done! You spelled moon!" },
+  { word: "NEST", intro: "The birds need a home! Let's find the nest. N, E, S, T!", reveal: "Great job! You spelled the word nest!" },
+  { word: "SOCK", intro: "Where did it go? Let's find the sock. S, O, C, K!", reveal: "Nice work! You spelled sock!" },
+  { word: "RING", intro: "Let's find the ring. R, I, N, G!", reveal: "Good job! You spelled ring!" },
+  { word: "DRUM", intro: "Can you spell DRUM? D, R, U, M!", reveal: "You spelled DRUM!" },
 ];
 
 export function buildEntries(): AudioEntry[] {

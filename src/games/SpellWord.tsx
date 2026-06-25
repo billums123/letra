@@ -32,9 +32,24 @@ type LetterEntry = {
   character: ReturnType<typeof buildLetterCharacter>;
 };
 
-function pickWord(prevWord?: string) {
+// Weighted pick: bias toward words the kid hasn't mastered yet. Weight is
+// 1 / (1 + min(timesSpelled, CAP)), so a brand-new word (count 0) is ~7x
+// likelier than a fully-mastered one — but every word keeps a non-zero
+// weight (the CAP floors it at 1/7), so mastered words still resurface for
+// spaced review and nothing ever drops out of rotation. counts come from
+// the store's persisted spellWordCounts. The immediately-previous word is
+// still excluded so the same word never repeats back-to-back.
+const MASTERY_CAP = 6;
+function pickWord(prevWord: string | undefined, counts: Record<string, number>) {
   const choices = SPELL_WORDS.filter((w) => w.word !== prevWord);
-  return choices[Math.floor(Math.random() * choices.length)] ?? SPELL_WORDS[0];
+  const pool = choices.length ? choices : SPELL_WORDS;
+  const weights = pool.map((w) => 1 / (1 + Math.min(counts[w.word] ?? 0, MASTERY_CAP)));
+  const total = weights.reduce((a, b) => a + b, 0);
+  let r = Math.random() * total;
+  for (let i = 0; i < pool.length; i++) {
+    if ((r -= weights[i]) <= 0) return pool[i];
+  }
+  return pool[pool.length - 1];
 }
 
 export function SpellWordGame() {
@@ -76,7 +91,10 @@ function SpellWordRound({
   onNext: (justFinished: string, lowercase: boolean) => void;
   collect: (letter: string) => void;
 }) {
-  const word = useMemo(() => pickWord(prevWord), [prevWord]);
+  const word = useMemo(
+    () => pickWord(prevWord, useGameStore.getState().spellWordCounts),
+    [prevWord],
+  );
   // Roll the case for THIS word. Uppercase / lowercase modes are pinned;
   // "mixed" flips deterministically from the previous round when one
   // exists, otherwise it rolls randomly. Computed once so a re-render
