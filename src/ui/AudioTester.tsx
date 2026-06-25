@@ -69,6 +69,12 @@ export function AudioTester() {
   const [playing, setPlaying] = useState<string | null>(null);
   const [editing, setEditing] = useState<Editing | null>(null);
   const [copied, setCopied] = useState(false);
+  const [sortMode, setSortMode] = useState<"category" | "newest">("category");
+  // Per-clip file mtimes for the active voice, fetched from the dev server.
+  // Keyed by clip id (filename without .mp3). Drives the "Newest first" sort.
+  const [mtimes, setMtimes] = useState<Record<string, number>>({});
+  // Collapsed-by-default sections — a group title in this set is expanded.
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
   // Forces a re-render when the player's voice list resolves (init is async).
   const [, force] = useState(0);
 
@@ -77,15 +83,48 @@ export function AudioTester() {
     return off;
   }, []);
 
+  const activeSlug = audio.activeVoice?.slug ?? null;
+  useEffect(() => {
+    if (!activeSlug) return;
+    let cancelled = false;
+    fetch(`/__dev/clip-mtimes?voice=${encodeURIComponent(activeSlug)}`)
+      .then((r) => (r.ok ? r.json() : { mtimes: {} }))
+      .then((j: { mtimes?: Record<string, number> }) => {
+        if (!cancelled) setMtimes(j.mtimes ?? {});
+      })
+      .catch(() => {
+        if (!cancelled) setMtimes({});
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeSlug]);
+
+  function toggleSection(title: string) {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(title)) next.delete(title);
+      else next.add(title);
+      return next;
+    });
+  }
+
   const groups = useMemo(() => {
     const all = buildEntries();
-    if (!filter.trim()) return categorise(all);
     const needle = filter.trim().toLowerCase();
-    const filtered = all.filter(
-      (e) => e.id.toLowerCase().includes(needle) || e.text.toLowerCase().includes(needle),
-    );
+    const filtered = needle
+      ? all.filter(
+          (e) => e.id.toLowerCase().includes(needle) || e.text.toLowerCase().includes(needle),
+        )
+      : all;
+    if (sortMode === "newest") {
+      // One flat list, most-recently-generated first. Clips with no mtime
+      // (not generated for this voice) sort to the bottom.
+      const sorted = [...filtered].sort((a, b) => (mtimes[b.id] ?? 0) - (mtimes[a.id] ?? 0));
+      return [{ title: "Newest first", entries: sorted }];
+    }
     return categorise(filtered);
-  }, [filter]);
+  }, [filter, sortMode, mtimes]);
 
   async function playOne(id: string) {
     setPlaying(id);
@@ -204,6 +243,17 @@ export function AudioTester() {
               {audio.voices.length === 0 && <option value="">(none)</option>}
             </select>
           </label>
+          <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span style={{ opacity: 0.8, fontSize: 14 }}>Sort</span>
+            <select
+              value={sortMode}
+              onChange={(e) => setSortMode(e.target.value as "category" | "newest")}
+              style={selectStyle}
+            >
+              <option value="category">Category</option>
+              <option value="newest">Newest first</option>
+            </select>
+          </label>
           <input
             type="search"
             placeholder="Filter by id or text…"
@@ -226,11 +276,32 @@ export function AudioTester() {
           )}
         </div>
 
-        {groups.map((group) => (
+        {groups.map((group) => {
+          const isExpanded = expanded.has(group.title);
+          return (
           <section key={group.title} style={{ marginTop: 28 }}>
-            <div style={{ display: "flex", alignItems: "baseline", gap: 12 }}>
-              <h2 style={{ margin: 0, fontSize: 18, fontWeight: 800 }}>{group.title}</h2>
-              <span style={{ opacity: 0.6, fontSize: 13 }}>({group.entries.length})</span>
+            <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+              <button
+                type="button"
+                onClick={() => toggleSection(group.title)}
+                aria-expanded={isExpanded}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 10,
+                  background: "transparent",
+                  border: "none",
+                  color: "white",
+                  cursor: "pointer",
+                  padding: 0,
+                }}
+              >
+                <span style={{ fontSize: 13, opacity: 0.7, width: 12, display: "inline-block" }}>
+                  {isExpanded ? "▾" : "▸"}
+                </span>
+                <h2 style={{ margin: 0, fontSize: 18, fontWeight: 800 }}>{group.title}</h2>
+                <span style={{ opacity: 0.6, fontSize: 13 }}>({group.entries.length})</span>
+              </button>
               <button
                 type="button"
                 onClick={() => playMany(group.entries.map((e) => e.id))}
@@ -239,6 +310,7 @@ export function AudioTester() {
                 ▶ Play all
               </button>
             </div>
+            {isExpanded && (
             <div style={{ marginTop: 8, display: "grid", gap: 6 }}>
               {group.entries.map((entry) => {
                 const isEditing = editing?.id === entry.id;
@@ -272,7 +344,25 @@ export function AudioTester() {
                       >
                         ▶
                       </button>
-                      <code style={{ fontSize: 13, opacity: 0.9 }}>{entry.id}</code>
+                      <code
+                        style={{
+                          fontSize: 13,
+                          opacity: 0.9,
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {entry.id}
+                        {sortMode === "newest" && mtimes[entry.id] != null && (
+                          <span style={{ opacity: 0.5, marginLeft: 8, fontSize: 11 }}>
+                            {new Date(mtimes[entry.id]).toLocaleDateString(undefined, {
+                              month: "short",
+                              day: "numeric",
+                            })}
+                          </span>
+                        )}
+                      </code>
                       <span
                         style={{
                           opacity: 0.85,
@@ -312,8 +402,10 @@ export function AudioTester() {
                 );
               })}
             </div>
+            )}
           </section>
-        ))}
+          );
+        })}
 
         {groups.length === 0 && (
           <p style={{ opacity: 0.6, marginTop: 24 }}>No clips match that filter.</p>

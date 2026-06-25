@@ -69,6 +69,50 @@ function devAudioPlugin(): PluginOption {
     name: "letra-dev-audio",
     apply: "serve",
     configureServer(server) {
+      // GET /__dev/clip-mtimes?voice=<slug> → { mtimes: { [clipId]: epochMs } }
+      // for every .mp3 in public/audio/<slug>/. Powers the Audio Tester's
+      // "Newest first" sort so freshly-generated clips are easy to find.
+      server.middlewares.use("/__dev/clip-mtimes", async (req, res) => {
+        if (req.method !== "GET") {
+          res.statusCode = 405;
+          res.end("GET only");
+          return;
+        }
+        try {
+          const url = new URL(req.url ?? "", "http://localhost");
+          const slug = (url.searchParams.get("voice") ?? "").replace(/[^a-z0-9-]/gi, "");
+          if (!slug) {
+            sendJson(res, 400, { error: "Missing ?voice=<slug>" });
+            return;
+          }
+          const dir = path.join(PUBLIC_AUDIO, slug);
+          let files: string[];
+          try {
+            files = await fs.readdir(dir);
+          } catch {
+            // Unknown / not-yet-generated voice — empty map, not an error.
+            sendJson(res, 200, { mtimes: {} });
+            return;
+          }
+          const mtimes: Record<string, number> = {};
+          await Promise.all(
+            files
+              .filter((f) => f.endsWith(".mp3"))
+              .map(async (f) => {
+                try {
+                  const st = await fs.stat(path.join(dir, f));
+                  mtimes[f.replace(/\.mp3$/, "")] = st.mtimeMs;
+                } catch {
+                  /* skip unreadable file */
+                }
+              }),
+          );
+          sendJson(res, 200, { mtimes });
+        } catch (e) {
+          sendJson(res, 500, { error: (e as Error).message });
+        }
+      });
+
       server.middlewares.use("/__dev/generate-spell-clips", async (req, res) => {
         if (req.method !== "POST") {
           res.statusCode = 405;
