@@ -115,6 +115,23 @@ with zero token spend.
 `npm run audio:list` shows what would be generated without making any API
 calls.
 
+> **Adding clips to a voice you've already generated** (e.g. new Spell-the-Word
+> words)? Use **`npm run audio:generate-all`**, not `audio:generate`. The
+> `-all` variant walks every voice in the registry (`public/audio/voices.json`)
+> and skips clips that already exist, so you only pay for the new ones.
+>
+> The plain `npm run audio:generate` picks its output folder from
+> `ELEVENLABS_VOICE_NAME` (via a slug). **If that var is unset it slugs to
+> `default` and writes a brand-new `public/audio/default/` folder, regenerating
+> all ~160 clips from scratch** — burning credits on audio you already have, in
+> a folder your registered voice isn't using. So to extend an existing voice,
+> either set `ELEVENLABS_VOICE_NAME` to that voice's name first, or just use
+> `audio:generate-all`.
+>
+> `npm run audio:list` always prints the *full* manifest (every clip that
+> could exist), not just the missing ones — so don't read its count as "what
+> will be generated."
+
 The voice defaults to *Rachel* (a warm, friendly American voice). Override
 with `ELEVENLABS_VOICE_ID` in `.env`.
 
