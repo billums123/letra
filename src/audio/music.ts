@@ -43,6 +43,19 @@ class MusicPlayer {
   private intendedTrack: Track | null = null;
   private intendedVolume = 0.18;
   private userVolume = 1;
+  // Voice duck. When a voice clip is playing we dip the music so the
+  // narration stays intelligible — for a phonics game the spoken letter
+  // sound IS the product, and it used to compete with the music at full
+  // volume. duckCount ref-counts overlapping voice clips; duckLevel is
+  // the current multiplier applied on top of intendedVolume*userVolume
+  // (1 = open, DUCK_GAIN = ducked). A short release hold keeps the music
+  // down through the tiny gaps in a clip sequence (e.g. letter-name →
+  // letter-sound) instead of pumping up and back down between them.
+  private duckCount = 0;
+  private duckLevel = 1;
+  private duckReleaseTimer: number | null = null;
+  private readonly DUCK_GAIN = 0.35;
+  private readonly DUCK_RELEASE_MS = 220;
   // Set true when the context goes suspended/interrupted; on the
   // next return-to-running we know to re-trigger playback because
   // the source node may have been killed.
@@ -59,7 +72,7 @@ class MusicPlayer {
     this.intendedTrack = track;
     this.intendedVolume = volume;
     if (this.active && this.active.track.id === track.id && !this.interrupted) {
-      this.fadeTo(volume * this.userVolume);
+      this.applyGain(0.2);
       return;
     }
     const c = getMusicCtx();
@@ -89,7 +102,12 @@ class MusicPlayer {
     const master = c.createGain();
     master.gain.value = 0.0001;
     master.connect(c.destination);
-    master.gain.linearRampToValueAtTime(volume * this.userVolume, startAt + 0.04);
+    // Start at the current target — which honours an in-progress duck so
+    // a track that comes in while the voice is talking starts dipped.
+    master.gain.linearRampToValueAtTime(
+      Math.max(volume * this.userVolume * this.duckLevel, 0.0001),
+      startAt + 0.04,
+    );
     const source = c.createBufferSource();
     source.buffer = buffer;
     source.loop = true;
@@ -162,13 +180,51 @@ class MusicPlayer {
     void this.play(track, volume);
   }
 
-  fadeTo(volume: number): void {
+  // Ramp the active track to its current target gain — the per-track
+  // intended mix, scaled by the settings-panel volume and the voice
+  // duck. Single funnel so volume changes, ducking, and unducking all
+  // resolve to one consistent target.
+  private applyGain(rampSec: number): void {
     const c = getMusicCtx();
     if (!c || !this.active) return;
+    const target = Math.max(this.intendedVolume * this.userVolume * this.duckLevel, 0.0001);
     const g = this.active.masterGain.gain;
     g.cancelScheduledValues(c.currentTime);
     g.setValueAtTime(g.value, c.currentTime);
-    g.linearRampToValueAtTime(Math.max(volume, 0.0001), c.currentTime + 0.2);
+    g.linearRampToValueAtTime(target, c.currentTime + rampSec);
+  }
+
+  // Dip the music under a voice clip. Ref-counted so overlapping clips
+  // don't fight; always pair with unduck().
+  duck(): void {
+    if (this.duckReleaseTimer !== null) {
+      clearTimeout(this.duckReleaseTimer);
+      this.duckReleaseTimer = null;
+    }
+    this.duckCount++;
+    if (this.duckLevel !== this.DUCK_GAIN) {
+      this.duckLevel = this.DUCK_GAIN;
+      this.applyGain(0.12);
+    }
+  }
+
+  unduck(): void {
+    if (this.duckCount > 0) this.duckCount--;
+    if (this.duckCount > 0) return;
+    // Release hold — wait a beat before restoring full volume so a run
+    // of clips with tiny gaps (a letter-name → letter-sound sequence)
+    // doesn't make the music audibly pump up between each one.
+    if (this.duckReleaseTimer !== null) clearTimeout(this.duckReleaseTimer);
+    if (typeof window === "undefined") {
+      this.duckLevel = 1;
+      this.applyGain(0.3);
+      return;
+    }
+    this.duckReleaseTimer = window.setTimeout(() => {
+      this.duckReleaseTimer = null;
+      this.duckLevel = 1;
+      this.applyGain(0.3);
+    }, this.DUCK_RELEASE_MS);
   }
 
   // Settings-panel master volume multiplier (0..1). Scales the
@@ -177,7 +233,7 @@ class MusicPlayer {
   setUserVolume(v: number): void {
     this.userVolume = Math.max(0, Math.min(1, v));
     if (this.active) {
-      this.fadeTo(this.intendedVolume * this.userVolume);
+      this.applyGain(0.2);
     }
   }
 

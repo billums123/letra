@@ -12,6 +12,7 @@
 
 import type { AudioManifest, VoicesRegistry, VoiceRegistryEntry } from "./types";
 import { ALPHABET, LETTER_NAME_TEXT, LETTER_SOUND_TEXT, getHintIds, getWrongNudgeIds } from "./types";
+import { music } from "./music";
 
 type Mode = "elevenlabs" | "speech" | "muted";
 
@@ -312,7 +313,12 @@ class AudioPlayer {
       // clip never starts. Symptom: occasionally no audio for the new
       // word.
       await Promise.resolve();
-      return new Promise((resolve) => {
+      // Dip the background music for the duration of the clip so the
+      // voice stays clear. unduck() runs whenever the returned promise
+      // settles — ended, error, OR a stop() that resolves it early —
+      // so the music always comes back up.
+      music.duck();
+      return new Promise<void>((resolve) => {
         const a = this.getAudioEl();
         // Swap the src on the cached element rather than creating a
         // new Audio — keeps the iOS unlock state intact across plays.
@@ -339,7 +345,7 @@ class AudioPlayer {
             this.unlocked = true;
           })
           .catch(finish);
-      });
+      }).finally(() => music.unduck());
     }
     // Speech fallback: derive the natural-language text from the id.
     const text = textForId(id);
@@ -355,7 +361,9 @@ class AudioPlayer {
       return Promise.resolve();
     }
     if (typeof window === "undefined" || !("speechSynthesis" in window)) return Promise.resolve();
-    return new Promise((resolve) => {
+    // Duck the music under the spoken line, same as the ElevenLabs path.
+    music.duck();
+    return new Promise<void>((resolve) => {
       const utter = new SpeechSynthesisUtterance(text);
       if (this.speechVoice) utter.voice = this.speechVoice;
       utter.rate = 0.95;
@@ -364,7 +372,7 @@ class AudioPlayer {
       utter.onend = () => resolve();
       utter.onerror = () => resolve();
       window.speechSynthesis.speak(utter);
-    });
+    }).finally(() => music.unduck());
   }
 
   // Queue a clip to play after the currently-queued audio finishes.

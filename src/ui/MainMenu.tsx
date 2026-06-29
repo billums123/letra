@@ -251,8 +251,7 @@ export function MainMenu() {
   // heights so the menu fits in one screenful without scrolling.
   const short = useIsShort();
 
-  // Stop any leftover voice clip if we land on the menu mid-utterance,
-  // but don't auto-play a welcome line — the menu music carries the vibe.
+  // Stop any leftover voice clip if we land on the menu mid-utterance.
   useEffect(() => {
     return () => audio.stop();
   }, []);
@@ -267,6 +266,21 @@ export function MainMenu() {
     hasPlayedBootAnim = true;
   }, []);
   const boot = isBoot.current;
+
+  // Greet the kid out loud the first time they reach the menu this
+  // session — a non-reader needs an audible "here's what to do" cue.
+  // Gated to the boot mount only (same as the pop-in) so returning from
+  // a game stays quiet; on later visits the menu music carries the vibe.
+  // The small delay lets the menu music fade in first; the welcome line
+  // then ducks it. play() no-ops cleanly if audio is muted or the clip
+  // hasn't unlocked yet, so this is safe on every path.
+  useEffect(() => {
+    if (!isBoot.current) return;
+    const t = setTimeout(() => {
+      void audio.play(audio.menu("welcome"));
+    }, 450);
+    return () => clearTimeout(t);
+  }, []);
 
   return (
     <div
