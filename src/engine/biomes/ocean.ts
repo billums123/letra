@@ -344,6 +344,121 @@ function buildProps(ctx: BiomeContext): void {
   skirt.position.y = -0.12;
   group.add(skirt);
 
+  // ── Boat wake — the water actually parting ───────────────────────
+  // A ribbon rebuilt every frame along the avatar's recent path over
+  // water. Each cross-section is a parted-water profile: raised foam
+  // ridges at the edges, a churned trough down the middle, feathering
+  // to ambient water at the outer lip. The ribbon rides the same wave
+  // field as the sea and fades with age, so it reads as displaced
+  // water rather than a sticker. Works for any avatar the kid drives
+  // — no wake while airborne or beached.
+  {
+    const TRAIL_MAX = 26;
+    const TRAIL_LIFE = 1.9; // seconds a sample lives
+    const TRAIL_SPACING = 0.55;
+    const CROSS = 7; // verts per cross-section
+    type TrailSample = { x: number; z: number; px: number; pz: number; age: number };
+    const trail: TrailSample[] = [];
+    let lastX = 0;
+    let lastZ = 0;
+    let haveLast = false;
+
+    const maxVerts = (TRAIL_MAX + 1) * CROSS;
+    const wakeGeo = new THREE.BufferGeometry();
+    const wakePos = new Float32Array(maxVerts * 3);
+    const wakeCol = new Float32Array(maxVerts * 4);
+    wakeGeo.setAttribute("position", new THREE.BufferAttribute(wakePos, 3));
+    wakeGeo.setAttribute("color", new THREE.BufferAttribute(wakeCol, 4));
+    const wakeIdx: number[] = [];
+    for (let s = 0; s < TRAIL_MAX; s++) {
+      const a = s * CROSS;
+      const b = (s + 1) * CROSS;
+      for (let c = 0; c < CROSS - 1; c++) {
+        wakeIdx.push(a + c, b + c, b + c + 1, a + c, b + c + 1, a + c + 1);
+      }
+    }
+    wakeGeo.setIndex(wakeIdx);
+    wakeGeo.setDrawRange(0, 0);
+    const wakeMesh = new THREE.Mesh(
+      wakeGeo,
+      new THREE.MeshBasicMaterial({ vertexColors: true, transparent: true, depthWrite: false })
+    );
+    wakeMesh.frustumCulled = false;
+    group.add(wakeMesh);
+
+    // Cross-section shape: offsets across the ribbon (×width) and the
+    // matching height profile (×intensity) + foam whiteness per vert.
+    const OFFS = [-1.5, -1.0, -0.45, 0, 0.45, 1.0, 1.5];
+    const LIFT = [0, 1.0, -0.35, -0.8, -0.35, 1.0, 0];
+    const FOAM = [0, 0.85, 0.35, 0.55, 0.35, 0.85, 0];
+    const cWater = new THREE.Color(0x3f9fce);
+    const cFoam = new THREE.Color(0xf2fdff);
+    const tmpC = new THREE.Color();
+
+    tick.push((dt) => {
+      const p = getPlayerPosition();
+      for (const s of trail) s.age += dt;
+      while (trail.length && trail[trail.length - 1].age > TRAIL_LIFE) trail.pop();
+
+      if (p) {
+        const overWater = islandHeight(p.x, p.z) + sandHeight(p.x, p.z) < 0.05 && p.y < 1.6;
+        if (!haveLast) {
+          lastX = p.x;
+          lastZ = p.z;
+          haveLast = true;
+        }
+        const dx = p.x - lastX;
+        const dz = p.z - lastZ;
+        const moved = Math.hypot(dx, dz);
+        if (moved > 4) {
+          // Teleport (eruption swallow / launch) — restart the trail.
+          trail.length = 0;
+          lastX = p.x;
+          lastZ = p.z;
+        } else if (moved > TRAIL_SPACING && overWater) {
+          trail.unshift({ x: p.x, z: p.z, px: -dz / moved, pz: dx / moved, age: 0 });
+          if (trail.length > TRAIL_MAX) trail.pop();
+          lastX = p.x;
+          lastZ = p.z;
+        }
+      }
+
+      const count = trail.length;
+      if (count < 2) {
+        wakeGeo.setDrawRange(0, 0);
+        return;
+      }
+      for (let i = 0; i < count; i++) {
+        const s = trail[i];
+        const k = s.age / TRAIL_LIFE; // 0 fresh → 1 gone
+        const fade = 1 - k;
+        // The channel widens and shallows as it ages — water closing
+        // back over the boat's path.
+        const width = 0.7 + k * 1.9;
+        const intensity = 0.14 * fade;
+        const alpha = 0.75 * fade;
+        for (let c = 0; c < CROSS; c++) {
+          const off = OFFS[c] * width;
+          const x = s.x + s.px * off;
+          const z = s.z + s.pz * off;
+          const y = waveHeight(x, z) + LIFT[c] * intensity + 0.05;
+          const vi = i * CROSS + c;
+          wakePos[vi * 3 + 0] = x;
+          wakePos[vi * 3 + 1] = y;
+          wakePos[vi * 3 + 2] = z;
+          tmpC.copy(cWater).lerp(cFoam, FOAM[c] * fade);
+          wakeCol[vi * 4 + 0] = tmpC.r;
+          wakeCol[vi * 4 + 1] = tmpC.g;
+          wakeCol[vi * 4 + 2] = tmpC.b;
+          wakeCol[vi * 4 + 3] = FOAM[c] === 0 ? 0 : alpha;
+        }
+      }
+      wakeGeo.attributes.position.needsUpdate = true;
+      wakeGeo.attributes.color.needsUpdate = true;
+      wakeGeo.setDrawRange(0, (count - 1) * (CROSS - 1) * 6);
+    });
+  }
+
   // ── Volcano island ───────────────────────────────────────────────
   const volcanoGroup = new THREE.Group();
   volcanoGroup.position.set(ISLAND.x, 0, ISLAND.z);
