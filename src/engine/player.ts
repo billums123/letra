@@ -688,10 +688,13 @@ function buildBoat(): PlayerHandles {
   const stripe = new THREE.Mesh(new THREE.BoxGeometry(1.34, 0.16, 2.14), hullTrimMat);
   stripe.position.y = 0.2;
   group.add(stripe);
-  // Rounded bow cap.
-  const bow = new THREE.Mesh(new THREE.CylinderGeometry(0.65, 0.65, 0.55, 14, 1, false, 0, Math.PI), hullMat);
-  bow.rotation.y = Math.PI / 2;
-  bow.position.set(0, 0.42, 1.05);
+  // Rounded bow cap — a full vertical cylinder centred on the hull's
+  // front face: the back half embeds in the hull box and the front
+  // half rounds the bow. The face features sit ON this curve.
+  const BOW_R = 0.65;
+  const BOW_Z = 1.05;
+  const bow = new THREE.Mesh(new THREE.CylinderGeometry(BOW_R, BOW_R, 0.55, 16), hullMat);
+  bow.position.set(0, 0.42, BOW_Z);
   bow.castShadow = true;
   group.add(bow);
 
@@ -727,24 +730,30 @@ function buildBoat(): PlayerHandles {
   group.add(stackBand);
 
   // Googly eyes on the bow so the kid knows which way is forward.
+  // Each eye sits half-sunk into the bow curve: its centre is pushed
+  // to just inside the cylinder surface at its own x-offset, so the
+  // sphere visibly emerges from the hull instead of floating ahead
+  // of it.
   const whiteMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.3 });
   const pupilMat = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.4 });
   for (const dx of [-0.28, 0.28]) {
+    const surfaceZ = BOW_Z + Math.sqrt(BOW_R * BOW_R - dx * dx);
     const eye = new THREE.Mesh(new THREE.SphereGeometry(0.15, 14, 12), whiteMat);
-    eye.position.set(dx, 0.62, 1.28);
+    eye.position.set(dx, 0.62, surfaceZ - 0.07);
     group.add(eye);
     const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.07, 10, 8), pupilMat);
-    pupil.position.set(dx, 0.62, 1.4);
+    pupil.position.set(dx, 0.62, surfaceZ + 0.05);
     group.add(pupil);
   }
-  // Bow smile.
+  // Bow smile — flat torus arc pressed into the front of the bow
+  // curve (slightly embedded at its widest points).
   const smile = new THREE.Mesh(
     new THREE.TorusGeometry(0.16, 0.035, 8, 16, Math.PI),
     new THREE.MeshStandardMaterial({ color: 0x203a5c }),
   );
-  smile.position.set(0, 0.4, 1.34);
+  smile.position.set(0, 0.36, BOW_Z + BOW_R - 0.06);
   smile.rotation.z = Math.PI;
-  smile.rotation.x = -0.35;
+  smile.rotation.x = -0.15;
   group.add(smile);
 
   // Steam puffs from the stack — reuse the car's recycled-pool pattern
@@ -759,15 +768,26 @@ function buildBoat(): PlayerHandles {
     steams.push({ mesh, age: (i / STEAM_COUNT) * 1.1, lifetime: 1.0 + Math.random() * 0.4, jitter: Math.random() * Math.PI * 2 });
   }
   // Wake foam behind the stern, hugging the waterline.
-  const WAKE_COUNT = 7;
-  const wakeOrigin = new THREE.Vector3(0, 0.12, -1.15);
-  const wakes: { mesh: THREE.Mesh; age: number; lifetime: number; side: number }[] = [];
+  // Wake — a fan of flat foam blobs streaming off the stern, plus two
+  // V-arm trails peeling off the bow sides. Deliberately loud: the
+  // wake is half of what sells "boat on water".
+  const WAKE_COUNT = 12;
+  const wakeOrigin = new THREE.Vector3(0, 0.1, -1.15);
+  const wakes: { mesh: THREE.Mesh; age: number; lifetime: number; side: number; arm: number }[] = [];
   for (let i = 0; i < WAKE_COUNT; i++) {
     const m = new THREE.MeshBasicMaterial({ color: 0xeafaff, transparent: true, opacity: 0, depthWrite: false });
-    const mesh = new THREE.Mesh(new THREE.SphereGeometry(0.14, 10, 8), m);
-    mesh.scale.y = 0.35;
+    const mesh = new THREE.Mesh(new THREE.SphereGeometry(0.16, 10, 8), m);
+    mesh.scale.y = 0.3;
     group.add(mesh);
-    wakes.push({ mesh, age: (i / WAKE_COUNT) * 0.9, lifetime: 0.8 + Math.random() * 0.35, side: Math.random() * 2 - 1 });
+    // Every third blob rides a V-arm instead of the centre churn.
+    const arm = i % 3 === 0 ? (i % 2 === 0 ? 1 : -1) : 0;
+    wakes.push({
+      mesh,
+      age: (i / WAKE_COUNT) * 0.9,
+      lifetime: 0.9 + Math.random() * 0.4,
+      side: Math.random() * 2 - 1,
+      arm,
+    });
   }
 
   let facing = 0;
@@ -833,24 +853,36 @@ function buildBoat(): PlayerHandles {
       }
       // Wake foam — flat white blobs sliding back from the stern,
       // spreading sideways as they age. Only really visible under way.
-      const wakeRate = 0.5 + mag * 1.6;
+      const wakeRate = 0.5 + mag * 1.8;
       for (const w of wakes) {
         w.age += dt * wakeRate;
         if (w.age >= w.lifetime) {
           w.age -= w.lifetime;
-          w.lifetime = 0.7 + Math.random() * 0.4;
+          w.lifetime = 0.8 + Math.random() * 0.45;
           w.side = Math.random() * 2 - 1;
         }
         const t = Math.min(1, w.age / w.lifetime);
-        w.mesh.position.set(
-          wakeOrigin.x + w.side * t * 0.55,
-          wakeOrigin.y,
-          wakeOrigin.z - t * (0.4 + mag * 1.1),
-        );
-        w.mesh.scale.set(0.5 + t * 1.6, 0.3, 0.5 + t * 1.2);
+        if (w.arm === 0) {
+          // Centre churn — spreads into a widening fan behind the stern.
+          w.mesh.position.set(
+            wakeOrigin.x + w.side * t * 1.0,
+            wakeOrigin.y,
+            wakeOrigin.z - t * (0.6 + mag * 2.2),
+          );
+          w.mesh.scale.set(0.7 + t * 2.4, 0.3, 0.7 + t * 1.8);
+        } else {
+          // V-arms — peel diagonally off the bow sides.
+          w.mesh.position.set(
+            w.arm * (0.7 + t * 1.7),
+            wakeOrigin.y,
+            0.9 - t * (2.0 + mag * 1.6),
+          );
+          w.mesh.scale.set(0.5 + t * 1.4, 0.25, 0.5 + t * 1.1);
+        }
         const fadeIn = Math.min(1, t / 0.1);
         const fadeOut = Math.max(0, 1 - (t - 0.1) / 0.9);
-        (w.mesh.material as THREE.MeshBasicMaterial).opacity = (0.05 + mag * 0.3) * fadeIn * fadeOut;
+        (w.mesh.material as THREE.MeshBasicMaterial).opacity =
+          (0.06 + mag * 0.5) * fadeIn * fadeOut;
       }
     },
     position() {

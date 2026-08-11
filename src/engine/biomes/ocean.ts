@@ -101,9 +101,12 @@ const MOUTH_DIR = (() => {
 // How far along the mouth ray (from the island centre) things sit:
 // the cave's back wall, the glowing arch, and the trigger point the
 // boat has to reach. All inside the carved channel below.
-const CAVE_WALL_ALONG = 3.9;
+const CAVE_WALL_ALONG = 2.6;
 const CAVE_ARCH_ALONG = 4.55;
-const MOUTH_ALONG = 5.1;
+const MOUTH_ALONG = 4.7;
+// Where the rumble drags the boat to — deep enough to sit in the dark
+// under the tunnel roof, shy of the back-wall collision fence.
+const SWALLOW_ALONG = 4.5;
 const MOUTH = {
   x: ISLAND.x + MOUTH_DIR.x * MOUTH_ALONG,
   z: ISLAND.z + MOUTH_DIR.z * MOUTH_ALONG,
@@ -351,14 +354,41 @@ function buildProps(ctx: BiomeContext): void {
   obstacles.push({ x: ISLAND.x, z: ISLAND.z, radius: ISLAND_OUTER_R + 1, solid: false });
 
   {
-    const SEGMENTS = 56;
-    const STEPS = 40;
-    const points: THREE.Vector2[] = [];
-    for (let i = 0; i <= STEPS; i++) {
-      const d = (i / STEPS) * ISLAND_OUTER_R;
-      points.push(new THREE.Vector2(d, volcanoProfile(d)));
+    // The carved cone is a heightfield (one Y per XZ), so build it as
+    // a polar grid displaced by the exact same islandHeight math the
+    // terrain sampler uses. The earlier LatheGeometry + carve approach
+    // folded faces where the channel cut through rings — the flipped
+    // triangles got backface-culled and the mountain looked
+    // translucent. A heightfield can't fold, so it renders solid from
+    // every angle and matches the drivable surface exactly.
+    const RINGS = 36;
+    const SEGS = 72;
+    const positions: number[] = [0, volcanoProfile(0), 0];
+    for (let r = 1; r <= RINGS; r++) {
+      const ringR = (r / RINGS) * ISLAND_OUTER_R;
+      for (let s = 0; s < SEGS; s++) {
+        const th = (s / SEGS) * Math.PI * 2;
+        positions.push(Math.cos(th) * ringR, 0, Math.sin(th) * ringR);
+      }
     }
-    const coneGeo = new THREE.LatheGeometry(points, SEGMENTS);
+    const indices: number[] = [];
+    for (let s = 0; s < SEGS; s++) {
+      indices.push(0, 1 + ((s + 1) % SEGS), 1 + s);
+    }
+    for (let r = 1; r < RINGS; r++) {
+      const inner = 1 + (r - 1) * SEGS;
+      const outer = 1 + r * SEGS;
+      for (let s = 0; s < SEGS; s++) {
+        const i0 = inner + s;
+        const i1 = inner + ((s + 1) % SEGS);
+        const o0 = outer + s;
+        const o1 = outer + ((s + 1) % SEGS);
+        indices.push(i0, i1, o1, i0, o1, o0);
+      }
+    }
+    const coneGeo = new THREE.BufferGeometry();
+    coneGeo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+    coneGeo.setIndex(indices);
     const pos = coneGeo.attributes.position;
     const colors = new Float32Array(pos.count * 3);
     const cSand = new THREE.Color(0xe8d49a);
@@ -370,12 +400,11 @@ function buildProps(ctx: BiomeContext): void {
       const x = pos.getX(i);
       const z = pos.getZ(i);
       const d = Math.hypot(x, z);
-      // Same carve the terrain sampler applies (vertex coords are
-      // island-local here), so the visible cone and the surface the
-      // boat rides match — including the sea-level cave inlet.
       const mask = channelMask(x, z);
       const masked = volcanoProfile(d) * mask;
-      if (d > CRATER_FLOOR_R + 0.3) {
+      // Rocky jitter everywhere except the crater floor and the
+      // carved channel floor, both of which should stay smooth.
+      if (d > CRATER_FLOOR_R + 0.3 && masked > 0.25) {
         const n = Math.sin(x * 4.7 + z * 3.9) * Math.cos(x * 2.1 - z * 5.3);
         pos.setY(i, masked + n * 0.16 * mask);
       } else {
@@ -405,6 +434,32 @@ function buildProps(ctx: BiomeContext): void {
     volcanoGroup.add(cone);
   }
 
+  // Invisible collision fence traced along the island's own height
+  // contour: at each bearing, walk inward from open water and drop a
+  // solid obstacle where the ground first rises past knee height. The
+  // carved inlet never crosses that height until its back wall, so
+  // the cave corridor stays open while every other approach — however
+  // diagonal — bumps into the fence before the boat can climb the
+  // flank. (The visible flank boulders are just dressing on top.)
+  {
+    const FENCE_STEPS = 48;
+    for (let i = 0; i < FENCE_STEPS; i++) {
+      const a = (i / FENCE_STEPS) * Math.PI * 2;
+      const dirX = Math.cos(a);
+      const dirZ = Math.sin(a);
+      // Walk inward from open water; the first sample past knee height
+      // is where the fence post goes.
+      for (let r = ISLAND_OUTER_R; r > CRATER_FLOOR_R; r -= 0.25) {
+        const x = ISLAND.x + dirX * r;
+        const z = ISLAND.z + dirZ * r;
+        if (islandHeight(x, z) >= 0.5) {
+          obstacles.push({ x, z, radius: 1.0 });
+          break;
+        }
+      }
+    }
+  }
+
   // Sea-cave mouth — a dark arch + black interior plane set into the
   // flank, facing the world centre. Pure dressing; the "cave" itself
   // is the trigger zone in front of it.
@@ -417,24 +472,38 @@ function buildProps(ctx: BiomeContext): void {
     caveGroup.position.set(mouthLocal.x, 0, mouthLocal.z);
     caveGroup.lookAt(MOUTH_DIR.x * 100, 0, MOUTH_DIR.z * 100);
     volcanoGroup.add(caveGroup);
-    // Black interior — a vertical half-disc "hole".
+    // Tunnel roof — a half-pipe laid along the inlet so the boat
+    // drives INTO the mountain, under rock, into the dark. DoubleSide
+    // so the interior reads as cave walls from inside.
+    const tunnelGeo = new THREE.CylinderGeometry(1.9, 1.9, 2.4, 12, 1, true, 0, Math.PI);
+    tunnelGeo.rotateZ(Math.PI / 2);
+    tunnelGeo.rotateY(Math.PI / 2);
+    const tunnel = new THREE.Mesh(
+      tunnelGeo,
+      new THREE.MeshStandardMaterial({ color: 0x2e241c, roughness: 1, side: THREE.DoubleSide })
+    );
+    tunnel.position.set(0, 0.1, -0.55);
+    tunnel.castShadow = true;
+    caveGroup.add(tunnel);
+    // Black back wall deep inside — the "bottomless dark" the boat
+    // disappears toward.
     const hole = new THREE.Mesh(
-      new THREE.CircleGeometry(1.6, 20, 0, Math.PI),
+      new THREE.CircleGeometry(1.85, 20, 0, Math.PI),
       new THREE.MeshBasicMaterial({ color: 0x0a0806, side: THREE.DoubleSide })
     );
-    hole.position.y = 0.1;
+    hole.position.set(0, 0.1, -1.7);
     caveGroup.add(hole);
-    // Rocky arch framing the hole.
+    // Rocky arch framing the tunnel entrance.
     const archMat = new THREE.MeshStandardMaterial({ color: 0x5c4a3c, roughness: 1 });
-    const arch = new THREE.Mesh(new THREE.TorusGeometry(1.6, 0.35, 8, 14, Math.PI), archMat);
-    arch.position.y = 0.1;
+    const arch = new THREE.Mesh(new THREE.TorusGeometry(1.7, 0.38, 8, 14, Math.PI), archMat);
+    arch.position.set(0, 0.1, 0.68);
     caveGroup.add(arch);
-    // Warm glow spilling out of the mouth.
-    const caveLight = new THREE.PointLight(0xff6a2a, 0.9, 8);
-    caveLight.position.set(0, 0.8, 0.8);
+    // Warm glow from deep inside, spilling toward the entrance.
+    const caveLight = new THREE.PointLight(0xff6a2a, 1.1, 10);
+    caveLight.position.set(0, 0.8, -1.0);
     caveGroup.add(caveLight);
     tick.push((_dt, t) => {
-      caveLight.intensity = 0.7 + Math.sin(t * 3.1) * 0.2 + Math.sin(t * 7.3) * 0.1;
+      caveLight.intensity = 0.9 + Math.sin(t * 3.1) * 0.25 + Math.sin(t * 7.3) * 0.12;
     });
   }
 
@@ -666,6 +735,15 @@ function buildProps(ctx: BiomeContext): void {
         }
       }
     } else if (state === "rumbling") {
+      // The mountain slurps the boat deeper into the tunnel while it
+      // rumbles — by the boom, the kid is sitting in the dark.
+      if (player) {
+        const tx = ISLAND.x + MOUTH_DIR.x * SWALLOW_ALONG;
+        const tz = ISLAND.z + MOUTH_DIR.z * SWALLOW_ALONG;
+        const k = Math.min(1, dt * 3);
+        player.x += (tx - player.x) * k;
+        player.z += (tz - player.z) * k;
+      }
       if (stateT >= RUMBLE_SECONDS) {
         state = "cooldown";
         stateT = 0;
