@@ -236,6 +236,9 @@ export function SoundMatchGame() {
         entry.character.setPlayerProximity(d);
       }
       if (lockRef.current) return;
+      // No collecting while the volcano launch is flying the avatar
+      // over the map — collection distance is XZ-only.
+      if (engine.inFlight) return;
       const target = targetRef.current;
       if (!target) return;
       for (const entry of lettersRef.current) {

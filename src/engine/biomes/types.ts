@@ -44,6 +44,16 @@ export type BiomeContext = {
   // walkable area. ringRadius optionally tightens the letter ring for
   // small dance floors.
   setCelebrationCenter: (center: { x: number; z: number; ringRadius?: number }) => void;
+  // Fling the avatar on a ballistic arc to (x, z). While airborne the
+  // engine suspends input, collision, and terrain-follow, tumbles the
+  // avatar, and keeps the camera tracking the flight; control returns
+  // on touchdown. Biomes use this for launch gags (the jungle volcano
+  // eruption). No-op if a flight is already in progress. onLand fires
+  // the frame the avatar touches down.
+  launchPlayer: (
+    to: { x: number; z: number },
+    opts?: { duration?: number; peakY?: number; onLand?: () => void }
+  ) => void;
 };
 
 export type Biome = {

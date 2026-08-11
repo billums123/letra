@@ -749,3 +749,147 @@ export function playWoo() {
   tone(N.E6, 0.5, 0.3, 0.12, "sine");
   tone(N.G6, 0.55, 0.35, 0.1, "sine");
 }
+
+// ─── Volcano cues (jungle biome) ─────────────────────────────────────────
+// Three-part eruption soundscape: a building rumble while the ground
+// shakes, a KABOOM + rising whoosh at launch, and small lava pops as
+// bombs rain down. All procedural — no assets to fetch.
+
+// Low ground-shake rumble that swells over ~0.9s. Played the moment
+// the kid drives into the crater, underneath the visual shake, so the
+// boom that follows feels earned rather than instant.
+export function playVolcanoRumble() {
+  const c = getCtx();
+  if (!c) return;
+  const dest = getSfxBus(c);
+  const t0 = c.currentTime;
+  // Deep noise bed, low-passed hard and swelling in.
+  {
+    const n = startNoise(c, t0, t0 + 1.1);
+    const lp = c.createBiquadFilter();
+    lp.type = "lowpass";
+    lp.frequency.setValueAtTime(90, t0);
+    lp.frequency.exponentialRampToValueAtTime(220, t0 + 0.9);
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(0.5, t0 + 0.7);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 1.1);
+    n.connect(lp).connect(g).connect(dest);
+  }
+  // Sub-bass wobble underneath — an LFO-like slow pitch wiggle reads
+  // as the mountain itself groaning.
+  {
+    const osc = c.createOscillator();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(42, t0);
+    osc.frequency.linearRampToValueAtTime(58, t0 + 0.45);
+    osc.frequency.linearRampToValueAtTime(38, t0 + 0.9);
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(0.4, t0 + 0.5);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 1.05);
+    osc.connect(g).connect(dest);
+    osc.start(t0);
+    osc.stop(t0 + 1.1);
+  }
+}
+
+// The eruption itself: sub-bass KABOOM + low noise body + a rising
+// two-oscillator whoosh that tracks the avatar sailing skyward.
+export function playVolcanoBoom() {
+  const c = getCtx();
+  if (!c) return;
+  const dest = getSfxBus(c);
+  const t0 = c.currentTime;
+  // 1 — sub-bass punch
+  {
+    const osc = c.createOscillator();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(60, t0);
+    osc.frequency.exponentialRampToValueAtTime(26, t0 + 0.5);
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(0.75, t0 + 0.012);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.65);
+    osc.connect(g).connect(dest);
+    osc.start(t0);
+    osc.stop(t0 + 0.7);
+  }
+  // 2 — boom body (low-passed noise)
+  {
+    const n = startNoise(c, t0, t0 + 0.9);
+    const lp = c.createBiquadFilter();
+    lp.type = "lowpass";
+    lp.frequency.setValueAtTime(200, t0);
+    lp.frequency.exponentialRampToValueAtTime(75, t0 + 0.6);
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(0.6, t0 + 0.015);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.85);
+    n.connect(lp).connect(g).connect(dest);
+  }
+  // 3 — rising launch whoosh: detuned sine pair sweeping up, like the
+  // firework shell whistle but bigger and slower to match the arc.
+  {
+    const s = t0 + 0.06;
+    const e = t0 + 0.9;
+    const osc1 = c.createOscillator();
+    osc1.type = "sine";
+    osc1.frequency.setValueAtTime(300, s);
+    osc1.frequency.exponentialRampToValueAtTime(1900, e);
+    const osc2 = c.createOscillator();
+    osc2.type = "sine";
+    osc2.frequency.setValueAtTime(450, s);
+    osc2.frequency.exponentialRampToValueAtTime(2800, e);
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.0001, s);
+    g.gain.exponentialRampToValueAtTime(0.12, s + 0.1);
+    g.gain.exponentialRampToValueAtTime(0.0001, e);
+    osc1.connect(g);
+    osc2.connect(g);
+    g.connect(dest);
+    osc1.start(s);
+    osc1.stop(e + 0.05);
+    osc2.start(s);
+    osc2.stop(e + 0.05);
+  }
+}
+
+// Small "bloop" pop for a lava bomb hitting the ground. Throttled hard
+// because a fountain drops many bombs in a burst and we want texture,
+// not a drum roll.
+let lastLavaPopAt = 0;
+export function playLavaPop() {
+  const now = performance.now();
+  if (now - lastLavaPopAt < 120) return;
+  lastLavaPopAt = now;
+  const c = getCtx();
+  if (!c) return;
+  const dest = getSfxBus(c);
+  const t0 = c.currentTime;
+  const osc = c.createOscillator();
+  osc.type = "sine";
+  const base = 200 + Math.random() * 120;
+  osc.frequency.setValueAtTime(base, t0);
+  osc.frequency.exponentialRampToValueAtTime(base * 0.45, t0 + 0.12);
+  const g = c.createGain();
+  g.gain.setValueAtTime(0.0001, t0);
+  g.gain.exponentialRampToValueAtTime(0.22, t0 + 0.008);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.14);
+  osc.connect(g).connect(dest);
+  osc.start(t0);
+  osc.stop(t0 + 0.18);
+  // Tiny sizzle layer on some pops so the field of splats varies.
+  if (Math.random() < 0.4) {
+    const n = startNoise(c, t0, t0 + 0.1);
+    const bp = c.createBiquadFilter();
+    bp.type = "bandpass";
+    bp.frequency.value = 1400 + Math.random() * 800;
+    bp.Q.value = 1.5;
+    const ng = c.createGain();
+    ng.gain.setValueAtTime(0.0001, t0);
+    ng.gain.exponentialRampToValueAtTime(0.06, t0 + 0.01);
+    ng.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.1);
+    n.connect(bp).connect(ng).connect(dest);
+  }
+}
