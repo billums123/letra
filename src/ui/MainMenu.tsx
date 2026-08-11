@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { useGameStore, type LetterCase } from "../state/store";
+import { useGameStore, type AvatarKind, type LetterCase } from "../state/store";
 import { audio } from "../audio/Player";
 import { StickerBook } from "./StickerBook";
 import { TrophyShelf } from "./TrophyShelf";
@@ -1089,7 +1089,7 @@ function voiceTriggerStyle(open: boolean): React.CSSProperties {
 }
 
 type AvatarOption = {
-  kind: "kid" | "car" | "rocket";
+  kind: AvatarKind;
   label: string;
   emoji: string;
   color: string;
@@ -1098,6 +1098,7 @@ const AVATAR_OPTIONS: AvatarOption[] = [
   { kind: "kid", label: "Kid", emoji: "🧒", color: "#ff8c4a" },
   { kind: "car", label: "Car", emoji: "🚗", color: "#ff5555" },
   { kind: "rocket", label: "Rocket", emoji: "🚀", color: "#7e9bff" },
+  { kind: "boat", label: "Boat", emoji: "🚤", color: "#3fa9d0" },
 ];
 
 // Two cartoony cards floating along the bottom-left of the menu so kids
@@ -1113,8 +1114,8 @@ function AvatarPicker({
   setAvatar,
   compact: _compact,
 }: {
-  avatar: "kid" | "car" | "rocket";
-  setAvatar: (a: "kid" | "car" | "rocket") => void;
+  avatar: AvatarKind;
+  setAvatar: (a: AvatarKind) => void;
   compact: boolean;
 }) {
   void _compact;

@@ -3,10 +3,11 @@ import { meadowBiome } from "./meadow";
 import { moonBiome } from "./moon";
 import { skyBiome } from "./sky";
 import { jungleBiome } from "./jungle";
+import { oceanBiome } from "./ocean";
 
 // Registry of every available biome. Order here is the order they
 // appear in the menu picker.
-export const BIOMES: Biome[] = [meadowBiome, moonBiome, skyBiome, jungleBiome];
+export const BIOMES: Biome[] = [meadowBiome, moonBiome, skyBiome, jungleBiome, oceanBiome];
 export type BiomeId = (typeof BIOMES)[number]["id"];
 
 const byId = new Map(BIOMES.map((b) => [b.id, b]));

@@ -29,7 +29,11 @@ export type TimeOfDay =
   // Jungle moods
   | "jungle-mist"
   | "jungle-noon"
-  | "jungle-sunset";
+  | "jungle-sunset"
+  // Ocean moods
+  | "ocean-dawn"
+  | "ocean-day"
+  | "ocean-sunset";
 
 const lastByBiome = new Map<string, TimeOfDay>();
 
@@ -46,6 +50,9 @@ const VALID_TODS: TimeOfDay[] = [
   "jungle-mist",
   "jungle-noon",
   "jungle-sunset",
+  "ocean-dawn",
+  "ocean-day",
+  "ocean-sunset",
 ];
 
 // Read a `?tod=...` query param at module load so the URL still works
@@ -130,6 +137,12 @@ function realTimeTOD(pool: readonly TimeOfDay[]): TimeOfDay | null {
     if (hour >= 5 && hour < 10) return inPool("jungle-mist", pool);
     if (hour >= 10 && hour < 16) return inPool("jungle-noon", pool);
     return inPool("jungle-sunset", pool); // 16:00 – 04:59
+  }
+  // Ocean pool: pink dawn / bright day / golden sunset.
+  if (pool.includes("ocean-dawn") || pool.includes("ocean-day")) {
+    if (hour >= 5 && hour < 10) return inPool("ocean-dawn", pool);
+    if (hour >= 10 && hour < 16) return inPool("ocean-day", pool);
+    return inPool("ocean-sunset", pool); // 16:00 – 04:59
   }
   return null;
 }

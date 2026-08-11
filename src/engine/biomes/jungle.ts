@@ -862,8 +862,8 @@ function makeJungleTree(rand: () => number, scale: number) {
 
 // Curved-trunk palm with a burst of fronds and a couple of coconuts.
 // shake/update contract matches makeTree so the world wiring is
-// identical.
-function makePalmTree(rand: () => number, scale: number) {
+// identical. Exported for reuse by the ocean biome's islands.
+export function makePalmTree(rand: () => number, scale: number) {
   const g = new THREE.Group();
   g.scale.setScalar(scale);
 

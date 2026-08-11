@@ -26,6 +26,7 @@ const TURN_LERP = 0.18;
 export function buildAvatar(kind: AvatarKind): PlayerHandles {
   if (kind === "car") return buildCar();
   if (kind === "rocket") return buildRocket();
+  if (kind === "boat") return buildBoat();
   return buildKid();
 }
 
@@ -661,3 +662,205 @@ function buildRocket(): PlayerHandles {
   };
 }
 
+
+// ─── Boat avatar ─────────────────────────────────────────────────────────────
+// A chubby cartoon tugboat for the ocean biome. Same omnidirectional
+// control model as the car; terrainAlign stays true so the engine's
+// terrain-tilt rides the biome's animated wave field — that pitch and
+// roll over swells is most of what makes the boat feel like it's on
+// water. A white foam wake streams from the stern, and the smokestack
+// drips little steam puffs that speed up under throttle.
+function buildBoat(): PlayerHandles {
+  const group = new THREE.Group();
+  group.name = "Player";
+
+  const hullMat = new THREE.MeshStandardMaterial({ color: 0x3f7fd0, roughness: 0.55 });
+  const hullTrimMat = new THREE.MeshStandardMaterial({ color: 0xe6473a, roughness: 0.6 });
+  const deckMat = new THREE.MeshStandardMaterial({ color: 0xfff3da, roughness: 0.75 });
+
+  // Hull — wide rounded box, slightly narrower at the bow via a scaled
+  // second box overlapping the front. Sits low so the waterline reads.
+  const hull = new THREE.Mesh(new THREE.BoxGeometry(1.3, 0.55, 2.1), hullMat);
+  hull.position.y = 0.42;
+  hull.castShadow = true;
+  group.add(hull);
+  // Red boot stripe under the hull.
+  const stripe = new THREE.Mesh(new THREE.BoxGeometry(1.34, 0.16, 2.14), hullTrimMat);
+  stripe.position.y = 0.2;
+  group.add(stripe);
+  // Rounded bow cap.
+  const bow = new THREE.Mesh(new THREE.CylinderGeometry(0.65, 0.65, 0.55, 14, 1, false, 0, Math.PI), hullMat);
+  bow.rotation.y = Math.PI / 2;
+  bow.position.set(0, 0.42, 1.05);
+  bow.castShadow = true;
+  group.add(bow);
+
+  // Deck cabin — cream block with a little roof.
+  const cabin = new THREE.Mesh(new THREE.BoxGeometry(0.85, 0.55, 0.9), deckMat);
+  cabin.position.set(0, 0.95, -0.25);
+  cabin.castShadow = true;
+  group.add(cabin);
+  const roof = new THREE.Mesh(new THREE.BoxGeometry(0.95, 0.12, 1.0), hullTrimMat);
+  roof.position.set(0, 1.28, -0.25);
+  group.add(roof);
+  // Porthole windows on the cabin sides.
+  const portholeMat = new THREE.MeshStandardMaterial({
+    color: 0x9ee3ff,
+    roughness: 0.25,
+    emissive: 0x4ab0e8,
+    emissiveIntensity: 0.15,
+  });
+  for (const side of [-1, 1]) {
+    const porthole = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.11, 0.06, 12), portholeMat);
+    porthole.rotation.z = Math.PI / 2;
+    porthole.position.set(side * 0.45, 1.0, -0.25);
+    group.add(porthole);
+  }
+
+  // Smokestack with a red band.
+  const stack = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.18, 0.5, 10), hullMat);
+  stack.position.set(0, 1.5, -0.6);
+  stack.castShadow = true;
+  group.add(stack);
+  const stackBand = new THREE.Mesh(new THREE.CylinderGeometry(0.155, 0.155, 0.12, 10), hullTrimMat);
+  stackBand.position.set(0, 1.68, -0.6);
+  group.add(stackBand);
+
+  // Googly eyes on the bow so the kid knows which way is forward.
+  const whiteMat = new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.3 });
+  const pupilMat = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.4 });
+  for (const dx of [-0.28, 0.28]) {
+    const eye = new THREE.Mesh(new THREE.SphereGeometry(0.15, 14, 12), whiteMat);
+    eye.position.set(dx, 0.62, 1.28);
+    group.add(eye);
+    const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.07, 10, 8), pupilMat);
+    pupil.position.set(dx, 0.62, 1.4);
+    group.add(pupil);
+  }
+  // Bow smile.
+  const smile = new THREE.Mesh(
+    new THREE.TorusGeometry(0.16, 0.035, 8, 16, Math.PI),
+    new THREE.MeshStandardMaterial({ color: 0x203a5c }),
+  );
+  smile.position.set(0, 0.4, 1.34);
+  smile.rotation.z = Math.PI;
+  smile.rotation.x = -0.35;
+  group.add(smile);
+
+  // Steam puffs from the stack — reuse the car's recycled-pool pattern
+  // but drifting straight up and white.
+  const STEAM_COUNT = 5;
+  const steamOrigin = new THREE.Vector3(0, 1.8, -0.6);
+  const steams: { mesh: THREE.Mesh; age: number; lifetime: number; jitter: number }[] = [];
+  for (let i = 0; i < STEAM_COUNT; i++) {
+    const m = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0, depthWrite: false });
+    const mesh = new THREE.Mesh(new THREE.SphereGeometry(0.09, 10, 8), m);
+    group.add(mesh);
+    steams.push({ mesh, age: (i / STEAM_COUNT) * 1.1, lifetime: 1.0 + Math.random() * 0.4, jitter: Math.random() * Math.PI * 2 });
+  }
+  // Wake foam behind the stern, hugging the waterline.
+  const WAKE_COUNT = 7;
+  const wakeOrigin = new THREE.Vector3(0, 0.12, -1.15);
+  const wakes: { mesh: THREE.Mesh; age: number; lifetime: number; side: number }[] = [];
+  for (let i = 0; i < WAKE_COUNT; i++) {
+    const m = new THREE.MeshBasicMaterial({ color: 0xeafaff, transparent: true, opacity: 0, depthWrite: false });
+    const mesh = new THREE.Mesh(new THREE.SphereGeometry(0.14, 10, 8), m);
+    mesh.scale.y = 0.35;
+    group.add(mesh);
+    wakes.push({ mesh, age: (i / WAKE_COUNT) * 0.9, lifetime: 0.8 + Math.random() * 0.35, side: Math.random() * 2 - 1 });
+  }
+
+  let facing = 0;
+  let bob = 0;
+  let roll = 0;
+
+  motor.start();
+
+  return {
+    group,
+    update(dt, input) {
+      const mag = Math.hypot(input.x, input.y);
+      const isMoving = mag > 0.05;
+      let turnDelta = 0;
+      if (isMoving) {
+        const speed = SPEED * dt;
+        group.position.x += input.x * speed;
+        group.position.z += input.y * speed;
+        const targetYaw = Math.atan2(input.x, input.y);
+        let delta = targetYaw - facing;
+        while (delta > Math.PI) delta -= Math.PI * 2;
+        while (delta < -Math.PI) delta += Math.PI * 2;
+        turnDelta = delta;
+        facing += delta * TURN_LERP;
+        bob += dt * 8;
+      } else {
+        bob += dt * 3.5;
+      }
+      // Gentle bob on top of whatever the biome's wave terrain adds.
+      const bobAmt = isMoving ? 0.05 : 0.03;
+      group.position.y = Math.abs(Math.sin(bob)) * bobAmt;
+      // Lean into turns like a boat heeling over. The engine owns
+      // group.quaternion (yaw + terrain tilt), so bank the HULL pieces
+      // via a slight z-rotation on the whole visible stack — cheap:
+      // rotate children through a shared roll applied on the group's
+      // own child transforms is overkill; a subtle scale-free roll on
+      // the hull mesh alone sells it.
+      const targetRoll = THREE.MathUtils.clamp(-turnDelta * 1.6, -0.3, 0.3);
+      roll += (targetRoll - roll) * 0.1;
+      hull.rotation.z = roll;
+      cabin.rotation.z = roll * 0.7;
+      // Motor putt tracks throttle.
+      motor.setActivity(mag);
+      // Steam puffs — rise from the stack, drift back a little.
+      const steamRate = 0.8 + mag * 1.2;
+      for (const p of steams) {
+        p.age += dt * steamRate;
+        if (p.age >= p.lifetime) {
+          p.age -= p.lifetime;
+          p.lifetime = 0.9 + Math.random() * 0.5;
+          p.jitter = Math.random() * Math.PI * 2;
+        }
+        const t = Math.min(1, p.age / p.lifetime);
+        p.mesh.position.set(
+          steamOrigin.x + Math.sin(p.jitter + t * 5) * 0.05,
+          steamOrigin.y + t * 0.7,
+          steamOrigin.z - t * (0.2 + mag * 0.4),
+        );
+        p.mesh.scale.setScalar(0.5 + t * 1.4);
+        const fadeIn = Math.min(1, t / 0.15);
+        const fadeOut = Math.max(0, 1 - (t - 0.15) / 0.85);
+        (p.mesh.material as THREE.MeshBasicMaterial).opacity = (0.12 + mag * 0.1) * fadeIn * fadeOut;
+      }
+      // Wake foam — flat white blobs sliding back from the stern,
+      // spreading sideways as they age. Only really visible under way.
+      const wakeRate = 0.5 + mag * 1.6;
+      for (const w of wakes) {
+        w.age += dt * wakeRate;
+        if (w.age >= w.lifetime) {
+          w.age -= w.lifetime;
+          w.lifetime = 0.7 + Math.random() * 0.4;
+          w.side = Math.random() * 2 - 1;
+        }
+        const t = Math.min(1, w.age / w.lifetime);
+        w.mesh.position.set(
+          wakeOrigin.x + w.side * t * 0.55,
+          wakeOrigin.y,
+          wakeOrigin.z - t * (0.4 + mag * 1.1),
+        );
+        w.mesh.scale.set(0.5 + t * 1.6, 0.3, 0.5 + t * 1.2);
+        const fadeIn = Math.min(1, t / 0.1);
+        const fadeOut = Math.max(0, 1 - (t - 0.1) / 0.9);
+        (w.mesh.material as THREE.MeshBasicMaterial).opacity = (0.05 + mag * 0.3) * fadeIn * fadeOut;
+      }
+    },
+    position() {
+      return group.position;
+    },
+    facing() {
+      return facing;
+    },
+    dispose() {
+      motor.stop();
+    },
+  };
+}

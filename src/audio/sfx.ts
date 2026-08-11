@@ -893,3 +893,56 @@ export function playLavaPop() {
     n.connect(bp).connect(ng).connect(dest);
   }
 }
+
+// Water splash — the boat (or a launched avatar) plunging into the
+// sea. Noise burst through a falling lowpass + a quick "bloop" pitch
+// drop underneath, then a lighter secondary patter for the droplets.
+export function playSplash() {
+  const c = getCtx();
+  if (!c) return;
+  const dest = getSfxBus(c);
+  const t0 = c.currentTime;
+  // Main splash body — bandpassed noise sweeping downward.
+  {
+    const n = startNoise(c, t0, t0 + 0.55);
+    const lp = c.createBiquadFilter();
+    lp.type = "lowpass";
+    lp.frequency.setValueAtTime(2600, t0);
+    lp.frequency.exponentialRampToValueAtTime(500, t0 + 0.45);
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(0.45, t0 + 0.015);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.5);
+    n.connect(lp).connect(g).connect(dest);
+  }
+  // Bloop underneath — sine dropping an octave.
+  {
+    const osc = c.createOscillator();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(320, t0);
+    osc.frequency.exponentialRampToValueAtTime(120, t0 + 0.22);
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(0.3, t0 + 0.012);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.28);
+    osc.connect(g).connect(dest);
+    osc.start(t0);
+    osc.stop(t0 + 0.32);
+  }
+  // Droplet patter — a few tiny delayed high blips.
+  for (let i = 0; i < 4; i++) {
+    const at = t0 + 0.12 + i * 0.06 + Math.random() * 0.04;
+    const osc = c.createOscillator();
+    osc.type = "sine";
+    const f = 900 + Math.random() * 900;
+    osc.frequency.setValueAtTime(f, at);
+    osc.frequency.exponentialRampToValueAtTime(f * 0.6, at + 0.08);
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.0001, at);
+    g.gain.exponentialRampToValueAtTime(0.07, at + 0.008);
+    g.gain.exponentialRampToValueAtTime(0.0001, at + 0.09);
+    osc.connect(g).connect(dest);
+    osc.start(at);
+    osc.stop(at + 0.12);
+  }
+}

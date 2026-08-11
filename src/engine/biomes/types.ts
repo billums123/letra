@@ -62,7 +62,7 @@ export type Biome = {
   emoji: string;
   // Suggested avatar for this biome — used by the picker so e.g. the
   // moon defaults to the rocket. Players can still override.
-  recommendedAvatar?: "kid" | "car" | "rocket";
+  recommendedAvatar?: "kid" | "car" | "rocket" | "boat";
   // Apply this biome's background colour, fog, lights to the scene.
   // Returns a dispose function the engine calls on teardown so biome-
   // owned lights can be removed cleanly.
