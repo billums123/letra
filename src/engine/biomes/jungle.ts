@@ -8,7 +8,6 @@ import {
   makeGrassyDiscGeometry,
   paintGrassVertexColors,
   makeGroundPatches,
-  makeTree,
   makeFlower,
   makeButterfly,
   makeBoulder,
@@ -100,12 +99,12 @@ const JUNGLE_MOODS: Record<
 const JUNGLE_POOL = ["jungle-mist", "jungle-noon", "jungle-sunset"] as const;
 
 const JUNGLE_GRASS_PALETTE: GrassPalette = {
-  base: 0x5cb356,
-  light: 0x8fd47a,
-  dark: 0x3d7d38,
-  patchLight: 0xa8dd8a,
-  patchDark: 0x2f6b2e,
-  patchDirt: 0x8a6a42,
+  base: 0x46a04a,
+  light: 0x74c468,
+  dark: 0x2c6e30,
+  patchLight: 0x8fd47a,
+  patchDark: 0x225c26,
+  patchDirt: 0x7a5c3a,
 };
 
 // ── Volcano geometry constants ──────────────────────────────────────
@@ -578,16 +577,17 @@ function buildProps(ctx: BiomeContext): void {
   tick.push(pond.tick);
 
   // ── Canopy trees ─────────────────────────────────────────────────
-  // Denser and taller than the meadow, hues pushed to deep tropical
-  // greens. Same factory so bump-shake behaviour carries over.
+  // Big broadleaf jungle trees — tall bare trunks with wide drooping
+  // leaf crowns and hanging vines. This is what separates the jungle
+  // from the park at a glance: no conifer cones anywhere in the play
+  // zone.
   const treeRand = mulberry32(freshSeed());
-  for (let i = 0; i < 30; i++) {
-    const scale = 1.15 + treeRand() * 0.85;
-    const radius = 1.4 * scale;
+  for (let i = 0; i < 26; i++) {
+    const scale = 1.0 + treeRand() * 0.7;
+    const radius = 1.3 * scale;
     const spot = findOpenSpot(treeRand, worldRadius - 4, radius, obstacles, { minRadius: 8 });
     if (!spot) continue;
-    const hue = 105 + treeRand() * 45;
-    const tree = makeTree(hue, scale, shared);
+    const tree = makeJungleTree(treeRand, scale);
     tree.group.position.set(spot.x, 0, spot.z);
     tree.group.rotation.y = treeRand() * Math.PI * 2;
     group.add(tree.group);
@@ -597,7 +597,7 @@ function buildProps(ctx: BiomeContext): void {
 
   // ── Palm trees ───────────────────────────────────────────────────
   const palmRand = mulberry32(freshSeed());
-  for (let i = 0; i < 12; i++) {
+  for (let i = 0; i < 16; i++) {
     const scale = 0.9 + palmRand() * 0.5;
     const radius = 0.6 * scale;
     const spot = findOpenSpot(palmRand, worldRadius - 4, radius, obstacles, { minRadius: 7 });
@@ -612,8 +612,9 @@ function buildProps(ctx: BiomeContext): void {
 
   // ── Ferns ────────────────────────────────────────────────────────
   // Soft props: the kid drives through and they wiggle, like flowers.
+  // Dense — the understory is most of what makes it read "jungle".
   const fernRand = mulberry32(freshSeed());
-  for (let i = 0; i < 24; i++) {
+  for (let i = 0; i < 40; i++) {
     const spot = findOpenSpot(fernRand, worldRadius - 3, 0.5, obstacles, {
       minRadius: 4,
       pad: 0.2,
@@ -727,8 +728,7 @@ function buildProps(ctx: BiomeContext): void {
       }
       if (!clear) continue;
       distantSpots.push({ x, z, radius: selfR });
-      const hue = 100 + distantRand() * 45;
-      const tree = makeTree(hue, scale, shared);
+      const tree = makeJungleTree(distantRand, scale);
       tree.group.position.set(x, 0, z);
       tree.group.rotation.y = distantRand() * Math.PI * 2;
       group.add(tree.group);
@@ -747,6 +747,118 @@ function buildProps(ctx: BiomeContext): void {
 }
 
 // ─── Jungle-specific prop factories ───────────────────────────────────
+
+// Big broadleaf jungle tree: a tall bare trunk with a wide two-tier
+// drooping crown built from flattened spheres + blade leaves, plus a
+// couple of hanging vines that sway. Crown pivots for the bump-shake,
+// vines get their own lazy pendulum.
+function makeJungleTree(rand: () => number, scale: number) {
+  const g = new THREE.Group();
+  g.scale.setScalar(scale);
+
+  const trunkMat = new THREE.MeshStandardMaterial({ color: 0x7a5230, roughness: 1 });
+  const trunkH = 2.6 + rand() * 1.2;
+  const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.34, trunkH, 8), trunkMat);
+  trunk.position.y = trunkH / 2;
+  trunk.castShadow = true;
+  trunk.receiveShadow = true;
+  g.add(trunk);
+  // A couple of buttress-root nubs at the base.
+  for (let i = 0; i < 3; i++) {
+    const ang = (i / 3) * Math.PI * 2 + rand();
+    const root = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.16, 0.5, 6), trunkMat);
+    root.position.set(Math.cos(ang) * 0.28, 0.2, Math.sin(ang) * 0.28);
+    root.rotation.z = -Math.cos(ang) * 0.5;
+    root.rotation.x = Math.sin(ang) * 0.5;
+    g.add(root);
+  }
+
+  const crown = new THREE.Group();
+  crown.position.y = trunkH;
+  g.add(crown);
+
+  const hue = 112 + rand() * 26;
+  const leafDark = new THREE.MeshStandardMaterial({
+    color: new THREE.Color(`hsl(${hue}, 52%, 30%)`),
+    roughness: 0.95,
+  });
+  const leafLight = new THREE.MeshStandardMaterial({
+    color: new THREE.Color(`hsl(${hue + 8}, 55%, 40%)`),
+    roughness: 0.9,
+  });
+  // Two stacked flattened blobs = the canopy mass.
+  const blobLo = new THREE.Mesh(new THREE.SphereGeometry(1.5, 12, 9), leafDark);
+  blobLo.scale.set(1.25, 0.55, 1.25);
+  blobLo.position.y = 0.25;
+  blobLo.castShadow = true;
+  crown.add(blobLo);
+  const blobHi = new THREE.Mesh(new THREE.SphereGeometry(1.0, 12, 9), leafLight);
+  blobHi.scale.set(1.1, 0.6, 1.1);
+  blobHi.position.y = 0.85;
+  blobHi.castShadow = true;
+  crown.add(blobHi);
+  // Drooping blade leaves ringing the crown edge — same flattened-cone
+  // trick as the palm fronds, pointing down and out.
+  const BLADES = 8;
+  for (let i = 0; i < BLADES; i++) {
+    const ang = (i / BLADES) * Math.PI * 2 + rand() * 0.3;
+    const blade = new THREE.Mesh(new THREE.ConeGeometry(0.24, 1.5, 4), leafDark);
+    blade.scale.z = 0.22;
+    blade.position.set(Math.cos(ang) * 1.6, 0.1, Math.sin(ang) * 1.6);
+    blade.rotation.z = Math.cos(ang) * 1.35;
+    blade.rotation.x = -Math.sin(ang) * 1.35;
+    blade.castShadow = true;
+    crown.add(blade);
+  }
+
+  // Hanging vines — thin cylinders dangling from the crown edge with
+  // a leaf tip. Each sways on its own phase.
+  const vineMat = new THREE.MeshStandardMaterial({ color: new THREE.Color(`hsl(${hue}, 45%, 34%)`), roughness: 1 });
+  const vines: { pivot: THREE.Group; phase: number }[] = [];
+  const vineCount = 2 + ((rand() * 2) | 0);
+  for (let i = 0; i < vineCount; i++) {
+    const ang = rand() * Math.PI * 2;
+    const pivot = new THREE.Group();
+    pivot.position.set(Math.cos(ang) * 1.2, 0.15, Math.sin(ang) * 1.2);
+    crown.add(pivot);
+    const len = 1.2 + rand() * 1.0;
+    const vine = new THREE.Mesh(new THREE.CylinderGeometry(0.03, 0.025, len, 5), vineMat);
+    vine.position.y = -len / 2;
+    pivot.add(vine);
+    const tipLeaf = new THREE.Mesh(new THREE.SphereGeometry(0.09, 6, 5), leafLight);
+    tipLeaf.scale.set(1, 0.5, 1.6);
+    tipLeaf.position.y = -len;
+    pivot.add(tipLeaf);
+    vines.push({ pivot, phase: rand() * Math.PI * 2 });
+  }
+
+  let shakeT = 0;
+  let amp = 0;
+  return {
+    group: g,
+    shake: (intensity: number = 1) => {
+      shakeT = 1;
+      amp = Math.max(amp, Math.min(0.26, 0.17 * intensity + 0.07));
+    },
+    update: (dt: number, t: number) => {
+      for (const v of vines) {
+        v.pivot.rotation.x = Math.sin(t * 1.1 + v.phase) * 0.12 + (shakeT > 0 ? Math.sin(t * 24) * 0.3 * shakeT : 0);
+        v.pivot.rotation.z = Math.cos(t * 0.9 + v.phase) * 0.1;
+      }
+      if (shakeT <= 0) {
+        if (crown.rotation.x !== 0 || crown.rotation.z !== 0) {
+          crown.rotation.x = 0;
+          crown.rotation.z = 0;
+        }
+        return;
+      }
+      shakeT = Math.max(0, shakeT - dt * 2.2);
+      crown.rotation.z = Math.sin(t * 26) * amp * shakeT;
+      crown.rotation.x = Math.cos(t * 22) * amp * 0.55 * shakeT;
+      if (shakeT === 0) amp = 0;
+    },
+  };
+}
 
 // Curved-trunk palm with a burst of fronds and a couple of coconuts.
 // shake/update contract matches makeTree so the world wiring is
