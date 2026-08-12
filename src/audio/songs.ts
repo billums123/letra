@@ -28,6 +28,7 @@ export const GAME_TRACKS: Track[] = [
   { id: "adventure", name: "Adventure", url: "/audio/music/adventure.mp3" },
   { id: "sky-park", name: "Sky Park", url: "/audio/music/sky-park.mp3" },
   { id: "bouncy-castle", name: "Bouncy Castle", url: "/audio/music/bouncy-castle.mp3" },
+  { id: "island-breeze", name: "Island Breeze", url: "/audio/music/island-breeze.mp3" },
 ];
 
 // Pick a fresh random game track each time an activity starts. Avoid
