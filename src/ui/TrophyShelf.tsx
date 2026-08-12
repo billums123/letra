@@ -184,7 +184,10 @@ function TrophyDetail({
   const earned = count > 0;
   return (
     <div
-      onClick={onClose}
+      onClick={(e) => {
+        e.stopPropagation();
+        onClose();
+      }}
       style={{
         position: "absolute",
         inset: 0,
