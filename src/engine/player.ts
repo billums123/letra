@@ -776,7 +776,17 @@ function buildBoat(): PlayerHandles {
   // Steam puffs from the stack — reuse the car's recycled-pool pattern
   // but drifting straight up and white.
   const STEAM_COUNT = 5;
-  const steamOrigin = new THREE.Vector3(0, 1.8, -0.6);
+  // Mouth of the funnel. Must track the stack: it moved to z = -0.25
+  // when the funnel was re-centred over the cabin, and the steam was
+  // left venting from thin air behind it.
+  //
+  // The stack itself rides the `body` group so it heels in a turn,
+  // while these puffs deliberately don't (steam rises vertically). So
+  // the emission point is rotated by the current roll each frame,
+  // keeping the plume on the funnel through a turn without tipping the
+  // plume itself over.
+  const STACK_TOP = new THREE.Vector3(0, 1.9, -0.25);
+  const steamOrigin = new THREE.Vector3();
   const steams: { mesh: THREE.Mesh; age: number; lifetime: number; jitter: number }[] = [];
   for (let i = 0; i < STEAM_COUNT; i++) {
     const m = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0, depthWrite: false });
@@ -846,6 +856,9 @@ function buildBoat(): PlayerHandles {
       // Motor putt tracks throttle.
       motor.setActivity(mag);
       // Steam puffs — rise from the stack, drift back a little.
+      const rollCos = Math.cos(body.rotation.z);
+      const rollSin = Math.sin(body.rotation.z);
+      steamOrigin.set(-STACK_TOP.y * rollSin, STACK_TOP.y * rollCos, STACK_TOP.z);
       const steamRate = 0.8 + mag * 1.2;
       for (const p of steams) {
         p.age += dt * steamRate;

@@ -461,10 +461,19 @@ export default defineConfig({
             },
           },
           {
-            // SFX clips (firework bursts etc). Same fetch() + decode
-            // path as music; covers both .mp3 and .ogg variants.
+            // SFX clips. StaleWhileRevalidate, NOT CacheFirst: unlike
+            // voice and music these get replaced IN PLACE — the SFX
+            // Lab's approve step overwrites a live filename, and clips
+            // get regenerated at new lengths under the same name (the
+            // volcano rumble went 1.6s -> 3.6s as volcano-rumble.mp3).
+            // Under CacheFirst a returning device kept serving the old
+            // audio for the full 30-day expiry and never noticed the
+            // file had changed. SWR plays the cached copy instantly and
+            // refreshes it in the background, so a replacement lands on
+            // the next visit instead of next month. These are 12-40 KB
+            // each, so the background refetch costs nothing.
             urlPattern: /\/audio\/sfx\/.*\.(mp3|ogg)$/,
-            handler: "CacheFirst",
+            handler: "StaleWhileRevalidate",
             options: {
               cacheName: "letra-sfx",
               expiration: { maxEntries: 30, maxAgeSeconds: 60 * 60 * 24 * 30 },
