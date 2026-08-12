@@ -643,6 +643,143 @@ function buildProps(ctx: BiomeContext): void {
     });
   }
 
+  // ── Space ────────────────────────────────────────────────────────
+  // Every so often the volcano really lets go and throws the boat
+  // clear of the atmosphere. Stars, a sun and the sky draining to
+  // black all fade in purely as a function of the avatar's altitude —
+  // no flight state to stay in sync with, so it can't get stuck on if
+  // a launch is interrupted, and it works for any future launcher.
+  const SPACE_START = 30;
+  const SPACE_FULL = 100;
+  {
+    const spaceColor = new THREE.Color(0x05070f);
+
+    const STAR_COUNT = 420;
+    const starRand = mulberry32(freshSeed());
+    const starPos = new Float32Array(STAR_COUNT * 3);
+    for (let i = 0; i < STAR_COUNT; i++) {
+      // Biased to the upper hemisphere — nobody looks down at stars.
+      const y = starRand() * 1.5 - 0.25;
+      const r = Math.sqrt(Math.max(0, 1 - y * y));
+      const th = starRand() * Math.PI * 2;
+      const R = 300 + starRand() * 80;
+      starPos[i * 3] = Math.cos(th) * r * R;
+      starPos[i * 3 + 1] = y * R;
+      starPos[i * 3 + 2] = Math.sin(th) * r * R;
+    }
+    const starGeo = new THREE.BufferGeometry();
+    starGeo.setAttribute("position", new THREE.BufferAttribute(starPos, 3));
+    const starMat = new THREE.PointsMaterial({
+      color: 0xffffff,
+      size: 2.1,
+      // Fixed pixel size and fog-exempt: they are meant to read as
+      // pinpricks at infinity, not as objects 300 units away.
+      sizeAttenuation: false,
+      transparent: true,
+      opacity: 0,
+      depthWrite: false,
+      fog: false,
+    });
+    const stars = new THREE.Points(starGeo, starMat);
+    stars.frustumCulled = false;
+    stars.visible = false;
+    group.add(stars);
+
+    // Sits low and very far off, so it reads as rising over the
+    // planet's curve. The obvious placement — high in the sky — is
+    // wrong: the flight camera looks about 33 degrees DOWN at the
+    // avatar, so anything overhead is pushed straight off the top of
+    // the frame. Low and distant puts it about 19 degrees off the view
+    // axis, comfortably in shot, and the composition is better for it.
+    const sunAt = new THREE.Vector3(30, 45, -300);
+    const sunMat = new THREE.MeshBasicMaterial({
+      color: 0xfff6d0,
+      transparent: true,
+      opacity: 0,
+      fog: false,
+      depthWrite: false,
+    });
+    const sun = new THREE.Mesh(new THREE.SphereGeometry(17, 20, 16), sunMat);
+    sun.position.copy(sunAt);
+    sun.visible = false;
+    group.add(sun);
+    // Glow. This has to be a gradient, which means a texture: a flat
+    // sphere can't fade out, and dimming one just makes a duller flat
+    // disc — additive at 0.32 over black lands on a muddy brown ring
+    // rather than anything resembling light.
+    const glowTex = (() => {
+      const c = document.createElement("canvas");
+      c.width = 128;
+      c.height = 128;
+      const g = c.getContext("2d")!;
+      const grd = g.createRadialGradient(64, 64, 0, 64, 64, 64);
+      grd.addColorStop(0, "rgba(255,244,205,1)");
+      grd.addColorStop(0.3, "rgba(255,186,96,0.5)");
+      grd.addColorStop(1, "rgba(255,150,50,0)");
+      g.fillStyle = grd;
+      g.fillRect(0, 0, 128, 128);
+      return new THREE.CanvasTexture(c);
+    })();
+    const haloMat = new THREE.SpriteMaterial({
+      map: glowTex,
+      transparent: true,
+      opacity: 0,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending,
+      fog: false,
+    });
+    const halo = new THREE.Sprite(haloMat);
+    halo.scale.setScalar(110);
+    halo.position.copy(sunAt);
+    halo.visible = false;
+    group.add(halo);
+
+    // The biome's own sky is captured the first time we see it and
+    // whenever applyScene swaps in a new one (a time-of-day change),
+    // so the values we lerp away from are always the pristine ones and
+    // the sky restores itself exactly on the way back down.
+    let bgRef: THREE.Color | null = null;
+    const bgBase = new THREE.Color();
+    let fogRef: THREE.Fog | null = null;
+    const fogBase = new THREE.Color();
+    let fogNearBase = 0;
+    let fogFarBase = 0;
+
+    tick.push(() => {
+      const p = getPlayerPosition();
+      const scene = group.parent as THREE.Scene | null;
+      if (!p || !scene) return;
+      const bg = scene.background;
+      if (bg instanceof THREE.Color && bg !== bgRef) {
+        bgRef = bg;
+        bgBase.copy(bg);
+      }
+      const fog = scene.fog;
+      if (fog instanceof THREE.Fog && fog !== fogRef) {
+        fogRef = fog;
+        fogBase.copy(fog.color);
+        fogNearBase = fog.near;
+        fogFarBase = fog.far;
+      }
+
+      const k = smoothstep01((p.y - SPACE_START) / (SPACE_FULL - SPACE_START));
+      if (bgRef) bgRef.copy(bgBase).lerp(spaceColor, k);
+      if (fogRef) {
+        fogRef.color.copy(fogBase).lerp(spaceColor, k);
+        // Pushed way out as we climb, or the sea below would vanish
+        // into haze exactly when the view is worth having.
+        fogRef.near = fogNearBase + k * 260;
+        fogRef.far = fogFarBase + k * 900;
+      }
+      starMat.opacity = k;
+      sunMat.opacity = Math.min(1, k * 1.5);
+      haloMat.opacity = k * 0.9;
+      stars.visible = k > 0.01;
+      sun.visible = k > 0.01;
+      halo.visible = k > 0.01;
+    });
+  }
+
   // ── Volcano island ───────────────────────────────────────────────
   const volcanoGroup = new THREE.Group();
   volcanoGroup.position.set(ISLAND.x, 0, ISLAND.z);
@@ -1512,12 +1649,23 @@ function buildProps(ctx: BiomeContext): void {
           p.x = ISLAND.x;
           p.z = ISLAND.z;
         }
+        // Every so often the mountain really lets go and throws the
+        // boat clear of the atmosphere. Rare enough to stay a surprise,
+        // common enough that a kid who keeps sailing in will get one.
+        const mega = Math.random() < 0.22;
+        if (mega) {
+          fountainT = 3.4;
+          for (let i = 0; i < 16; i++) fireEmber();
+        }
         const dest = pickWaterLanding();
         launchPlayer(dest, {
-          duration: 1.8,
-          peakY: 15,
+          duration: mega ? 5.2 : 1.8,
+          peakY: mega ? 135 : 15,
           onLand: () => bigSplash(dest.x, dest.z),
         });
+        // A second whoop near the top of a mega arc, timed for the
+        // moment the stars come out.
+        if (mega) wooTimer = 2.2;
       }
     } else if (state === "cooldown") {
       if (stateT >= COOLDOWN_SECONDS) {

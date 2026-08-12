@@ -484,7 +484,12 @@ export class Engine {
       const cameraAnchorY = focus
         ? focus.y
         : this.flight
-          ? pos.y * 0.8
+          ? // Trail a fixed distance below the avatar rather than a
+            // fraction of its height. The two agree exactly up to 15
+            // units (a normal volcano launch), but on a mega-launch a
+            // fraction leaves the camera hundreds of units low and the
+            // avatar sails off the top of the frame.
+            pos.y - Math.min(3, pos.y * 0.2)
           : this.terrainHeight
             ? this.terrainHeight(pos.x, pos.z)
             : 0;
