@@ -204,7 +204,10 @@ export class Engine {
     const world = buildWorld(
       biome,
       () => this.player?.group.position ?? null,
-      (to, opts) => this.launchPlayer(to, opts)
+      (to, opts) => this.launchPlayer(to, opts),
+      (visible) => {
+        if (this.player) this.player.group.visible = visible;
+      }
     );
     this.scene.add(world.group);
     this.terrainHeight = world.terrainHeight;

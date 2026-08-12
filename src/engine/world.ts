@@ -522,7 +522,8 @@ export type WorldBuildResult = WorldHandles & {
 export function buildWorld(
   biome: Biome,
   getPlayerPosition: () => THREE.Vector3 | null = () => null,
-  launchPlayer: BiomeContext["launchPlayer"] = () => {}
+  launchPlayer: BiomeContext["launchPlayer"] = () => {},
+  setPlayerVisible: BiomeContext["setPlayerVisible"] = () => {}
 ): WorldBuildResult {
   const group = new THREE.Group();
   group.name = `World:${biome.id}`;
@@ -548,6 +549,7 @@ export function buildWorld(
       celebrationCenter = c;
     },
     launchPlayer,
+    setPlayerVisible,
   };
   biome.buildProps(ctx);
   return { group, worldRadius: WORLD_RADIUS, obstacles, tick, terrainHeight, isWalkable, celebrationCenter };

@@ -54,6 +54,13 @@ export type BiomeContext = {
     to: { x: number; z: number },
     opts?: { duration?: number; peakY?: number; onLand?: () => void }
   ) => void;
+  // Show or hide the avatar mesh. Nothing else changes — position,
+  // collision, and camera tracking carry on as normal, so the camera
+  // keeps watching the spot the avatar occupies. Used for "swallowed"
+  // beats: the ocean volcano hides the boat once it is inside the sea
+  // cave so it reads as gone into the mountain rather than parked
+  // against the back wall, then shows it again as it is launched out.
+  setPlayerVisible: (visible: boolean) => void;
 };
 
 export type Biome = {

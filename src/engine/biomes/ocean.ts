@@ -112,6 +112,10 @@ const MOUTH_DIR = (() => {
 const CAVE_WALL_ALONG = 2.6;
 const CAVE_ARCH_ALONG = 4.55;
 const MOUTH_ALONG = 4.7;
+// Where the darkness takes the avatar — a little inside the arch (at
+// 5.5), so the boat slides under the rock and is gone rather than
+// blinking out in open daylight.
+const SWALLOW_HIDE_ALONG = 5.1;
 // Where the rumble drags the boat to — deep enough to sit in the dark
 // under the tunnel roof, shy of the back-wall collision fence.
 const SWALLOW_ALONG = 4.5;
@@ -253,7 +257,16 @@ export const oceanBiome: Biome = {
 };
 
 function buildProps(ctx: BiomeContext): void {
-  const { group, obstacles, tick, worldRadius, getPlayerPosition, setTerrainHeight, launchPlayer } = ctx;
+  const {
+    group,
+    obstacles,
+    tick,
+    worldRadius,
+    getPlayerPosition,
+    setTerrainHeight,
+    launchPlayer,
+    setPlayerVisible,
+  } = ctx;
 
   // ── Wave field ───────────────────────────────────────────────────
   // Three traveling sines at different wavelengths/directions. waveT
@@ -275,6 +288,38 @@ function buildProps(ctx: BiomeContext): void {
     return solid + waveHeight(x, z) * damp;
   };
   setTerrainHeight(sampleGround);
+
+  // ── Swallowed-by-the-mountain test ───────────────────────────────
+  // True while the avatar is inside the sea-cave tunnel. Two things
+  // read it: the avatar is hidden (it should read as gone INTO the
+  // mountain, waiting to be spat out, rather than parked nose-first
+  // against a back wall), and the wake stops (no foam trail under
+  // solid rock).
+  //
+  // Derived from position every frame rather than latched off the
+  // eruption state machine, so it can't get stuck: back out of the
+  // tunnel and the boat reappears, whatever the volcano is doing.
+  // The height test keeps the launch visible — the boom teleports the
+  // avatar to the crater floor, which is well above the tunnel.
+  const SWALLOW_CEILING = 1.6;
+  let swallowed = false;
+  tick.push(() => {
+    const p = getPlayerPosition();
+    if (!p) return;
+    const lx = p.x - ISLAND.x;
+    const lz = p.z - ISLAND.z;
+    const along = lx * MOUTH_DIR.x + lz * MOUTH_DIR.z;
+    const perp = Math.abs(lx * -MOUTH_DIR.z + lz * MOUTH_DIR.x);
+    const next =
+      along > CAVE_WALL_ALONG &&
+      along < SWALLOW_HIDE_ALONG &&
+      perp < CHANNEL_HALF_W + 0.3 &&
+      p.y < SWALLOW_CEILING;
+    if (next !== swallowed) {
+      swallowed = next;
+      setPlayerVisible(!swallowed);
+    }
+  });
 
   // ── Water surface ────────────────────────────────────────────────
   // Faceted disc whose vertex Ys are re-sampled from the wave field
@@ -447,7 +492,8 @@ function buildProps(ctx: BiomeContext): void {
       while (trail.length && trail[trail.length - 1].age > TRAIL_LIFE) trail.pop();
 
       if (p) {
-        const overWater = islandHeight(p.x, p.z) + sandHeight(p.x, p.z) < 0.05 && p.y < 1.6;
+        const overWater =
+          !swallowed && islandHeight(p.x, p.z) + sandHeight(p.x, p.z) < 0.05 && p.y < 1.6;
         if (!haveLast) {
           lastX = p.x;
           lastZ = p.z;
@@ -677,20 +723,44 @@ function buildProps(ctx: BiomeContext): void {
     tunnelGeo.rotateY(Math.PI / 2);
     const tunnel = new THREE.Mesh(
       tunnelGeo,
-      new THREE.MeshStandardMaterial({ color: 0x2e241c, roughness: 1, side: THREE.DoubleSide })
+      new THREE.MeshStandardMaterial({ color: 0x1e1710, roughness: 1, side: THREE.DoubleSide })
     );
     tunnel.position.set(0, 0.1, -0.6);
     tunnel.castShadow = true;
     caveGroup.add(tunnel);
-    // Black back wall deep inside — the "bottomless dark" the boat
-    // disappears toward. Sits at the far end of the pipe, right about
-    // where the carve blends back into solid rock.
-    const hole = new THREE.Mesh(
-      new THREE.CircleGeometry(CHANNEL_HALF_W - 0.05, 20, 0, Math.PI),
-      new THREE.MeshBasicMaterial({ color: 0x0a0806, side: THREE.DoubleSide })
-    );
-    hole.position.set(0, 0.1, -2.15);
-    caveGroup.add(hole);
+    // The void. A pure-black unlit curtain hung across the full bore
+    // and carried BELOW the waterline, so the sea visibly runs into
+    // darkness instead of up against a lit rock face. This is what the
+    // kid steers into; the avatar is hidden before it ever reaches the
+    // curtain, so the cave reads as bottomless rather than as a wall
+    // you bonk.
+    //
+    // Deliberately not a shaded material: any lighting at all gives
+    // the surface a readable angle, and the illusion needs it to have
+    // no surface at all.
+    //
+    // It is cut to the tunnel's own cross-section — a half-disc on the
+    // pipe's radius, plus a skirt carried under the water. Oversizing
+    // it does NOT hide behind the mountain: the channel is carved out
+    // of the cone as a heightfield, so there is no rock above the
+    // inlet at all, and anything wider than the bore reads as a black
+    // rectangle floating in the gorge.
+    const voidMat = new THREE.MeshBasicMaterial({
+      color: 0x000000,
+      side: THREE.DoubleSide,
+      fog: false,
+    });
+    const VOID_R = CHANNEL_HALF_W - 0.02;
+    const voidArch = new THREE.Mesh(new THREE.CircleGeometry(VOID_R, 24, 0, Math.PI), voidMat);
+    voidArch.position.set(0, 0.1, -1.45);
+    caveGroup.add(voidArch);
+    // Skirt: the half-disc's flat edge sits at the springline, a hair
+    // above the sea, which would leave a sliver of lit water visible
+    // underneath it. This carries the black down past the waterline;
+    // the opaque sea hides whatever is below.
+    const voidSkirt = new THREE.Mesh(new THREE.PlaneGeometry(VOID_R * 2, 1.0), voidMat);
+    voidSkirt.position.set(0, -0.4, -1.45);
+    caveGroup.add(voidSkirt);
     // Rocky arch framing the tunnel entrance, parked on the pipe's
     // outer lip so it reads as the mouth you steer through.
     const archMat = new THREE.MeshStandardMaterial({ color: 0x5c4a3c, roughness: 1 });
@@ -700,9 +770,12 @@ function buildProps(ctx: BiomeContext): void {
     );
     arch.position.set(0, 0.1, 0.95);
     caveGroup.add(arch);
-    // Warm glow from deep inside, spilling toward the entrance.
-    const caveLight = new THREE.PointLight(0xff6a2a, 1.1, 10);
-    caveLight.position.set(0, 0.8, -1.2);
+    // Warm glow at the mouth. Parked just inside the arch rather than
+    // deep in the tunnel: a light back there would pick out the rock
+    // walls and kill the void. Here it rims the entrance and the water
+    // running in, and the darkness beyond stays absolute.
+    const caveLight = new THREE.PointLight(0xff6a2a, 1.0, 6);
+    caveLight.position.set(0, 0.9, 0.3);
     caveGroup.add(caveLight);
     tick.push((_dt, t) => {
       caveLight.intensity = 0.9 + Math.sin(t * 3.1) * 0.25 + Math.sin(t * 7.3) * 0.12;
