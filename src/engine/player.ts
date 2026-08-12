@@ -680,14 +680,26 @@ function buildBoat(): PlayerHandles {
 
   // Hull — wide rounded box, slightly narrower at the bow via a scaled
   // second box overlapping the front. Sits low so the waterline reads.
+  // Every solid part of the boat lives on this inner group so the whole
+  // hull can heel over as one. Banking used to be applied to the hull
+  // and cabin meshes only, which left the boot stripe, bow cap, roof,
+  // portholes, funnel and face bolt upright while the rest of the boat
+  // leaned — it visibly came apart in a turn.
+  //
+  // Steam and wake foam stay OUTSIDE it on purpose: steam should rise
+  // vertically and foam should lie flat on the water, and neither
+  // should heel with the hull.
+  const body = new THREE.Group();
+  group.add(body);
+
   const hull = new THREE.Mesh(new THREE.BoxGeometry(1.3, 0.55, 2.1), hullMat);
   hull.position.y = 0.42;
   hull.castShadow = true;
-  group.add(hull);
+  body.add(hull);
   // Red boot stripe under the hull.
   const stripe = new THREE.Mesh(new THREE.BoxGeometry(1.34, 0.16, 2.14), hullTrimMat);
   stripe.position.y = 0.2;
-  group.add(stripe);
+  body.add(stripe);
   // Rounded bow cap — a full vertical cylinder centred on the hull's
   // front face: the back half embeds in the hull box and the front
   // half rounds the bow. The face features sit ON this curve.
@@ -696,16 +708,16 @@ function buildBoat(): PlayerHandles {
   const bow = new THREE.Mesh(new THREE.CylinderGeometry(BOW_R, BOW_R, 0.55, 16), hullMat);
   bow.position.set(0, 0.42, BOW_Z);
   bow.castShadow = true;
-  group.add(bow);
+  body.add(bow);
 
   // Deck cabin — cream block with a little roof.
   const cabin = new THREE.Mesh(new THREE.BoxGeometry(0.85, 0.55, 0.9), deckMat);
   cabin.position.set(0, 0.95, -0.25);
   cabin.castShadow = true;
-  group.add(cabin);
+  body.add(cabin);
   const roof = new THREE.Mesh(new THREE.BoxGeometry(0.95, 0.12, 1.0), hullTrimMat);
   roof.position.set(0, 1.28, -0.25);
-  group.add(roof);
+  body.add(roof);
   // Porthole windows on the cabin sides.
   const portholeMat = new THREE.MeshStandardMaterial({
     color: 0x9ee3ff,
@@ -717,7 +729,7 @@ function buildBoat(): PlayerHandles {
     const porthole = new THREE.Mesh(new THREE.CylinderGeometry(0.11, 0.11, 0.06, 12), portholeMat);
     porthole.rotation.z = Math.PI / 2;
     porthole.position.set(side * 0.45, 1.0, -0.25);
-    group.add(porthole);
+    body.add(porthole);
   }
 
   // Smokestack with a red band. Centred over the cabin (z = -0.25,
@@ -729,10 +741,10 @@ function buildBoat(): PlayerHandles {
   const stack = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.18, 0.5, 10), hullMat);
   stack.position.set(0, 1.62, -0.25);
   stack.castShadow = true;
-  group.add(stack);
+  body.add(stack);
   const stackBand = new THREE.Mesh(new THREE.CylinderGeometry(0.155, 0.155, 0.12, 10), hullTrimMat);
   stackBand.position.set(0, 1.8, -0.25);
-  group.add(stackBand);
+  body.add(stackBand);
 
   // Googly eyes on the bow so the kid knows which way is forward.
   // Each eye sits half-sunk into the bow curve: its centre is pushed
@@ -745,10 +757,10 @@ function buildBoat(): PlayerHandles {
     const surfaceZ = BOW_Z + Math.sqrt(BOW_R * BOW_R - dx * dx);
     const eye = new THREE.Mesh(new THREE.SphereGeometry(0.15, 14, 12), whiteMat);
     eye.position.set(dx, 0.62, surfaceZ - 0.07);
-    group.add(eye);
+    body.add(eye);
     const pupil = new THREE.Mesh(new THREE.SphereGeometry(0.07, 10, 8), pupilMat);
     pupil.position.set(dx, 0.62, surfaceZ + 0.05);
-    group.add(pupil);
+    body.add(pupil);
   }
   // Bow smile — flat torus arc pressed into the front of the bow
   // curve (slightly embedded at its widest points).
@@ -759,7 +771,7 @@ function buildBoat(): PlayerHandles {
   smile.position.set(0, 0.36, BOW_Z + BOW_R - 0.06);
   smile.rotation.z = Math.PI;
   smile.rotation.x = -0.15;
-  group.add(smile);
+  body.add(smile);
 
   // Steam puffs from the stack — reuse the car's recycled-pool pattern
   // but drifting straight up and white.
@@ -825,15 +837,12 @@ function buildBoat(): PlayerHandles {
       const bobAmt = isMoving ? 0.05 : 0.03;
       group.position.y = Math.abs(Math.sin(bob)) * bobAmt;
       // Lean into turns like a boat heeling over. The engine owns
-      // group.quaternion (yaw + terrain tilt), so bank the HULL pieces
-      // via a slight z-rotation on the whole visible stack — cheap:
-      // rotate children through a shared roll applied on the group's
-      // own child transforms is overkill; a subtle scale-free roll on
-      // the hull mesh alone sells it.
+      // group.quaternion (yaw + terrain tilt), so the bank goes on the
+      // inner body group — one rotation, whole hull, nothing left
+      // standing upright behind it.
       const targetRoll = THREE.MathUtils.clamp(-turnDelta * 1.6, -0.3, 0.3);
       roll += (targetRoll - roll) * 0.1;
-      hull.rotation.z = roll;
-      cabin.rotation.z = roll * 0.7;
+      body.rotation.z = roll;
       // Motor putt tracks throttle.
       motor.setActivity(mag);
       // Steam puffs — rise from the stack, drift back a little.

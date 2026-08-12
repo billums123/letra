@@ -79,6 +79,7 @@ export class Engine {
     toGroundY: number;
     peakY: number;
     spin: number;
+    flips: number;
     onLand?: () => void;
   } | null = null;
   private tmpTumble = new THREE.Quaternion();
@@ -104,17 +105,26 @@ export class Engine {
     if (this.flight) return;
     const pp = this.player.group.position;
     const sample = this.terrainHeight;
+    const duration = opts.duration ?? 1.6;
+    const peakY = opts.peakY ?? 12;
+    // Whole turns, so touchdown lands on an exact multiple of 2π and
+    // the avatar is never left tilted. The rate climbs with height as
+    // well as time: a short hop keeps its lazy couple of turns (1.8s
+    // at peak 15 still gives exactly 2), while a launch into space is
+    // a proper tumble rather than two slow rolls over five seconds.
+    const flips = Math.max(1, Math.round(duration * (1.1 + peakY / 100)));
     this.flight = {
       t: 0,
-      duration: opts.duration ?? 1.6,
+      duration,
       fromX: pp.x,
       fromZ: pp.z,
       fromGroundY: sample ? sample(pp.x, pp.z) : 0,
       toX: to.x,
       toZ: to.z,
       toGroundY: sample ? sample(to.x, to.z) : 0,
-      peakY: opts.peakY ?? 12,
+      peakY,
       spin: 0,
+      flips,
       onLand: opts.onLand,
     };
   }
@@ -312,9 +322,9 @@ export class Engine {
         // is lerped underneath so crater-rim → flat-ground flights
         // stay smooth.
         pp.y = baseY + flight.peakY * 4 * k * (1 - k);
-        // Two full front-flips across the flight; ends at an exact
-        // multiple of 2π so touchdown orientation is clean.
-        flight.spin = (Math.PI * 4) * k;
+        // Whole front-flips across the flight, so touchdown lands on an
+        // exact multiple of 2π and the avatar is never left tilted.
+        flight.spin = Math.PI * 2 * flight.flips * k;
         if (k >= 1) {
           this.flight = null;
           this.landSquash = Engine.LAND_SQUASH_DURATION;
