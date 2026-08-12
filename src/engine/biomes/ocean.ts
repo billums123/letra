@@ -1834,17 +1834,43 @@ function buildProps(ctx: BiomeContext): void {
   }
 
   // ── Jumping fish ─────────────────────────────────────────────────
+  // Fish must stay in open water. Two things used to let them onto
+  // land: the jump DESTINATION was only bounds-checked against the
+  // world radius and never against the islands, and after each jump
+  // the fish adopts its landing spot as home — so a school would walk
+  // its patch across the map over a few minutes and end up hopping in
+  // and out of a beach or the volcano.
+  const FISH_CLEARANCE = 2.2;
+  const isOpenWater = (x: number, z: number): boolean => {
+    if (Math.hypot(x, z) > worldRadius + 4) return false;
+    if (Math.hypot(x - ISLAND.x, z - ISLAND.z) < ISLAND_OUTER_R + FISH_CLEARANCE) return false;
+    for (const s of SAND_ISLANDS) {
+      // Measured against the island's own radius, not sandHeight —
+      // sandHeight is already 0 at the shoreline, which leaves no
+      // clearance at all.
+      if (Math.hypot(x - s.x, z - s.z) < s.r + FISH_CLEARANCE) return false;
+    }
+    return true;
+  };
   const fishRand = mulberry32(freshSeed());
   for (let i = 0; i < 6; i++) {
     const fish = makeFish(fishRand);
     group.add(fish.group);
-    // Home waters — anywhere open, away from the volcano.
+    // Home waters. Falls back to a sweep around a mid-ocean ring
+    // rather than keeping whatever the last failed try produced.
     let hx = 0;
     let hz = 0;
-    for (let a = 0; a < 12; a++) {
+    let placed = false;
+    for (let a = 0; a < 40 && !placed; a++) {
       hx = (fishRand() - 0.5) * (worldRadius * 1.5);
       hz = (fishRand() - 0.5) * (worldRadius * 1.5);
-      if (Math.hypot(hx - ISLAND.x, hz - ISLAND.z) > ISLAND_OUTER_R + 4 && sandHeight(hx, hz) === 0) break;
+      placed = isOpenWater(hx, hz);
+    }
+    for (let a = 0; a < 48 && !placed; a++) {
+      const th = (a / 48) * Math.PI * 2;
+      hx = Math.cos(th) * (worldRadius * 0.6);
+      hz = Math.sin(th) * (worldRadius * 0.6);
+      placed = isOpenWater(hx, hz);
     }
     let phase: "under" | "jumping" = "under";
     let timer = 1 + fishRand() * 3;
@@ -1860,12 +1886,23 @@ function buildProps(ctx: BiomeContext): void {
         if (timer <= 0) {
           phase = "jumping";
           jumpT = 0;
-          const ang = fishRand() * Math.PI * 2;
-          const dist = 2 + fishRand() * 3;
           from = { x: hx, z: hz };
-          to = { x: hx + Math.cos(ang) * dist, z: hz + Math.sin(ang) * dist };
-          // Keep the school loosely anchored to its home patch.
-          if (Math.hypot(to.x, to.z) > worldRadius + 8) to = { x: hx, z: hz };
+          // Pick a destination in open water, checking the midpoint
+          // too — both ends can be clear while the arc still cuts the
+          // corner of an island between them. If nothing lands, jump
+          // straight up and come back down, which is open by
+          // construction.
+          to = { x: hx, z: hz };
+          for (let a = 0; a < 10; a++) {
+            const ang = fishRand() * Math.PI * 2;
+            const dist = 2 + fishRand() * 3;
+            const tx = hx + Math.cos(ang) * dist;
+            const tz = hz + Math.sin(ang) * dist;
+            if (isOpenWater(tx, tz) && isOpenWater((hx + tx) / 2, (hz + tz) / 2)) {
+              to = { x: tx, z: tz };
+              break;
+            }
+          }
           jumpDur = 0.9 + fishRand() * 0.4;
           peak = 1.2 + fishRand() * 1.0;
           fish.group.visible = true;
