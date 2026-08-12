@@ -869,7 +869,7 @@ export function makePalmTree(rand: () => number, scale: number) {
 
   const trunkMat = new THREE.MeshStandardMaterial({ color: 0x9a6a3a, roughness: 1 });
   // Trunk: stacked, slightly offset segments to fake a gentle curve.
-  const SEGS = 5;
+  const SEGS = 6;
   const lean = 0.12 + rand() * 0.1;
   let topX = 0;
   let topY = 0;
@@ -894,25 +894,72 @@ export function makePalmTree(rand: () => number, scale: number) {
     roughness: 0.9,
     side: THREE.DoubleSide,
   });
-  const FROND_COUNT = 7;
+  // A frond is a tapered strip that arcs up out of the crown and then
+  // droops over, folded along its midrib so it catches the light on
+  // two planes. These used to be flattened 4-sided cones — rigid
+  // rectangular paddles sticking straight out, which read as paper
+  // strips rather than leaves.
+  //
+  // Built in local space with +X pointing outward along the leaf and
+  // the arc in XY, so a frond is placed purely by rotating it about Y.
+  const makeFrondGeometry = (len: number, width: number, droop: number) => {
+    const STEPS = 9;
+    const pos: number[] = [];
+    const idx: number[] = [];
+    for (let i = 0; i <= STEPS; i++) {
+      const t = i / STEPS;
+      const x = t * len;
+      // Rise then fall — the tip ends up below the crown.
+      const y = 0.55 * len * t - droop * len * t * t;
+      // Widest around the middle, pinched at the stem and the tip.
+      const w = width * Math.pow(Math.sin(Math.PI * t), 0.7);
+      const fold = w * 0.5; // midrib lifted above the two edges
+      pos.push(x, y, -w, x, y + fold, 0, x, y, w);
+    }
+    for (let i = 0; i < STEPS; i++) {
+      const a = i * 3;
+      const b = (i + 1) * 3;
+      idx.push(a, b, b + 1, a, b + 1, a + 1);
+      idx.push(a + 1, b + 1, b + 2, a + 1, b + 2, a + 2);
+    }
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+    geo.setIndex(idx);
+    geo.computeVertexNormals();
+    return geo;
+  };
+
+  const FROND_COUNT = 10;
   for (let i = 0; i < FROND_COUNT; i++) {
-    const frond = new THREE.Mesh(new THREE.ConeGeometry(0.22, 1.7, 4), frondMat);
-    frond.scale.y = 1;
-    frond.scale.z = 0.25; // flatten into a blade
-    const ang = (i / FROND_COUNT) * Math.PI * 2 + rand() * 0.3;
-    frond.position.set(Math.cos(ang) * 0.55, 0.18, Math.sin(ang) * 0.55);
-    // Tip the cone outward + downward so the crown droops like a palm.
-    frond.rotation.z = Math.cos(ang) * 1.25;
-    frond.rotation.x = -Math.sin(ang) * 1.25;
+    const len = 1.35 + rand() * 0.55;
+    const frond = new THREE.Mesh(
+      makeFrondGeometry(len, 0.2 + rand() * 0.07, 1.25 + rand() * 0.5),
+      frondMat
+    );
+    // Even fan with jitter, so the crown isn't a mechanical star.
+    frond.rotation.y = (i / FROND_COUNT) * Math.PI * 2 + (rand() - 0.5) * 0.45;
+    frond.rotation.z = (rand() - 0.5) * 0.25;
+    frond.position.y = 0.12;
     frond.castShadow = true;
     fronds.add(frond);
   }
-  // Coconuts.
-  const cocoMat = new THREE.MeshStandardMaterial({ color: 0x5c4326, roughness: 0.9 });
+  // Two or three short new leaves standing up out of the middle — the
+  // growing tip every palm has, and it fills the hole at the centre of
+  // the fan where the trunk would otherwise show through.
   for (let i = 0; i < 3; i++) {
-    const nut = new THREE.Mesh(new THREE.SphereGeometry(0.11, 8, 8), cocoMat);
-    const ang = rand() * Math.PI * 2;
-    nut.position.set(Math.cos(ang) * 0.18, -0.05, Math.sin(ang) * 0.18);
+    const spike = new THREE.Mesh(makeFrondGeometry(0.62 + rand() * 0.22, 0.1, 0.35), frondMat);
+    spike.rotation.y = rand() * Math.PI * 2;
+    spike.rotation.z = 0.75 + rand() * 0.4; // tipped up towards vertical
+    spike.position.y = 0.14;
+    fronds.add(spike);
+  }
+  // Coconuts, clustered under the crown where the fronds meet.
+  const cocoMat = new THREE.MeshStandardMaterial({ color: 0x5c4326, roughness: 0.9 });
+  const nutAng = rand() * Math.PI * 2;
+  for (let i = 0; i < 3; i++) {
+    const nut = new THREE.Mesh(new THREE.SphereGeometry(0.1 + rand() * 0.03, 8, 8), cocoMat);
+    const a = nutAng + i * 2.1 + rand() * 0.4;
+    nut.position.set(Math.cos(a) * 0.15, -0.08 - rand() * 0.05, Math.sin(a) * 0.15);
     nut.castShadow = true;
     fronds.add(nut);
   }

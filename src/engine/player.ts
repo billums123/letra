@@ -720,13 +720,18 @@ function buildBoat(): PlayerHandles {
     group.add(porthole);
   }
 
-  // Smokestack with a red band.
+  // Smokestack with a red band. Centred over the cabin (z = -0.25,
+  // same as the cabin and roof) and standing clear of the roof slab,
+  // whose top face is at y = 1.34. It used to sit at z = -0.6 with its
+  // base at y = 1.25 — off to the back edge AND sunk into the roof, so
+  // the two solids intersected and the stack looked like it was
+  // melting through the corner.
   const stack = new THREE.Mesh(new THREE.CylinderGeometry(0.14, 0.18, 0.5, 10), hullMat);
-  stack.position.set(0, 1.5, -0.6);
+  stack.position.set(0, 1.62, -0.25);
   stack.castShadow = true;
   group.add(stack);
   const stackBand = new THREE.Mesh(new THREE.CylinderGeometry(0.155, 0.155, 0.12, 10), hullTrimMat);
-  stackBand.position.set(0, 1.68, -0.6);
+  stackBand.position.set(0, 1.8, -0.25);
   group.add(stackBand);
 
   // Googly eyes on the bow so the kid knows which way is forward.

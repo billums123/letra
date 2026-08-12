@@ -68,6 +68,7 @@ export function FindAlphabetGame() {
   const collect = useGameStore((s) => s.collect);
   const avatar = useGameStore((s) => s.avatar);
   const letterCase = useGameStore((s) => s.letterCase);
+  const biomeId = useGameStore((s) => s.biomeId);
   // Decide each letter's display case once at mount so the HUD can
   // render the right glyphs on the very first frame (before bootstrap
   // has finished building characters). The bootstrap reads the same
@@ -550,7 +551,7 @@ export function FindAlphabetGame() {
       const engine = engineRef.current;
       // Restore in-game music if we were in dance mode when the kid bailed.
       if (danceModeRef.current) {
-        void music.play(pickGameTrack(), 0.16);
+        void music.play(pickGameTrack(biomeId), 0.16);
       }
       if (!engine) return;
       for (const entry of lettersRef.current) {

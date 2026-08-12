@@ -38,6 +38,9 @@ export class Engine {
   private onResizeBound: () => void;
   private cameraOffset = new THREE.Vector3(0, 7, 9);
   private cameraLookOffset = new THREE.Vector3(0, 1.2, 0);
+  // Optional biome-supplied camera anchor. See the follow-camera block
+  // in the tick loop.
+  private cameraFocus: { x: number; y: number; z: number; zoom?: number } | null = null;
   private tmpVec = new THREE.Vector3();
   private disposed = false;
 
@@ -207,6 +210,9 @@ export class Engine {
       (to, opts) => this.launchPlayer(to, opts),
       (visible) => {
         if (this.player) this.player.group.visible = visible;
+      },
+      (focus) => {
+        this.cameraFocus = focus;
       }
     );
     this.scene.add(world.group);
@@ -461,18 +467,32 @@ export class Engine {
       // makes the whole world feel like it's nodding. Anchor Y to the
       // terrain so the camera dips into craters along with the player.
       const pos = this.player.position();
+      // A biome can take the camera off the avatar and park it on a
+      // fixed world point — used when the avatar is out of sight and
+      // the interesting thing is elsewhere (inside the sea-cave
+      // volcano, waiting to be launched out of the crater). The 0.08
+      // lerp below carries the camera over and back smoothly, so
+      // setting and clearing a focus needs no easing of its own.
+      const focus = this.cameraFocus;
+      const focusZoom = focus?.zoom ?? 1;
       // While airborne, anchor the camera to (most of) the flight
       // height so the avatar stays in frame at the apex; the 0.08
       // position lerp below smooths both the climb and the settle
       // back to ground level after touchdown.
-      const cameraAnchorY = this.flight
-        ? pos.y * 0.8
-        : this.terrainHeight
-          ? this.terrainHeight(pos.x, pos.z)
-          : 0;
-      this.tmpVec.set(pos.x, cameraAnchorY, pos.z).add(this.cameraOffset);
+      const anchorX = focus ? focus.x : pos.x;
+      const anchorZ = focus ? focus.z : pos.z;
+      const cameraAnchorY = focus
+        ? focus.y
+        : this.flight
+          ? pos.y * 0.8
+          : this.terrainHeight
+            ? this.terrainHeight(pos.x, pos.z)
+            : 0;
+      this.tmpVec
+        .set(anchorX, cameraAnchorY, anchorZ)
+        .addScaledVector(this.cameraOffset, focusZoom);
       this.camera.position.lerp(this.tmpVec, 0.08);
-      this.tmpVec.set(pos.x, cameraAnchorY, pos.z).add(this.cameraLookOffset);
+      this.tmpVec.set(anchorX, cameraAnchorY, anchorZ).add(this.cameraLookOffset);
       this.camera.lookAt(this.tmpVec);
 
       // Per-actor update first (so collected letters can hide before render).

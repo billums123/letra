@@ -908,6 +908,56 @@ export function playVolcanoBoom() {
   }
 }
 
+// Lava hitting the sea. A plain water plop is wrong for this — the
+// moment is molten rock quenching, so it wants a steam flash and
+// crackle over the splash. Shares the small-splash throttle window so
+// a bomb fountain can't stack these into a wash.
+const lavaHissClips = makeClipPool([
+  "/audio/sfx/lava-hiss-1.mp3",
+  "/audio/sfx/lava-hiss-2.mp3",
+  "/audio/sfx/lava-hiss-3.mp3",
+]);
+
+export function playLavaSplash() {
+  const now = performance.now();
+  if (now - lastSmallSplashAt < 110) return;
+  lastSmallSplashAt = now;
+  const c = getCtx();
+  if (!c) return;
+  if (lavaHissClips.play(0.5, 0.1)) return;
+  // Procedural fallback — a wet plop with a steam hiss layered over it.
+  const dest = getSfxBus(c);
+  const t0 = c.currentTime;
+  {
+    const osc = c.createOscillator();
+    osc.type = "sine";
+    const f = 300 + Math.random() * 160;
+    osc.frequency.setValueAtTime(f, t0);
+    osc.frequency.exponentialRampToValueAtTime(f * 0.4, t0 + 0.16);
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(0.13, t0 + 0.008);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.2);
+    osc.connect(g).connect(dest);
+    osc.start(t0);
+    osc.stop(t0 + 0.24);
+  }
+  {
+    // The steam: bright noise that swells a beat after the plop and
+    // decays slowly, high-passed so it sits above the splash.
+    const n = startNoise(c, t0 + 0.02, t0 + 0.75);
+    const hp = c.createBiquadFilter();
+    hp.type = "highpass";
+    hp.frequency.setValueAtTime(2200, t0);
+    hp.frequency.exponentialRampToValueAtTime(5200, t0 + 0.6);
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.0001, t0 + 0.02);
+    g.gain.exponentialRampToValueAtTime(0.11, t0 + 0.09);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.7);
+    n.connect(hp).connect(g).connect(dest);
+  }
+}
+
 // Small "bloop" pop for a lava bomb hitting the ground. Throttled hard
 // because a fountain drops many bombs in a burst and we want texture,
 // not a drum roll.

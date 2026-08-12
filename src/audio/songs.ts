@@ -31,17 +31,40 @@ export const GAME_TRACKS: Track[] = [
   { id: "island-breeze", name: "Island Breeze", url: "/audio/music/island-breeze.mp3" },
 ];
 
+// Some worlds have a signature track that should usually play there,
+// without pinning it so hard that the world only ever has one tune.
+const SIGNATURE_TRACKS: Record<string, { id: string; chance: number }> = {
+  ocean: { id: "island-breeze", chance: 0.75 },
+};
+
 // Pick a fresh random game track each time an activity starts. Avoid
 // repeating the immediately previous pick so the kid gets variety even
 // across consecutive games.
+//
+// The no-repeat rule is deliberately NOT applied to a signature pick:
+// on the ocean the whole point is that Island Breeze usually plays, and
+// suppressing it just because it played last time would cap it at every
+// other visit however high the chance is set.
 let lastPickedId: string | null = null;
 
-export function pickGameTrack(): Track {
+export function pickGameTrack(biomeId?: string): Track {
   if (GAME_TRACKS.length === 1) return GAME_TRACKS[0];
+  const signature = biomeId ? SIGNATURE_TRACKS[biomeId] : undefined;
+  if (signature && Math.random() < signature.chance) {
+    const track = GAME_TRACKS.find((t) => t.id === signature.id);
+    if (track) {
+      lastPickedId = track.id;
+      return track;
+    }
+  }
+  // Otherwise roll from everything *except* the signature track, so the
+  // remaining share is spread across the rest of the pool rather than
+  // handing the signature track extra draws on top of its own chance.
+  const pool = signature ? GAME_TRACKS.filter((t) => t.id !== signature.id) : GAME_TRACKS;
   let choice: Track;
   do {
-    choice = GAME_TRACKS[Math.floor(Math.random() * GAME_TRACKS.length)];
-  } while (choice.id === lastPickedId);
+    choice = pool[Math.floor(Math.random() * pool.length)];
+  } while (pool.length > 1 && choice.id === lastPickedId);
   lastPickedId = choice.id;
   return choice;
 }

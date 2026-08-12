@@ -9,6 +9,7 @@ import {
   playLavaPop,
   playSplash,
   playSmallSplash,
+  playLavaSplash,
   playWoo,
 } from "../../audio/sfx";
 
@@ -117,12 +118,20 @@ const MOUTH_DIR = (() => {
 // the cave's back wall, the glowing arch, and the trigger point the
 // boat has to reach. All inside the carved channel below.
 const CAVE_WALL_ALONG = 2.6;
+// Where the cone's rendered rock face comes down at the cave mouth.
+// See renderChannelMask below for why these live here.
+const RENDER_WALL_ALONG = 5.35;
+const RENDER_WALL_WIDTH = 0.18;
+// Where the cave opening sits on the cliff face — just proud of it,
+// so the black disc reads as set into the rock rather than buried.
+const ARCH_MOUTH_ALONG = RENDER_WALL_ALONG + RENDER_WALL_WIDTH + 0.42;
 const CAVE_ARCH_ALONG = 4.55;
 const MOUTH_ALONG = 4.7;
-// Where the darkness takes the avatar — a little inside the arch (at
-// 5.5), so the boat slides under the rock and is gone rather than
-// blinking out in open daylight.
-const SWALLOW_HIDE_ALONG = 5.1;
+// Where the darkness takes the avatar. This has to sit outside the
+// cone's rock face — a heightfield can't overhang, so any point where
+// rock is drawn is a point the boat would be standing inside it. It
+// still lands inside the archway, which is pushed out past the face.
+const SWALLOW_HIDE_ALONG = ARCH_MOUTH_ALONG + 0.12;
 // Where the rumble drags the boat to — deep enough to sit in the dark
 // under the tunnel roof, shy of the back-wall collision fence.
 const SWALLOW_ALONG = 4.5;
@@ -153,13 +162,39 @@ const CHANNEL_FADE_W = 3.8;
 // sliding down into the trench.
 const CHANNEL_MIN_DEPTH = 0.48; // water left over the floor at low trough
 const CHANNEL_DREDGE = WAVE_CREST + CHANNEL_MIN_DEPTH;
-function channelMask(lx: number, lz: number): number {
+function maskAt(lx: number, lz: number, wallStart: number, wallWidth: number): number {
   const along = lx * MOUTH_DIR.x + lz * MOUTH_DIR.z;
-  const wallBlend = smoothstep01((along - (CAVE_WALL_ALONG - 0.6)) / 1.2);
+  const wallBlend = smoothstep01((along - wallStart) / wallWidth);
   if (wallBlend <= 0) return 1;
   const perp = Math.abs(lx * -MOUTH_DIR.z + lz * MOUTH_DIR.x);
   const carve = 1 - smoothstep01((perp - CHANNEL_HALF_W) / (CHANNEL_FADE_W - CHANNEL_HALF_W));
   return 1 - wallBlend * carve;
+}
+
+// The carve the boat sails through: open from the back wall all the
+// way out to sea. This is what collision, the fence contour and the
+// terrain sampler read.
+function channelMask(lx: number, lz: number): number {
+  return maskAt(lx, lz, CAVE_WALL_ALONG - 0.6, 1.2);
+}
+
+// The carve the *cone mesh* is cut with, which stops much further out
+// — right at the cave mouth — so the mountain stays solid over the
+// tunnel and its rock face comes out to meet the archway. Cut it with
+// the collision mask instead and the whole channel is gouged open from
+// the back wall outward, leaving the tunnel as a bare tube lying in an
+// empty trench with nothing around it.
+//
+// The two masks only disagree where the avatar is hidden anyway
+// (inside the tunnel), so nothing can be seen standing on ground that
+// isn't drawn. The blend is deliberately tight: a heightfield cannot
+// overhang, so a wide blend gives a long shallow ramp that the tunnel
+// crown pokes out of, while a narrow one reads as a cliff face with
+// the cave cut into its foot. (Both constants are declared further
+// up, next to the other cave measurements, because the swallow line
+// is derived from them.)
+function renderChannelMask(lx: number, lz: number): number {
+  return maskAt(lx, lz, RENDER_WALL_ALONG, RENDER_WALL_WIDTH);
 }
 function islandHeight(x: number, z: number): number {
   const lx = x - ISLAND.x;
@@ -167,22 +202,55 @@ function islandHeight(x: number, z: number): number {
   return volcanoProfile(Math.hypot(lx, lz)) * channelMask(lx, lz);
 }
 
+// Layered sine noise. Four octaves at unrelated frequencies read as
+// weathered rock; a single sine product (what this used to be) lays a
+// visible waffle over the whole cone because its two factors keep
+// lining up. Range is roughly [-1, 1].
+function rockNoise(x: number, z: number): number {
+  return (
+    Math.sin(x * 0.83 + z * 1.31) * 0.5 +
+    Math.sin(x * 2.27 - z * 1.09 + 1.7) * 0.27 +
+    Math.sin(x * 4.13 + z * 3.31 + 4.2) * 0.15 +
+    Math.sin(x * 7.91 - z * 6.73 + 2.1) * 0.08
+  );
+}
+
 // The cone's *rendered* rock surface, in island-local coords: the
-// carved profile, minus the dredge, plus the rocky jitter. Both the
+// carved profile, minus the dredge, plus all the weathering. Both the
 // cone mesh and anything that has to lie ON it (the lava flows) read
 // this one function, so they can never drift apart.
+//
+// Everything here is render-only. volcanoProfile stays a clean radial
+// curve, so islandHeight — collision, the fence contour, the terrain
+// the boat rides — is unaffected by any of this detail.
 function coneSurfaceY(lx: number, lz: number): number {
   const d = Math.hypot(lx, lz);
-  const mask = channelMask(lx, lz);
+  const mask = renderChannelMask(lx, lz);
   const masked = volcanoProfile(d) * mask;
   const dredge = CHANNEL_DREDGE * (1 - mask);
-  // Jitter everywhere except the crater floor and the carved channel
-  // floor, both of which should stay smooth.
-  if (d > CRATER_FLOOR_R + 0.3 && masked > 0.25) {
-    const n = Math.sin(lx * 4.7 + lz * 3.9) * Math.cos(lx * 2.1 - lz * 5.3);
-    return masked + n * 0.16 * mask - dredge;
-  }
-  return masked - dredge;
+  // Leave the crater floor and the carved channel floor smooth.
+  if (d <= CRATER_FLOOR_R + 0.3 || masked <= 0.25) return masked - dredge;
+
+  const ang = Math.atan2(lz, lx);
+  let h = masked;
+  // General weathering, heavier low down where scree collects. Kept
+  // modest on purpose: pushed much past this the cone stops reading as
+  // a volcano at all and turns into a lumpy mound.
+  const weather = 0.16 - 0.06 * (masked / RIM_H);
+  h += rockNoise(lx, lz) * weather;
+  // Erosion gullies fanning down the flanks. Strongest mid-slope and
+  // fading out at both the rim and the shoreline, so the crater lip
+  // stays crisp and the beach stays smooth. The wobble term keeps the
+  // channels from being evenly spaced spokes.
+  const flank = smoothstep01((d - CRATER_RIM_R) / 1.8) * (1 - smoothstep01((d - 6.5) / 3.5));
+  h -= (Math.sin(ang * 8 + Math.sin(ang * 3.0) * 1.6) * 0.5 + 0.5) * flank * 0.22;
+  // Scalloped crater lip — the rim is a broken ring of high points and
+  // low notches rather than a machined circle.
+  const rimBand = 1 - smoothstep01(Math.abs(d - CRATER_RIM_R) / 1.1);
+  h += Math.sin(ang * 5 + 0.7) * 0.17 * rimBand + Math.sin(ang * 11 - 2.0) * 0.07 * rimBand;
+  // Everything fades out through the carved channel so the inlet walls
+  // stay clean and the boat's corridor keeps its shape.
+  return masked + (h - masked) * mask - dredge;
 }
 const RUMBLE_SECONDS = 1.0;
 const COOLDOWN_SECONDS = 3.5;
@@ -280,6 +348,7 @@ function buildProps(ctx: BiomeContext): void {
     setTerrainHeight,
     launchPlayer,
     setPlayerVisible,
+    setCameraFocus,
   } = ctx;
 
   // ── Wave field ───────────────────────────────────────────────────
@@ -332,6 +401,15 @@ function buildProps(ctx: BiomeContext): void {
     if (next !== swallowed) {
       swallowed = next;
       setPlayerVisible(!swallowed);
+      // With the boat inside the mountain there is nothing to follow,
+      // so pull the camera back onto the volcano itself — the kid
+      // watches the crater they are about to come flying out of.
+      // Clearing it at the boom hands the camera straight back to the
+      // avatar for the flight, and because the avatar has just been
+      // teleported to that same crater, the handover barely moves.
+      setCameraFocus(
+        swallowed ? { x: ISLAND.x, y: RIM_H * 0.55, z: ISLAND.z, zoom: 1.55 } : null
+      );
     }
   });
 
@@ -622,7 +700,9 @@ function buildProps(ctx: BiomeContext): void {
       const x = pos.getX(i);
       const z = pos.getZ(i);
       const d = Math.hypot(x, z);
-      const mask = channelMask(x, z);
+      // Colour has to read from the same mask the geometry was built
+      // with, or the shading won't line up with the shape.
+      const mask = renderChannelMask(x, z);
       const masked = volcanoProfile(d) * mask;
       // How far this vert is dredged below sea level — full depth in
       // the carved channel, tapering to nothing in the feather band
@@ -715,94 +795,85 @@ function buildProps(ctx: BiomeContext): void {
     }
   }
 
-  // Sea-cave mouth — a dark arch + black interior plane set into the
-  // flank, facing the world centre. Pure dressing; the "cave" itself
-  // is the trigger zone in front of it.
+  // Sea-cave mouth. A black semicircle set flush into the cliff face,
+  // ringed by rock chunks that follow the same curve.
+  //
+  // Deliberately flat. Earlier versions modelled an actual tunnel — a
+  // tube bored into the mountain — and it never worked, because the
+  // island is a heightfield and a heightfield cannot represent a
+  // tunnel: every hole you make through it is a canyon open to the
+  // sky. Cut it narrow and rock plugs the opening; cut it wide and you
+  // get a black gash down the mountainside; leave the tube uncut and
+  // its outside hangs off the slope. A painted-on opening has none of
+  // those failure modes and reads exactly right at low-poly scale.
   {
-    const mouthLocal = {
-      x: MOUTH_DIR.x * CAVE_ARCH_ALONG,
-      z: MOUTH_DIR.z * CAVE_ARCH_ALONG,
-    };
     const caveGroup = new THREE.Group();
-    caveGroup.position.set(mouthLocal.x, 0, mouthLocal.z);
+    caveGroup.position.set(MOUTH_DIR.x * CAVE_ARCH_ALONG, 0, MOUTH_DIR.z * CAVE_ARCH_ALONG);
     caveGroup.lookAt(MOUTH_DIR.x * 100, 0, MOUTH_DIR.z * 100);
     volcanoGroup.add(caveGroup);
-    // Tunnel roof — a half-pipe laid along the inlet so the boat
-    // drives INTO the mountain, under rock, into the dark. DoubleSide
-    // so the interior reads as cave walls from inside. Its radius
-    // tracks CHANNEL_HALF_W so the pipe meets the carved rock walls
-    // rather than floating inside them, and it runs long enough that
-    // SWALLOW_ALONG sits a good metre back under the roof.
-    const tunnelGeo = new THREE.CylinderGeometry(
-      CHANNEL_HALF_W,
-      CHANNEL_HALF_W,
-      3.2,
-      14,
-      1,
-      true,
-      0,
-      Math.PI
-    );
-    tunnelGeo.rotateZ(Math.PI / 2);
-    tunnelGeo.rotateY(Math.PI / 2);
-    const tunnel = new THREE.Mesh(
-      tunnelGeo,
-      new THREE.MeshStandardMaterial({ color: 0x1e1710, roughness: 1, side: THREE.DoubleSide })
-    );
-    tunnel.position.set(0, 0.1, -0.6);
-    tunnel.castShadow = true;
-    caveGroup.add(tunnel);
-    // The void. A pure-black unlit curtain hung across the full bore
-    // and carried BELOW the waterline, so the sea visibly runs into
-    // darkness instead of up against a lit rock face. This is what the
-    // kid steers into; the avatar is hidden before it ever reaches the
-    // curtain, so the cave reads as bottomless rather than as a wall
-    // you bonk.
-    //
-    // Deliberately not a shaded material: any lighting at all gives
-    // the surface a readable angle, and the illusion needs it to have
-    // no surface at all.
-    //
-    // It is cut to the tunnel's own cross-section — a half-disc on the
-    // pipe's radius, plus a skirt carried under the water. Oversizing
-    // it does NOT hide behind the mountain: the channel is carved out
-    // of the cone as a heightfield, so there is no rock above the
-    // inlet at all, and anything wider than the bore reads as a black
-    // rectangle floating in the gorge.
-    const voidMat = new THREE.MeshBasicMaterial({
-      color: 0x000000,
-      side: THREE.DoubleSide,
-      fog: false,
-    });
-    const VOID_R = CHANNEL_HALF_W - 0.02;
-    const voidArch = new THREE.Mesh(new THREE.CircleGeometry(VOID_R, 24, 0, Math.PI), voidMat);
-    voidArch.position.set(0, 0.1, -1.45);
-    caveGroup.add(voidArch);
-    // Skirt: the half-disc's flat edge sits at the springline, a hair
-    // above the sea, which would leave a sliver of lit water visible
-    // underneath it. This carries the black down past the waterline;
-    // the opaque sea hides whatever is below.
-    const voidSkirt = new THREE.Mesh(new THREE.PlaneGeometry(VOID_R * 2, 1.0), voidMat);
-    voidSkirt.position.set(0, -0.4, -1.45);
-    caveGroup.add(voidSkirt);
-    // Rocky arch framing the tunnel entrance, parked on the pipe's
-    // outer lip so it reads as the mouth you steer through.
-    const archMat = new THREE.MeshStandardMaterial({ color: 0x5c4a3c, roughness: 1 });
-    const arch = new THREE.Mesh(
-      new THREE.TorusGeometry(CHANNEL_HALF_W - 0.1, 0.42, 8, 16, Math.PI),
-      archMat
-    );
-    arch.position.set(0, 0.1, 0.95);
-    caveGroup.add(arch);
-    // Warm glow at the mouth. Parked just inside the arch rather than
-    // deep in the tunnel: a light back there would pick out the rock
-    // walls and kill the void. Here it rims the entrance and the water
-    // running in, and the darkness beyond stays absolute.
-    const caveLight = new THREE.PointLight(0xff6a2a, 1.0, 6);
-    caveLight.position.set(0, 0.9, 0.3);
+
+    // One radius function drives both the opening and the rocks around
+    // it, so the arch always frames the hole exactly.
+    const ARCH_R = CHANNEL_HALF_W + 0.16;
+    const archRadius = (a: number) =>
+      ARCH_R * (1 + Math.sin(a * 3 + 0.6) * 0.05 + Math.sin(a * 5.5 - 1.2) * 0.03);
+    const MOUTH_Z = ARCH_MOUTH_ALONG - CAVE_ARCH_ALONG;
+
+    {
+      const shape = new THREE.Shape();
+      const STEPS = 26;
+      shape.moveTo(-archRadius(Math.PI), -0.9);
+      for (let i = 0; i <= STEPS; i++) {
+        const a = Math.PI * (1 - i / STEPS);
+        const r = archRadius(a);
+        shape.lineTo(Math.cos(a) * r, Math.sin(a) * r);
+      }
+      shape.lineTo(archRadius(0), -0.9);
+      shape.closePath();
+      // Unlit and fog-exempt: any shading at all gives the surface a
+      // readable angle, and the whole point is that it has no surface.
+      // The skirt below the waterline keeps the sea from showing a lit
+      // sliver under the opening's flat edge.
+      const mouth = new THREE.Mesh(
+        new THREE.ShapeGeometry(shape),
+        new THREE.MeshBasicMaterial({ color: 0x000000, side: THREE.DoubleSide, fog: false })
+      );
+      mouth.position.set(0, 0.12, MOUTH_Z);
+      caveGroup.add(mouth);
+    }
+
+    // Rock ring around the opening. Each chunk is seated so its INNER
+    // face just meets the arch edge — offsetting by a flat amount
+    // instead let the bigger ones overhang the rim, and since they
+    // draw in front of the black disc their lit faces showed up inside
+    // the opening as pale lumps. Same reason there are no hanging
+    // teeth any more: anything placed over the hole reads as debris
+    // floating in it rather than rock framing it.
+    {
+      const archMat = new THREE.MeshStandardMaterial({ color: 0x5c4a3c, roughness: 1 });
+      const rand = mulberry32(freshSeed());
+      const CHUNKS = 12;
+      for (let i = 0; i < CHUNKS; i++) {
+        const a = (i / (CHUNKS - 1)) * Math.PI;
+        const size = 0.26 + rand() * 0.14;
+        // Dodecahedron "radius" is to its vertices; the flats sit a bit
+        // closer in, so a touch of extra clearance keeps corners out of
+        // the opening as they tumble.
+        const r = archRadius(a) + size * 0.95;
+        const chunk = new THREE.Mesh(new THREE.DodecahedronGeometry(size, 0), archMat);
+        chunk.position.set(Math.cos(a) * r, 0.12 + Math.sin(a) * r, MOUTH_Z + 0.06);
+        chunk.rotation.set(rand() * 3, rand() * 3, rand() * 3);
+        chunk.castShadow = true;
+        caveGroup.add(chunk);
+      }
+    }
+
+    // Warm glow spilling out of the opening.
+    const caveLight = new THREE.PointLight(0xff6a2a, 0.9, 4.5);
+    caveLight.position.set(0, 0.9, MOUTH_Z + 0.5);
     caveGroup.add(caveLight);
     tick.push((_dt, t) => {
-      caveLight.intensity = 0.9 + Math.sin(t * 3.1) * 0.25 + Math.sin(t * 7.3) * 0.12;
+      caveLight.intensity = 0.8 + Math.sin(t * 3.1) * 0.2 + Math.sin(t * 7.3) * 0.1;
     });
   }
 
@@ -832,17 +903,105 @@ function buildProps(ctx: BiomeContext): void {
     }
   }
 
-  // Lava pool + glow light in the crater.
+  // Ramps 0 → 1 while the volcano is erupting. Read by both the crater
+  // pool and the flank flows to brighten and speed up; driven by the
+  // eruption state machine further down.
+  let lavaSurge = 0;
+
+  // ── Crater lava ──────────────────────────────────────────────────
+  // A living molten surface rather than a flat orange disc: a polar
+  // grid that heaves slowly, with a crust that drifts across it. The
+  // crust is the part that sells it — real lava is mostly dark skin
+  // with incandescent cracks between the plates, so a uniformly bright
+  // pool always reads as a sticker. Vertex colours carry both the
+  // crust pattern and the heat, and the whole thing brightens and
+  // speeds up while the volcano is winding up.
+  const LAVA_R = CRATER_FLOOR_R + 0.5;
   const lavaMat = new THREE.MeshStandardMaterial({
-    color: 0xff6a1a,
+    color: 0xffffff,
+    vertexColors: true,
     emissive: 0xff4400,
     emissiveIntensity: 1.1,
     roughness: 0.6,
   });
-  const lava = new THREE.Mesh(new THREE.CircleGeometry(CRATER_FLOOR_R + 0.5, 24), lavaMat);
-  lava.rotation.x = -Math.PI / 2;
-  lava.position.y = FLOOR_H + 0.04;
+  const lavaGeo = (() => {
+    const RINGS = 7;
+    const SEGS = 26;
+    const pos: number[] = [0, 0, 0];
+    for (let r = 1; r <= RINGS; r++) {
+      const rr = (r / RINGS) * LAVA_R;
+      for (let s = 0; s < SEGS; s++) {
+        const th = (s / SEGS) * Math.PI * 2;
+        pos.push(Math.cos(th) * rr, 0, Math.sin(th) * rr);
+      }
+    }
+    const idx: number[] = [];
+    for (let s = 0; s < SEGS; s++) idx.push(0, 1 + ((s + 1) % SEGS), 1 + s);
+    for (let r = 1; r < RINGS; r++) {
+      const inner = 1 + (r - 1) * SEGS;
+      const outer = 1 + r * SEGS;
+      for (let s = 0; s < SEGS; s++) {
+        const i0 = inner + s;
+        const i1 = inner + ((s + 1) % SEGS);
+        const o0 = outer + s;
+        const o1 = outer + ((s + 1) % SEGS);
+        idx.push(i0, i1, o1, i0, o1, o0);
+      }
+    }
+    const g = new THREE.BufferGeometry();
+    g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+    g.setAttribute("color", new THREE.Float32BufferAttribute(new Array(pos.length).fill(1), 3));
+    g.setIndex(idx);
+    g.computeVertexNormals();
+    return g;
+  })();
+  const lava = new THREE.Mesh(lavaGeo, lavaMat);
+  lava.position.y = FLOOR_H + 0.17;
   volcanoGroup.add(lava);
+  {
+    const lavaPos = lavaGeo.attributes.position;
+    const lavaCol = lavaGeo.attributes.color;
+    const cCrust = new THREE.Color(0x3d1206);
+    const cHot = new THREE.Color(0xff7a18);
+    const cWhite = new THREE.Color(0xffe27a);
+    const tmp = new THREE.Color();
+    tick.push((_dt, t) => {
+      // Crust drifts one way, the swell rolls the other, so the two
+      // never lock into a repeating pattern.
+      const speed = 0.35 + lavaSurge * 1.1;
+      const ct = t * speed;
+      for (let i = 0; i < lavaPos.count; i++) {
+        const x = lavaPos.getX(i);
+        const z = lavaPos.getZ(i);
+        const edge = Math.min(1, Math.hypot(x, z) / LAVA_R);
+        // Slow heave, damped at the rim so the pool stays in its bowl.
+        // Slow heave with a finer ripple riding on it, plus a gentle
+        // swell of the whole pool — enough to read as simmering
+        // without becoming choppy.
+        const heave =
+          Math.sin(x * 2.1 + ct * 1.7) * 0.5 +
+          Math.sin(z * 1.7 - ct * 1.3) * 0.5 +
+          Math.sin((x - z) * 4.3 + ct * 2.9) * 0.28 +
+          Math.sin((x + z) * 6.1 - ct * 3.7) * 0.16;
+        const breathe = 1 + Math.sin(ct * 0.9) * 0.25;
+        lavaPos.setY(i, heave * 0.075 * breathe * (1 - edge * edge));
+        // Plate boundaries: where the noise crosses zero the crust
+        // splits and the glow shows through.
+        const plate =
+          Math.sin(x * 1.9 + ct * 0.8) * Math.cos(z * 2.3 - ct * 0.6) +
+          Math.sin((x + z) * 1.35 - ct * 0.9) * 0.6;
+        const crack = Math.pow(1 - Math.min(1, Math.abs(plate) / 0.55), 2);
+        // Cooler at the rim, hottest in the middle, hotter still while
+        // the eruption is building.
+        const heat = Math.min(1, (crack + lavaSurge * 0.55) * (1.25 - edge * 0.5));
+        tmp.copy(cCrust).lerp(cHot, Math.min(1, heat * 1.5));
+        if (heat > 0.65) tmp.lerp(cWhite, (heat - 0.65) * 2.2);
+        lavaCol.setXYZ(i, tmp.r, tmp.g, tmp.b);
+      }
+      lavaPos.needsUpdate = true;
+      lavaCol.needsUpdate = true;
+    });
+  }
   const lavaLight = new THREE.PointLight(0xff5a1a, 1.4, 18);
   lavaLight.position.y = FLOOR_H + 1.2;
   volcanoGroup.add(lavaLight);
@@ -856,9 +1015,6 @@ function buildProps(ctx: BiomeContext): void {
   //
   // These live on volcanoGroup, so they shake with the mountain during
   // the rumble for free.
-  // Ramps 0 → 1 while the volcano is erupting; the flows read it to
-  // brighten and speed up. Driven by the state machine further down.
-  let lavaSurge = 0;
   const lavaFlows: {
     geo: THREE.BufferGeometry;
     colors: Float32Array;
@@ -870,13 +1026,10 @@ function buildProps(ctx: BiomeContext): void {
   const lavaFeet: { x: number; z: number }[] = [];
   {
     const FLOW_COUNT = 6;
-    // Radians of mountain either side of the cave mouth to leave bare —
-    // a lava river pouring down the tunnel the kid is about to sail
-    // into reads as a wall, not a doorway. (It would also be dropped
-    // outright: on the mouth bearing the carved channel is already at
-    // the waterline two steps below the rim, so the flow has nowhere
-    // to run.)
-    const MOUTH_CLEAR = 1.15;
+    // Radians of mountain either side of the cave mouth to leave bare.
+    // Narrow on purpose: lava SHOULD run down the face the cave is in,
+    // it just must not pour across the opening itself.
+    const MOUTH_CLEAR = 0.52;
     const mouthAngle = Math.atan2(MOUTH_DIR.z, MOUTH_DIR.x);
     const flowRand = mulberry32(freshSeed());
     // Fan the flows evenly across the arc that ISN'T the mouth. Slot
@@ -892,17 +1045,25 @@ function buildProps(ctx: BiomeContext): void {
       const wanderPhase = flowRand() * Math.PI * 2;
 
       const pts: { x: number; z: number; y: number; k: number }[] = [];
-      const rTop = CRATER_RIM_R - 0.25;
-      const rBottom = ISLAND_OUTER_R;
-      for (let r = rTop; r <= rBottom; r += 0.35) {
+      // Start inside the crater pool itself, not at its edge. Starting
+      // at the edge still left a gap: the crater wall climbs from the
+      // floor to the rim, so a stream beginning out there sits a good
+      // 0.3 above the pool surface and visibly floats over it. From
+      // the floor it wells up, over the lip, and down.
+      const rTop = CRATER_FLOOR_R - 0.25;
+      // Runs a little past the island's edge so the tip finishes
+      // under the sea rather than stopping level with it.
+      const rBottom = ISLAND_OUTER_R + 0.9;
+      // Stepped finer than the cone mesh's own rings, so a ribbon
+      // can't chord across a bump and sink into the rock between
+      // samples — which was breaking the streams into dashes.
+      for (let r = rTop; r <= rBottom; r += 0.22) {
         const k = (r - rTop) / (rBottom - rTop);
         const a = bearing + Math.sin(k * wanderFreq * Math.PI + wanderPhase) * wanderAmp;
         const x = Math.cos(a) * r;
         const z = Math.sin(a) * r;
         const y = coneSurfaceY(x, z);
         pts.push({ x, z, y, k });
-        // Stop at the waterline — the flow quenches in the sea.
-        if (y <= 0.02) break;
       }
       if (pts.length < 3) continue;
 
@@ -918,15 +1079,39 @@ function buildProps(ctx: BiomeContext): void {
         const nl = Math.hypot(nx, nz) || 1;
         const px = -nz / nl;
         const pz = nx / nl;
-        // Narrow at the vent, spreading into a lobe near the shore.
-        const w = 0.2 + p.k * 0.26;
-        // Lift just clear of the rock so it never z-fights the cone.
-        const y = p.y + 0.05;
+        // Narrow at the vent, spreading a little on the way down.
+        // Kept thin deliberately — these are unlit, so a wide ribbon
+        // reads as a flat orange sticker painted on the mountain
+        // rather than as molten rock running down a gully.
+        const w = 0.13 + p.k * 0.13;
         for (const side of [-1, 1]) {
           const vi = i * 2 + (side < 0 ? 0 : 1);
-          positions[vi * 3 + 0] = p.x + px * w * side;
-          positions[vi * 3 + 1] = y;
-          positions[vi * 3 + 2] = p.z + pz * w * side;
+          const ex = p.x + px * w * side;
+          const ez = p.z + pz * w * side;
+          positions[vi * 3 + 0] = ex;
+          // Sample the rock under each EDGE, not just the centreline.
+          // The flanks are gullied now, so a ribbon whose edges inherit
+          // the middle's height buries itself on every cross-slope.
+          // Sits low in the pool at the vent and rides higher once it
+          // is out on the open flank, where the rock is rougher.
+          //
+          // Floored well under the sea rather than following the rock
+          // all the way down. The streams run to the island's edge now,
+          // and near the mouth that path crosses the dredged channel
+          // whose floor is 0.7 down — without the clamp the ribbon
+          // dives into the trench (and used to break off up the beach
+          // entirely). Held just under the surface, the sea cuts it off
+          // cleanly however the waves are moving.
+          // Dips under the surface over the last stretch. Ending level
+          // with the water left the tip riding at +0.17, so every wave
+          // trough exposed a squared-off end sitting on wet sand; the
+          // sea has to be able to swallow it whatever the swell is
+          // doing.
+          const rr = Math.hypot(ex, ez);
+          const sink = smoothstep01((rr - (ISLAND_OUTER_R - 0.8)) / 1.4) * 0.8;
+          positions[vi * 3 + 1] =
+            Math.max(coneSurfaceY(ex, ez), -0.3) + 0.05 + p.k * 0.12 - sink;
+          positions[vi * 3 + 2] = ez;
         }
         ks.push(p.k);
       }
@@ -1059,9 +1244,77 @@ function buildProps(ctx: BiomeContext): void {
     });
   }
 
+  // ── Ash plume ────────────────────────────────────────────────────
+  // Fired as one burst at the boom, separate from the lazy crater
+  // smoke above: bigger, darker, much faster off the mark, and it
+  // keeps climbing well past the rim so the eruption reads from across
+  // the map. Buoyant rather than ballistic — it decelerates and drifts
+  // instead of arcing over.
+  type Ash = { mesh: THREE.Mesh; age: number; life: number; vel: THREE.Vector3; spin: number };
+  const ASH_COUNT = 20;
+  const ashPuffs: Ash[] = [];
+  for (let i = 0; i < ASH_COUNT; i++) {
+    const m = new THREE.Mesh(
+      new THREE.SphereGeometry(0.62, 9, 7),
+      new THREE.MeshBasicMaterial({ color: 0x4a423c, transparent: true, opacity: 0, depthWrite: false })
+    );
+    m.visible = false;
+    group.add(m);
+    ashPuffs.push({ mesh: m, age: 0, life: 0, vel: new THREE.Vector3(), spin: 0 });
+  }
+  function burstAsh(): void {
+    for (let i = 0; i < ASH_COUNT; i++) {
+      const p = ashPuffs[i];
+      p.age = -(i / ASH_COUNT) * 0.7; // stagger so it billows out, not all at once
+      p.life = 3.2 + Math.random() * 1.6;
+      p.spin = (Math.random() - 0.5) * 2;
+      const ang = Math.random() * Math.PI * 2;
+      const out = Math.random() * 1.7;
+      p.vel.set(Math.cos(ang) * out, 7 + Math.random() * 6, Math.sin(ang) * out);
+      p.mesh.visible = true;
+      p.mesh.position.set(
+        ISLAND.x + Math.cos(ang) * Math.random() * 0.8,
+        FLOOR_H + 0.5,
+        ISLAND.z + Math.sin(ang) * Math.random() * 0.8
+      );
+      p.mesh.scale.setScalar(0.5);
+    }
+  }
+
+  // ── Glowing embers ───────────────────────────────────────────────
+  // Small bright sparks flung with the lava. Purely decorative — they
+  // fade out mid-air rather than landing, so a fountain of them can't
+  // set off a barrage of splash sounds.
+  type Ember = { mesh: THREE.Mesh; age: number; life: number; vel: THREE.Vector3 };
+  const EMBER_COUNT = 34;
+  const embers: Ember[] = [];
+  const emberMat = new THREE.MeshBasicMaterial({ color: 0xffc24a, transparent: true, opacity: 1 });
+  for (let i = 0; i < EMBER_COUNT; i++) {
+    const m = new THREE.Mesh(new THREE.SphereGeometry(0.075, 6, 5), emberMat.clone());
+    m.visible = false;
+    group.add(m);
+    embers.push({ mesh: m, age: 0, life: 0, vel: new THREE.Vector3() });
+  }
+  let nextEmber = 0;
+  function fireEmber(): void {
+    const e = embers[nextEmber];
+    nextEmber = (nextEmber + 1) % EMBER_COUNT;
+    e.age = 0;
+    e.life = 1.1 + Math.random() * 1.1;
+    e.mesh.visible = true;
+    e.mesh.position.set(
+      ISLAND.x + (Math.random() - 0.5) * 1.2,
+      FLOOR_H + 0.6,
+      ISLAND.z + (Math.random() - 0.5) * 1.2
+    );
+    const ang = Math.random() * Math.PI * 2;
+    const out = 1.5 + Math.random() * 5;
+    e.vel.set(Math.cos(ang) * out, 11 + Math.random() * 8, Math.sin(ang) * out);
+  }
+
   // ── Lava bombs + water effects pools ─────────────────────────────
   type Bomb = { mesh: THREE.Mesh; active: boolean; vel: THREE.Vector3; spin: THREE.Vector3 };
-  const BOMB_COUNT = 14;
+  const BOMB_COUNT = 26;
   const bombs: Bomb[] = [];
   const bombPalette = [0xff5a1a, 0xff7a2a, 0xffb03a];
   for (let i = 0; i < BOMB_COUNT; i++) {
@@ -1246,9 +1499,11 @@ function buildProps(ctx: BiomeContext): void {
         state = "cooldown";
         stateT = 0;
         playVolcanoBoom();
-        fountainT = 2.2;
+        fountainT = 2.6;
         bombAccum = 0;
         wooTimer = 0.35;
+        burstAsh();
+        for (let i = 0; i < 14; i++) fireEmber();
         // The mountain swallowed the boat — pop it to the crater and
         // blast it out the top. The teleport happens the same frame
         // as the boom + fountain, so it reads as "shot out".
@@ -1279,11 +1534,55 @@ function buildProps(ctx: BiomeContext): void {
 
     if (fountainT > 0) {
       fountainT -= dt;
-      bombAccum += dt * 7;
+      // Heaviest right after the boom, thinning as the eruption spends
+      // itself, so it reads as one blast rather than a steady tap.
+      const heat = Math.min(1, fountainT / 2.0);
+      bombAccum += dt * (5 + heat * 13);
       while (bombAccum >= 1) {
         bombAccum -= 1;
         fireBomb(true);
+        if (Math.random() < 0.8) fireEmber();
       }
+    }
+
+    // Ash — buoyant, so it sheds speed and keeps drifting up rather
+    // than arcing over like the bombs do.
+    for (const p of ashPuffs) {
+      if (!p.mesh.visible) continue;
+      p.age += dt;
+      if (p.age < 0) continue;
+      const k = p.age / p.life;
+      if (k >= 1) {
+        p.mesh.visible = false;
+        continue;
+      }
+      p.vel.multiplyScalar(1 - Math.min(1, dt * 1.5));
+      p.vel.y = Math.max(p.vel.y, 0.9);
+      p.mesh.position.addScaledVector(p.vel, dt);
+      p.mesh.rotation.y += p.spin * dt;
+      p.mesh.scale.setScalar(0.5 + k * 3.4);
+      const mat = p.mesh.material as THREE.MeshBasicMaterial;
+      mat.opacity = 0.74 * Math.min(1, k / 0.12) * Math.max(0, 1 - (k - 0.12) / 0.88);
+      // Starts as dark ash and greys out as it climbs and thins. Kept
+      // dark at the base on purpose — against a bright sky a pale
+      // plume just reads as steam.
+      mat.color.setRGB(0.17 + k * 0.32, 0.15 + k * 0.31, 0.14 + k * 0.3);
+    }
+
+    // Embers — ballistic sparks that burn out in the air.
+    for (const e2 of embers) {
+      if (!e2.mesh.visible) continue;
+      e2.age += dt;
+      const k = e2.age / e2.life;
+      if (k >= 1) {
+        e2.mesh.visible = false;
+        continue;
+      }
+      e2.vel.y -= 15 * dt;
+      e2.mesh.position.addScaledVector(e2.vel, dt);
+      const mat = e2.mesh.material as THREE.MeshBasicMaterial;
+      mat.opacity = 1 - k * k;
+      mat.color.setRGB(1, 0.76 - k * 0.5, 0.29 - k * 0.27);
     }
 
     // Bomb physics — bombs that hit open water raise foam + a pop;
@@ -1302,9 +1601,10 @@ function buildProps(ctx: BiomeContext): void {
         b.mesh.visible = false;
         if (Math.hypot(bx - ISLAND.x, bz - ISLAND.z) > CRATER_RIM_R) {
           spawnFoam(bx, bz, 0.9 + Math.random() * 0.5);
-          // A bomb that reaches open water splashes; one that lands on
-          // the island's rock or beach sizzles.
-          if (islandHeight(bx, bz) + sandHeight(bx, bz) < 0.05) playSmallSplash();
+          // A bomb that reaches open water quenches with a steam
+          // hiss; one that lands on the island's rock or beach just
+          // pops.
+          if (islandHeight(bx, bz) + sandHeight(bx, bz) < 0.05) playLavaSplash();
           else playLavaPop();
         }
       }

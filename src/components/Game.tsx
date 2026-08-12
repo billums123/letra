@@ -87,6 +87,7 @@ export function Game() {
   const audioVolume = useGameStore((s) => s.audioVolume);
   const audioMuted = useGameStore((s) => s.audioMuted);
   const musicEnabled = useGameStore((s) => s.musicEnabled);
+  const biomeId = useGameStore((s) => s.biomeId);
   const dev = isDev();
 
   // One-shot audio init at app boot. The store-resolved voice slug (if
@@ -184,9 +185,9 @@ export function Game() {
     ) {
       music.stop();
     } else {
-      void music.play(pickGameTrack(), 0.16);
+      void music.play(pickGameTrack(biomeId), 0.16);
     }
-  }, [screen, audioMuted, musicEnabled]);
+  }, [screen, audioMuted, musicEnabled, biomeId]);
 
   // Volume slider — fan out to every audio subsystem. Each one stores
   // the factor and applies it to anything currently playing as well as

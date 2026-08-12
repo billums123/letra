@@ -210,6 +210,41 @@ const SFX: Spec[] = [
     durationSeconds: 0.7,
     promptInfluence: 0.45,
   },
+  // ── Lava quenching in the sea ─────────────────────────────────────
+  // Lava bombs landing in open water. A plain water plop is wrong here
+  // — the moment is molten rock hitting cold seawater, so it wants the
+  // steam flash and crackle on top of the splash.
+  {
+    id: "lava-hiss-1",
+    prompt:
+      "Red hot molten lava hitting cold seawater. A sharp steam HISS " +
+      "and fizzing sizzle bursting up, with a wet splash underneath " +
+      "and crackling as the rock quenches. Short, punchy, exciting, " +
+      "not scary. Steam and water only — absolutely NO metallic clang, " +
+      "NO ringing metal, NO bell or gong, NO clank. No music, no voice.",
+    durationSeconds: 1.1,
+    promptInfluence: 0.5,
+  },
+  {
+    id: "lava-hiss-2",
+    prompt:
+      "A glowing lump of lava plunging into the ocean. Quick splash " +
+      "followed by a loud steam hiss and bubbling fizz, with a few " +
+      "sharp crackles of cooling rock. Punchy and dramatic, " +
+      "kid-friendly. Steam and water only — absolutely NO metallic " +
+      "clang, NO ringing metal, NO bell or gong. No music, no voice.",
+    durationSeconds: 1.1,
+    promptInfluence: 0.5,
+  },
+  {
+    id: "lava-hiss-3",
+    prompt:
+      "Molten rock quenching in water. Splash then a rush of steam, " +
+      "sizzling and popping as it cools, tailing off into bubbles. " +
+      "Crisp, close-up, playful. No music, no voice.",
+    durationSeconds: 1.0,
+    promptInfluence: 0.5,
+  },
   {
     id: "splash-small-3",
     prompt:

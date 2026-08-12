@@ -61,6 +61,15 @@ export type BiomeContext = {
   // cave so it reads as gone into the mountain rather than parked
   // against the back wall, then shows it again as it is launched out.
   setPlayerVisible: (visible: boolean) => void;
+  // Park the follow camera on a fixed world point instead of the
+  // avatar, for set-pieces where the avatar is out of sight and the
+  // thing worth watching is elsewhere — the ocean volcano uses it so
+  // that once the mountain has swallowed the boat, the kid is looking
+  // at the crater the boat is about to be fired out of. `zoom` scales
+  // the camera's standing offset, so >1 pulls back for a wider shot.
+  // Pass null to hand the camera back to the avatar. The engine lerps
+  // in both directions, so no easing is needed at the call site.
+  setCameraFocus: (focus: { x: number; y: number; z: number; zoom?: number } | null) => void;
 };
 
 export type Biome = {
