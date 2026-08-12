@@ -1646,9 +1646,10 @@ function buildProps(ctx: BiomeContext): void {
         player.z += (tz - player.z) * k;
       }
       if (stateT >= (pendingMega ? MEGA_RUMBLE_SECONDS : RUMBLE_SECONDS)) {
+        const mega = pendingMega;
         state = "cooldown";
         stateT = 0;
-        playVolcanoBoom();
+        playVolcanoBoom(mega);
         fountainT = 2.6;
         bombAccum = 0;
         wooTimer = 0.35;
@@ -1662,7 +1663,6 @@ function buildProps(ctx: BiomeContext): void {
           p.x = ISLAND.x;
           p.z = ISLAND.z;
         }
-        const mega = pendingMega;
         if (mega) {
           fountainT = 3.4;
           for (let i = 0; i < 16; i++) fireEmber();

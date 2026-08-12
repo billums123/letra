@@ -157,10 +157,20 @@ the **`sound_generation`** permission for `sfx:generate` — a key scoped to
 text-to-speech only will 401 on every clip.
 
 Every recorded SFX has a procedural WebAudio fallback in `src/audio/sfx.ts`,
-so the game is never silent if a clip is missing or still decoding. Note
-that a few specs in `scripts/generate-sfx.ts` are historical and no longer
-match what the runtime loads — see the header comment there before
-committing whatever it writes.
+so the game is never silent if a clip is missing or still decoding.
+
+`src/audio/sfxCatalog.ts` is the single source of truth for every sound —
+what it is, what it sounds like, where it fires, and which files it uses.
+Both the generator and the **SFX Lab** read it.
+
+The lab is a dev-only screen (🔊 on the menu, or `/dev/sfx-lab`) for
+replacing any sound without touching code: play what a cue sounds like
+now, edit the prompt, generate a take, audition it, then approve it into
+a slot or regenerate. Takes land in `public/audio/sfx/_candidates/`
+(gitignored) and aren't live until approved. Generation runs in the dev
+server so the API key never reaches the browser; the endpoints don't
+exist in a production build. Reload the page to hear an approved clip
+in-game — clips are decoded once per session.
 
 ### How the runtime decides
 

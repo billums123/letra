@@ -55,6 +55,10 @@ type ClipPool = { play(gain: number, jitter?: number): boolean; prime(): void };
 const allPools: ClipPool[] = [];
 
 function makeClipPool(urls: readonly string[]): ClipPool {
+  // Index of the last take played, so a pool of several never repeats
+  // itself back to back. Pure random does, often enough to notice when
+  // a kid triggers the same cue twenty times in a row.
+  let lastPicked = -1;
   // Fetching and decoding are deliberately separate steps. Fetching
   // needs no AudioContext, so it can start the moment a game mounts —
   // before the kid has done anything that would unlock audio. Decoding
@@ -130,8 +134,11 @@ function makeClipPool(urls: readonly string[]): ClipPool {
       const ready: AudioBuffer[] = [];
       for (const b of buffers) if (b) ready.push(b);
       if (ready.length === 0) return false;
+      let pick = (Math.random() * ready.length) | 0;
+      if (ready.length > 1 && pick === lastPicked) pick = (pick + 1) % ready.length;
+      lastPicked = pick;
       const src = c.createBufferSource();
-      src.buffer = ready[(Math.random() * ready.length) | 0];
+      src.buffer = ready[pick];
       src.playbackRate.value = 1 - jitter + Math.random() * jitter * 2;
       const g = c.createGain();
       g.gain.value = gain;
@@ -284,11 +291,21 @@ const PICKUP_VARIANTS: Array<() => void> = [
   fxFanfare,
 ];
 
+// Recorded pickups, rotated. The eight procedural variants below stay
+// as the fallback so a missing file never means a silent pickup.
+const chimeClips = makeClipPool([
+  "/audio/sfx/chime-1.mp3",
+  "/audio/sfx/chime-2.mp3",
+  "/audio/sfx/chime-3.mp3",
+  "/audio/sfx/chime-4.mp3",
+]);
+
 let lastVariant = -1;
 
 // Plays one of eight celebratory pickup sounds, cycling so the same one
 // never repeats twice in a row. A 3-year-old loves variety on rewards.
 export function playChime() {
+  if (chimeClips.play(0.62)) return;
   let idx = Math.floor(Math.random() * PICKUP_VARIANTS.length);
   if (idx === lastVariant) idx = (idx + 1) % PICKUP_VARIANTS.length;
   lastVariant = idx;
@@ -300,7 +317,12 @@ export function playChime() {
 // internally so callers can poke it from a tight render loop without
 // worrying about layering hundreds per second.
 let lastStepAt = 0;
+const kidStepClips = makeClipPool(["/audio/sfx/kid-step-1.mp3"]);
+
 export function playKidStep() {
+  // Wider pitch jitter than usual: it fires every footfall, and one
+  // recording played dead straight turns a walk into a metronome.
+  if (kidStepClips.play(0.34, 0.16)) return;
   const now = performance.now();
   if (now - lastStepAt < 220) return;
   lastStepAt = now;
@@ -780,7 +802,14 @@ function playProceduralAlienWave(c: AudioContext, dest: AudioNode) {
 }
 
 // Bigger flourish for end-of-word / end-of-round. Octave jump at the end.
+const wooClips = makeClipPool([
+  "/audio/sfx/woo-1.mp3",
+  "/audio/sfx/woo-2.mp3",
+  "/audio/sfx/woo-3.mp3",
+]);
+
 export function playWoo() {
+  if (wooClips.play(0.8)) return;
   tone(N.G4, 0, 0.16);
   tone(N.C5, 0.1, 0.16);
   tone(N.E5, 0.2, 0.16);
@@ -801,8 +830,12 @@ export function playWoo() {
 const volcanoRumbleClips = makeClipPool(["/audio/sfx/volcano-rumble.mp3"]);
 const volcanoBoomClips = makeClipPool([
   "/audio/sfx/volcano-boom-1.mp3",
-  "/audio/sfx/volcano-boom-2.mp3",
+  "/audio/sfx/volcano-boom-3.mp3",
+  "/audio/sfx/volcano-boom-4.mp3",
 ]);
+// Held back for the mega launch, so the eruption that throws the kid
+// into space doesn't sound like the everyday one.
+const volcanoMegaBoomClips = makeClipPool(["/audio/sfx/volcano-boom-2.mp3"]);
 
 // Low ground-shake rumble that swells over ~0.9s. Played the moment
 // the kid drives into the crater, underneath the visual shake, so the
@@ -848,10 +881,11 @@ export function playVolcanoRumble() {
 
 // The eruption itself: sub-bass KABOOM + low noise body + a rising
 // two-oscillator whoosh that tracks the avatar sailing skyward.
-export function playVolcanoBoom() {
+export function playVolcanoBoom(mega = false) {
   const c = getCtx();
   if (!c) return;
-  if (volcanoBoomClips.play(0.95)) return;
+  const pool = mega ? volcanoMegaBoomClips : volcanoBoomClips;
+  if (pool.play(mega ? 1 : 0.95)) return;
   const dest = getSfxBus(c);
   const t0 = c.currentTime;
   // 1 — sub-bass punch
@@ -961,6 +995,10 @@ export function playLavaSplash() {
 // Small "bloop" pop for a lava bomb hitting the ground. Throttled hard
 // because a fountain drops many bombs in a burst and we want texture,
 // not a drum roll.
+const lavaPopClips = makeClipPool([
+  "/audio/sfx/lava-pop-1.mp3",
+  "/audio/sfx/lava-pop-2.mp3",
+]);
 let lastLavaPopAt = 0;
 export function playLavaPop() {
   const now = performance.now();
@@ -968,6 +1006,7 @@ export function playLavaPop() {
   lastLavaPopAt = now;
   const c = getCtx();
   if (!c) return;
+  if (lavaPopClips.play(0.5)) return;
   const dest = getSfxBus(c);
   const t0 = c.currentTime;
   const osc = c.createOscillator();

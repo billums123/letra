@@ -49,10 +49,10 @@ export const SFX_CATALOG: SfxCue[] = [
     id: "chime",
     label: "Letter pickup",
     sounds:
-      "Eight different happy jingles, picked in rotation so the same one never repeats twice running — a rising triad, a fairy-dust sparkle, a bouncy skip, a magic glissando, a Mario-ish coin, a major-7 stack, a bubbly bloop, and a little trumpet fanfare. All built from triangle and square oscillators on a major scale.",
+      "Four recorded pickup chimes, rotated so the same one never plays twice running. Falls back to eight procedural jingles — a rising triad, a fairy-dust sparkle, a bouncy skip, a magic glissando, a Mario-ish coin, a major-7 stack, a bubbly bloop and a trumpet fanfare.",
     usedIn: ["Spell the Word", "Find the Alphabet", "Match the Sound", "Letter editor"],
-    kind: "synth",
-    slots: [],
+    kind: "recorded",
+    slots: ["chime-1.mp3", "chime-2.mp3", "chime-3.mp3", "chime-4.mp3"],
     prompt:
       "Bright happy chime for a small child collecting a letter in a " +
       "game. Short sparkling two-note bell with a warm sunny ring. " +
@@ -65,10 +65,10 @@ export const SFX_CATALOG: SfxCue[] = [
     id: "kid-step",
     label: "Kid footstep",
     sounds:
-      "A very short soft blip, pitch-jittered per step so a walk cycle doesn't tick like a metronome. Sine with a fast decay.",
+      "One recorded footfall, played with wide pitch jitter so a walk cycle does not tick like a metronome. Falls back to a short sine blip.",
     usedIn: ["Kid avatar, once per footfall"],
-    kind: "synth",
-    slots: [],
+    kind: "recorded",
+    slots: ["kid-step-1.mp3"],
     prompt:
       "Soft cartoon footstep on grass. A single quiet padded thud, " +
       "light and bouncy, not a boot or a stomp. Very short. No music, " +
@@ -96,15 +96,15 @@ export const SFX_CATALOG: SfxCue[] = [
     id: "woo",
     label: "Celebration flourish",
     sounds:
-      "A five-note rising arpeggio (G-C-E-G-C) that jumps an octave at the top, with a sparkle tail of two soft sine notes over it.",
+      "Three recorded flourishes, rotated. Falls back to a five-note rising arpeggio that jumps an octave at the top with a sparkle tail over it.",
     usedIn: [
       "Finishing a word",
       "Finishing a round",
       "Earning a trophy",
       "Volcano launch, timed for the apex",
     ],
-    kind: "synth",
-    slots: [],
+    kind: "recorded",
+    slots: ["woo-1.mp3", "woo-2.mp3", "woo-3.mp3"],
     prompt:
       "Short triumphant flourish for a small child completing " +
       "something. Bright rising sparkle with a cheerful lift at the " +
@@ -134,10 +134,10 @@ export const SFX_CATALOG: SfxCue[] = [
     id: "lava-pop",
     label: "Lava bomb pop",
     sounds:
-      "A small bloop — a sine dropping about an octave — with a bandpassed sizzle layered on roughly half the time. Throttled to 120ms so a bomb fountain reads as texture, not a drum roll.",
+      "Two recorded pops, rotated, still throttled to 120ms so a bomb fountain reads as texture rather than a drum roll. Falls back to a sine bloop with an occasional sizzle.",
     usedIn: ["Volcano bombs landing on rock or beach (ocean and jungle)"],
-    kind: "synth",
-    slots: [],
+    kind: "recorded",
+    slots: ["lava-pop-1.mp3", "lava-pop-2.mp3"],
     prompt:
       "Small blob of molten lava landing on rock. A short thick bloop " +
       "with a faint crackle of cooling. Close-up, quiet, playful. No " +
@@ -203,10 +203,18 @@ export const SFX_CATALOG: SfxCue[] = [
     id: "volcano-boom",
     label: "Volcano eruption",
     sounds:
-      "The blast itself. The fallback is a sub-bass punch, a lowpassed boom body, and a rising detuned whoosh tracking the avatar skyward.",
+      "The blast itself. Three takes rotate for an ordinary eruption; volcano-boom-2 is held back and only plays on a mega launch. The fallback is a sub-bass punch, a lowpassed boom body and a rising detuned whoosh tracking the avatar skyward.",
     usedIn: ["The eruption that launches the avatar"],
     kind: "recorded",
-    slots: ["volcano-boom-1.mp3", "volcano-boom-2.mp3"],
+    // volcano-boom-2 is deliberately NOT in the everyday rotation —
+    // it is reserved for the mega launch, so the eruption that
+    // throws the kid into space does not sound like the usual one.
+    slots: [
+      "volcano-boom-1.mp3",
+      "volcano-boom-3.mp3",
+      "volcano-boom-4.mp3",
+      "volcano-boom-2.mp3",
+    ],
     prompt:
       "Big cartoon volcano erupting. Huge deep KABOOM explosion of " +
       "lava, then a whooshing blast of air rushing upward and bubbling " +
