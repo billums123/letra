@@ -6,6 +6,7 @@ import path from "node:path";
 import { config as loadDotenv } from "dotenv";
 import { generateClipMp3 } from "./scripts/elevenlabs";
 import type { VoicesRegistry } from "./src/audio/types";
+import { sfxLabPlugin } from "./scripts/sfx-lab-plugin";
 
 // Load .env.local then .env so the dev plugin below can reach
 // ELEVENLABS_API_KEY. Vite normally only exposes VITE_-prefixed vars to the
@@ -370,6 +371,8 @@ const isMobileBuild = process.env.VITE_TARGET === "mobile";
 // Letra dev server. Default port 5173; falls through to next free port.
 export default defineConfig({
   plugins: [
+    // Dev-only: backs the SFX Lab screen. Absent from prod builds.
+    sfxLabPlugin(),
     react(),
     devAudioPlugin(),
     cloudflareWebAnalytics(process.env.CLOUDFLARE_ANALYTICS_TOKEN, isMobileBuild),

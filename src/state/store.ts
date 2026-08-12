@@ -18,6 +18,7 @@ export type Screen =
   | "q-tail-editor"
   | "trophy-lab"
   | "audio-tester"
+  | "sfx-lab"
   | "word-builder"
   | "word-asset-editor";
 

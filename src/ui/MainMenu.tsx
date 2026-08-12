@@ -521,6 +521,14 @@ export function MainMenu() {
           </button>
           <button
             type="button"
+            onClick={() => setScreen("sfx-lab")}
+            aria-label="Open the sound effects lab"
+            style={compact ? compactCornerBtn : cornerBtn}
+          >
+            {compact ? "🔊" : "🔊 SFX lab"}
+          </button>
+          <button
+            type="button"
             onClick={() => setScreen("word-builder")}
             aria-label="Open the spell-the-word builder"
             style={compact ? compactCornerBtn : cornerBtn}

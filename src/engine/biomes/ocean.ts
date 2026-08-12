@@ -252,7 +252,16 @@ function coneSurfaceY(lx: number, lz: number): number {
   // stay clean and the boat's corridor keeps its shape.
   return masked + (h - masked) * mask - dredge;
 }
+// How long the mountain shakes before it fires. The ordinary eruption
+// keeps its original snappy wind-up — that is the one the kid gets
+// most of the time and it should stay quick. Only the mega-launch
+// draws the build-up out, because you are about to be thrown into
+// space and it should have time to feel ominous.
 const RUMBLE_SECONDS = 1.0;
+const MEGA_RUMBLE_SECONDS = 3.2;
+// How often an eruption is a mega-launch. Deliberately the minority:
+// the surprise is the point, and it stops being one if it is the norm.
+const MEGA_CHANCE = 0.3;
 const COOLDOWN_SECONDS = 3.5;
 
 // ── Sandy islands (scenery; palms live here) ───────────────────────
@@ -1537,6 +1546,7 @@ function buildProps(ctx: BiomeContext): void {
   let bombAccum = 0;
   let wooTimer = -1;
   let sputterIn = 4 + Math.random() * 5;
+  let pendingMega = false;
 
   function pickWaterLanding(): { x: number; z: number } {
     for (let i = 0; i < 30; i++) {
@@ -1595,7 +1605,7 @@ function buildProps(ctx: BiomeContext): void {
     }
 
     if (state === "rumbling") {
-      const ramp = stateT / RUMBLE_SECONDS;
+      const ramp = stateT / (pendingMega ? MEGA_RUMBLE_SECONDS : RUMBLE_SECONDS);
       const amp = 0.05 + ramp * 0.1;
       volcanoGroup.position.set(
         ISLAND.x + (Math.random() - 0.5) * amp,
@@ -1619,6 +1629,9 @@ function buildProps(ctx: BiomeContext): void {
         if (d < MOUTH_TRIGGER_R) {
           state = "rumbling";
           stateT = 0;
+          // Rolled here rather than at the boom: the wind-up length
+          // depends on it.
+          pendingMega = Math.random() < MEGA_CHANCE;
           playVolcanoRumble();
         }
       }
@@ -1632,7 +1645,7 @@ function buildProps(ctx: BiomeContext): void {
         player.x += (tx - player.x) * k;
         player.z += (tz - player.z) * k;
       }
-      if (stateT >= RUMBLE_SECONDS) {
+      if (stateT >= (pendingMega ? MEGA_RUMBLE_SECONDS : RUMBLE_SECONDS)) {
         state = "cooldown";
         stateT = 0;
         playVolcanoBoom();
@@ -1649,10 +1662,7 @@ function buildProps(ctx: BiomeContext): void {
           p.x = ISLAND.x;
           p.z = ISLAND.z;
         }
-        // Every so often the mountain really lets go and throws the
-        // boat clear of the atmosphere. Rare enough to stay a surprise,
-        // common enough that a kid who keeps sailing in will get one.
-        const mega = Math.random() < 0.22;
+        const mega = pendingMega;
         if (mega) {
           fountainT = 3.4;
           for (let i = 0; i < 16; i++) fireEmber();

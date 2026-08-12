@@ -27,6 +27,7 @@ const AlienEditor = lazy(() => import("../ui/AlienEditor").then((m) => ({ defaul
 const QTailEditor = lazy(() => import("../ui/QTailEditor").then((m) => ({ default: m.QTailEditor })));
 const TrophyLab = lazy(() => import("../ui/TrophyLab").then((m) => ({ default: m.TrophyLab })));
 const AudioTester = lazy(() => import("../ui/AudioTester").then((m) => ({ default: m.AudioTester })));
+const SfxLab = lazy(() => import("../ui/SfxLab").then((m) => ({ default: m.SfxLab })));
 const SpellWordBuilder = lazy(() =>
   import("../ui/SpellWordBuilder").then((m) => ({ default: m.SpellWordBuilder })),
 );
@@ -74,6 +75,7 @@ const SCREEN_PATHS: Record<Screen, string> = {
   "q-tail-editor": "/dev/q-tail-editor",
   "trophy-lab": "/dev/trophy-lab",
   "audio-tester": "/dev/audio-tester",
+  "sfx-lab": "/dev/sfx-lab",
   "word-builder": "/dev/word-builder",
   "word-asset-editor": "/dev/word-asset-editor",
 };
@@ -145,6 +147,7 @@ export function Game() {
         screen === "q-tail-editor" ||
         screen === "trophy-lab" ||
         screen === "audio-tester" ||
+        screen === "sfx-lab" ||
         screen === "word-builder" ||
         screen === "word-asset-editor")
     ) {
@@ -180,6 +183,7 @@ export function Game() {
       screen === "q-tail-editor" ||
       screen === "trophy-lab" ||
       screen === "audio-tester" ||
+      screen === "sfx-lab" ||
       screen === "word-builder" ||
       screen === "word-asset-editor"
     ) {
@@ -230,6 +234,7 @@ export function Game() {
           screen === "q-tail-editor" ||
           screen === "trophy-lab" ||
           screen === "audio-tester" ||
+          screen === "sfx-lab" ||
           screen === "word-builder" ||
           screen === "word-asset-editor") && (
           <Suspense fallback={<DevLoading />}>
@@ -239,6 +244,7 @@ export function Game() {
             {screen === "q-tail-editor" && <QTailEditor />}
             {screen === "trophy-lab" && <TrophyLab />}
             {screen === "audio-tester" && <AudioTester />}
+            {screen === "sfx-lab" && <SfxLab />}
             {screen === "word-builder" && <SpellWordBuilder />}
             {screen === "word-asset-editor" && <WordAssetEditor />}
           </Suspense>

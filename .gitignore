@@ -13,3 +13,6 @@ dist-ssr
 audio-generation.log
 assets-source/_originals/
 .claude/
+
+# SFX Lab takes — scratch, not shipped assets.
+public/audio/sfx/_candidates/
