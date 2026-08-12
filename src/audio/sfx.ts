@@ -50,29 +50,83 @@ export function setSfxGain(v: number): void {
 // Pools pick a random clip per play and jitter the playback rate, so a
 // kid triggering the same event twenty times in a row (they will)
 // doesn't hear twenty identical files.
-type ClipPool = { play(gain: number, jitter?: number): boolean };
+type ClipPool = { play(gain: number, jitter?: number): boolean; prime(): void };
+
+const allPools: ClipPool[] = [];
 
 function makeClipPool(urls: readonly string[]): ClipPool {
+  // Fetching and decoding are deliberately separate steps. Fetching
+  // needs no AudioContext, so it can start the moment a game mounts —
+  // before the kid has done anything that would unlock audio. Decoding
+  // needs a context, so it waits for one and then runs off the bytes
+  // already in hand.
+  const raw: (ArrayBuffer | null)[] = urls.map(() => null);
   const buffers: (AudioBuffer | null)[] = urls.map(() => null);
-  let loadStarted = false;
-  return {
+  let fetchStarted = false;
+  const decoding = urls.map(() => false);
+
+  function decodeOne(c: AudioContext, i: number): void {
+    if (buffers[i] || decoding[i]) return;
+    const bytes = raw[i];
+    if (!bytes) return;
+    decoding[i] = true;
+    void (async () => {
+      try {
+        // decodeAudioData detaches the buffer it is given, so hand it a
+        // copy — otherwise a context swap (iOS interruption) would find
+        // raw emptied and could never re-decode.
+        buffers[i] = await c.decodeAudioData(bytes.slice(0));
+      } catch {
+        /* swallow — the procedural fallback already covers this */
+      } finally {
+        decoding[i] = false;
+      }
+    })();
+  }
+
+  function ensureFetched(): void {
+    if (fetchStarted) return;
+    fetchStarted = true;
+    urls.forEach((url, i) => {
+      void (async () => {
+        try {
+          const res = await fetch(url);
+          if (!res.ok) return;
+          raw[i] = await res.arrayBuffer();
+          // Decode the moment the bytes land. Kicking decoding off from
+          // prime() instead would be too early — the fetch it just
+          // started has not resolved, so there would be nothing to
+          // decode and nothing would retry until the first play(), by
+          // which point it is too late to be audible.
+          const c = getCtx();
+          if (c) decodeOne(c, i);
+        } catch {
+          /* swallow — the procedural fallback already covers this */
+        }
+      })();
+    });
+  }
+
+  function ensureDecoded(c: AudioContext): void {
+    for (let i = 0; i < urls.length; i++) decodeOne(c, i);
+  }
+
+  const pool: ClipPool = {
+    // Start pulling the bytes down, and decode them if audio is already
+    // live. Call this well before the sound is needed: the first play()
+    // of an un-primed pool can only fall back to the synth, and for the
+    // volcano that fallback is nearly all sub-bass — inaudible on a
+    // tablet speaker, which reads as "the eruption made no sound".
+    prime() {
+      ensureFetched();
+      const c = getCtx();
+      if (c) ensureDecoded(c);
+    },
     play(gain, jitter = 0.08) {
       const c = getCtx();
       if (!c) return false;
-      if (!loadStarted) {
-        loadStarted = true;
-        urls.forEach((url, i) => {
-          void (async () => {
-            try {
-              const res = await fetch(url);
-              if (!res.ok) return;
-              buffers[i] = await c.decodeAudioData(await res.arrayBuffer());
-            } catch {
-              /* swallow — the procedural fallback already covers this */
-            }
-          })();
-        });
-      }
+      ensureFetched();
+      ensureDecoded(c);
       const ready: AudioBuffer[] = [];
       for (const b of buffers) if (b) ready.push(b);
       if (ready.length === 0) return false;
@@ -86,6 +140,15 @@ function makeClipPool(urls: readonly string[]): ClipPool {
       return true;
     },
   };
+  allPools.push(pool);
+  return pool;
+}
+
+// Warm every recorded clip. Cheap (the whole SFX set is a couple of
+// hundred KB) and idempotent, so games can call it on mount and again
+// once audio unlocks without worrying about double work.
+export function primeSfxClips(): void {
+  for (const p of allPools) p.prime();
 }
 
 // Lightweight tone helper. `wave` defaults to triangle which sounds friendly
@@ -913,7 +976,7 @@ export function playSmallSplash() {
   lastSmallSplashAt = now;
   const c = getCtx();
   if (!c) return;
-  if (smallSplashClips.play(0.42, 0.12)) return;
+  if (smallSplashClips.play(0.26, 0.12)) return;
   // Procedural fallback — one short noise chirp through a falling
   // bandpass plus a tiny bloop. A miniature of playSplash below.
   const dest = getSfxBus(c);
@@ -927,7 +990,7 @@ export function playSmallSplash() {
     bp.Q.value = 0.9;
     const g = c.createGain();
     g.gain.setValueAtTime(0.0001, t0);
-    g.gain.exponentialRampToValueAtTime(0.16, t0 + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.1, t0 + 0.01);
     g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.2);
     n.connect(bp).connect(g).connect(dest);
   }
@@ -939,7 +1002,7 @@ export function playSmallSplash() {
     osc.frequency.exponentialRampToValueAtTime(f * 0.45, t0 + 0.13);
     const g = c.createGain();
     g.gain.setValueAtTime(0.0001, t0);
-    g.gain.exponentialRampToValueAtTime(0.11, t0 + 0.008);
+    g.gain.exponentialRampToValueAtTime(0.07, t0 + 0.008);
     g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.16);
     osc.connect(g).connect(dest);
     osc.start(t0);
