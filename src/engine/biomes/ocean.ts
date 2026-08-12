@@ -111,13 +111,28 @@ const MOUTH = {
   x: ISLAND.x + MOUTH_DIR.x * MOUTH_ALONG,
   z: ISLAND.z + MOUTH_DIR.z * MOUTH_ALONG,
 };
-const MOUTH_TRIGGER_R = 1.7;
+// Wide enough to swallow the whole channel: any line the boat can take
+// through the inlet passes inside this circle, so approaching at an
+// angle can't sneak past the trigger and bonk the back wall instead.
+const MOUTH_TRIGGER_R = 2.2;
 // Sea-level inlet carved into the cone so the boat can sail INTO the
 // mountain instead of driving up its flank. Full-depth carve within
 // CHANNEL_HALF_W of the mouth ray, feathering to untouched rock by
 // CHANNEL_FADE_W; the carve only applies outward of the back wall.
-const CHANNEL_HALF_W = 1.7;
-const CHANNEL_FADE_W = 3.2;
+const CHANNEL_HALF_W = 2.15;
+const CHANNEL_FADE_W = 3.8;
+// The inlet is dredged as well as carved: its floor is cut this far
+// below sea level. The wave troughs reach about -0.22, so with the
+// floor sitting at exactly y=0 the sea visibly drained out of the cave
+// mouth on every swell and the boat looked beached on its way in.
+// Dredging keeps water over the channel at all times.
+//
+// This lowers the *rendered seabed only*. islandHeight — what the boat
+// drives on, what the collision fence probes, what the wake's
+// over-water test reads — still bottoms out at 0, so the boat goes on
+// floating at the wave surface all the way into the dark instead of
+// sliding down into the trench.
+const CHANNEL_DREDGE = 0.7;
 function channelMask(lx: number, lz: number): number {
   const along = lx * MOUTH_DIR.x + lz * MOUTH_DIR.z;
   const wallBlend = smoothstep01((along - (CAVE_WALL_ALONG - 0.6)) / 1.2);
@@ -507,6 +522,7 @@ function buildProps(ctx: BiomeContext): void {
     const pos = coneGeo.attributes.position;
     const colors = new Float32Array(pos.count * 3);
     const cSand = new THREE.Color(0xe8d49a);
+    const cWet = new THREE.Color(0x6f7a6a);
     const cRock = new THREE.Color(0x7a5f4a);
     const cScorch = new THREE.Color(0x453832);
     const cGlow = new THREE.Color(0xff7a2a);
@@ -517,22 +533,29 @@ function buildProps(ctx: BiomeContext): void {
       const d = Math.hypot(x, z);
       const mask = channelMask(x, z);
       const masked = volcanoProfile(d) * mask;
+      // How far this vert is dredged below sea level — full depth in
+      // the carved channel, tapering to nothing in the feather band
+      // and zero everywhere the mask leaves the rock alone.
+      const dredge = CHANNEL_DREDGE * (1 - mask);
       // Rocky jitter everywhere except the crater floor and the
       // carved channel floor, both of which should stay smooth.
       if (d > CRATER_FLOOR_R + 0.3 && masked > 0.25) {
         const n = Math.sin(x * 4.7 + z * 3.9) * Math.cos(x * 2.1 - z * 5.3);
-        pos.setY(i, masked + n * 0.16 * mask);
+        pos.setY(i, masked + n * 0.16 * mask - dredge);
       } else {
-        pos.setY(i, masked);
+        pos.setY(i, masked - dredge);
       }
       const h = masked / RIM_H;
       if (d < CRATER_RIM_R && mask > 0.5) {
         tmp.copy(cScorch).lerp(cGlow, Math.min(1, Math.max(0, 1.1 - d / CRATER_RIM_R)) * 0.55);
       } else {
         // Sandy beach ring at the waterline, rock above, scorched rim.
-        // The carved channel floor sits at h≈0 so it reads as sand.
         tmp.copy(cSand).lerp(cRock, Math.min(1, h * 2.4));
         if (h > 0.8) tmp.lerp(cScorch, (h - 0.8) * 4.5);
+        // Dredged ground is submerged (or about to be) — darken it to
+        // wet sand so the feather band at the channel lip doesn't read
+        // as dry beach right where the water starts.
+        if (dredge > 0.02) tmp.lerp(cWet, Math.min(1, dredge / CHANNEL_DREDGE));
       }
       colors[i * 3 + 0] = tmp.r;
       colors[i * 3 + 1] = tmp.g;
@@ -549,28 +572,51 @@ function buildProps(ctx: BiomeContext): void {
     volcanoGroup.add(cone);
   }
 
-  // Invisible collision fence traced along the island's own height
-  // contour: at each bearing, walk inward from open water and drop a
-  // solid obstacle where the ground first rises past knee height. The
-  // carved inlet never crosses that height until its back wall, so
-  // the cave corridor stays open while every other approach — however
-  // diagonal — bumps into the fence before the boat can climb the
-  // flank. (The visible flank boulders are just dressing on top.)
+  // Invisible collision fence traced around the island's knee-height
+  // contour: every grid cell that sits on the boundary between
+  // wadeable and climbable ground gets a solid post, so the flank is
+  // sealed from every direction while the cave corridor — the only
+  // stretch that stays below knee height the whole way in — is left
+  // wide open. (The visible flank boulders are dressing on top.)
+  //
+  // This walks a grid rather than one post per compass bearing on
+  // purpose. A bearing walk stops at the FIRST crossing along each
+  // ray, which puts the channel's posts deep at its back wall and
+  // leaves its LATERAL walls unfenced — so a boat could sail into the
+  // inlet, turn sideways, and drive straight up the flank from
+  // inside. Following the contour instead fences those walls too.
   {
-    const FENCE_STEPS = 48;
-    for (let i = 0; i < FENCE_STEPS; i++) {
-      const a = (i / FENCE_STEPS) * Math.PI * 2;
-      const dirX = Math.cos(a);
-      const dirZ = Math.sin(a);
-      // Walk inward from open water; the first sample past knee height
-      // is where the fence post goes.
-      for (let r = ISLAND_OUTER_R; r > CRATER_FLOOR_R; r -= 0.25) {
-        const x = ISLAND.x + dirX * r;
-        const z = ISLAND.z + dirZ * r;
-        if (islandHeight(x, z) >= 0.5) {
-          obstacles.push({ x, z, radius: 1.0 });
-          break;
+    const FENCE_H = 0.5;
+    const STEP = 0.35;
+    // Posts are spaced closer than 2× their radius, so consecutive
+    // discs always overlap and the fence has no seams.
+    const SPACING = 0.85;
+    const POST_R = 0.75;
+    const posts: { x: number; z: number }[] = [];
+    for (let x = ISLAND.x - ISLAND_OUTER_R; x <= ISLAND.x + ISLAND_OUTER_R; x += STEP) {
+      for (let z = ISLAND.z - ISLAND_OUTER_R; z <= ISLAND.z + ISLAND_OUTER_R; z += STEP) {
+        if (islandHeight(x, z) < FENCE_H) continue;
+        // Keep only the rim of the climbable region — a cell with at
+        // least one wadeable neighbour. Interior cells would just pile
+        // up redundant obstacles.
+        if (
+          islandHeight(x + STEP, z) >= FENCE_H &&
+          islandHeight(x - STEP, z) >= FENCE_H &&
+          islandHeight(x, z + STEP) >= FENCE_H &&
+          islandHeight(x, z - STEP) >= FENCE_H
+        ) {
+          continue;
         }
+        let tooClose = false;
+        for (const p of posts) {
+          if (Math.hypot(x - p.x, z - p.z) < SPACING) {
+            tooClose = true;
+            break;
+          }
+        }
+        if (tooClose) continue;
+        posts.push({ x, z });
+        obstacles.push({ x, z, radius: POST_R });
       }
     }
   }
@@ -589,33 +635,50 @@ function buildProps(ctx: BiomeContext): void {
     volcanoGroup.add(caveGroup);
     // Tunnel roof — a half-pipe laid along the inlet so the boat
     // drives INTO the mountain, under rock, into the dark. DoubleSide
-    // so the interior reads as cave walls from inside.
-    const tunnelGeo = new THREE.CylinderGeometry(1.9, 1.9, 2.4, 12, 1, true, 0, Math.PI);
+    // so the interior reads as cave walls from inside. Its radius
+    // tracks CHANNEL_HALF_W so the pipe meets the carved rock walls
+    // rather than floating inside them, and it runs long enough that
+    // SWALLOW_ALONG sits a good metre back under the roof.
+    const tunnelGeo = new THREE.CylinderGeometry(
+      CHANNEL_HALF_W,
+      CHANNEL_HALF_W,
+      3.2,
+      14,
+      1,
+      true,
+      0,
+      Math.PI
+    );
     tunnelGeo.rotateZ(Math.PI / 2);
     tunnelGeo.rotateY(Math.PI / 2);
     const tunnel = new THREE.Mesh(
       tunnelGeo,
       new THREE.MeshStandardMaterial({ color: 0x2e241c, roughness: 1, side: THREE.DoubleSide })
     );
-    tunnel.position.set(0, 0.1, -0.55);
+    tunnel.position.set(0, 0.1, -0.6);
     tunnel.castShadow = true;
     caveGroup.add(tunnel);
     // Black back wall deep inside — the "bottomless dark" the boat
-    // disappears toward.
+    // disappears toward. Sits at the far end of the pipe, right about
+    // where the carve blends back into solid rock.
     const hole = new THREE.Mesh(
-      new THREE.CircleGeometry(1.85, 20, 0, Math.PI),
+      new THREE.CircleGeometry(CHANNEL_HALF_W - 0.05, 20, 0, Math.PI),
       new THREE.MeshBasicMaterial({ color: 0x0a0806, side: THREE.DoubleSide })
     );
-    hole.position.set(0, 0.1, -1.7);
+    hole.position.set(0, 0.1, -2.15);
     caveGroup.add(hole);
-    // Rocky arch framing the tunnel entrance.
+    // Rocky arch framing the tunnel entrance, parked on the pipe's
+    // outer lip so it reads as the mouth you steer through.
     const archMat = new THREE.MeshStandardMaterial({ color: 0x5c4a3c, roughness: 1 });
-    const arch = new THREE.Mesh(new THREE.TorusGeometry(1.7, 0.38, 8, 14, Math.PI), archMat);
-    arch.position.set(0, 0.1, 0.68);
+    const arch = new THREE.Mesh(
+      new THREE.TorusGeometry(CHANNEL_HALF_W - 0.1, 0.42, 8, 16, Math.PI),
+      archMat
+    );
+    arch.position.set(0, 0.1, 0.95);
     caveGroup.add(arch);
     // Warm glow from deep inside, spilling toward the entrance.
     const caveLight = new THREE.PointLight(0xff6a2a, 1.1, 10);
-    caveLight.position.set(0, 0.8, -1.0);
+    caveLight.position.set(0, 0.8, -1.2);
     caveGroup.add(caveLight);
     tick.push((_dt, t) => {
       caveLight.intensity = 0.9 + Math.sin(t * 3.1) * 0.25 + Math.sin(t * 7.3) * 0.12;

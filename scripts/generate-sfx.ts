@@ -107,6 +107,75 @@ const SFX: Spec[] = [
     durationSeconds: 0.9,
     promptInfluence: 0.45,
   },
+  // ── Volcano eruption (ocean + jungle biomes) ──────────────────────
+  // Three-beat sequence: the rumble plays the moment the boat is
+  // swallowed by the sea cave, then one of the two booms fires as the
+  // avatar is launched. Two boom variants so repeat eruptions — and a
+  // kid WILL do this twenty times in a row — don't feel canned.
+  {
+    id: "volcano-rumble",
+    prompt:
+      "Deep low earth rumble building up before a volcano erupts. " +
+      "Sub-bass ground shaking growl, gravel trembling, swelling " +
+      "steadily louder. Adventurous and exciting, NOT scary, no " +
+      "screaming, no music, no voice.",
+    // The eruption state machine holds `rumbling` for 1.0s; a slightly
+    // longer clip lets the tail bleed under the boom instead of
+    // cutting off dead.
+    durationSeconds: 1.6,
+    promptInfluence: 0.5,
+  },
+  {
+    id: "volcano-boom-1",
+    prompt:
+      "Big cartoon volcano erupting. Huge deep KABOOM explosion of " +
+      "lava, then a whooshing blast of air rushing upward and " +
+      "bubbling molten rock spraying out. Playful adventure-movie " +
+      "energy, NOT a bomb or gunshot, no music, no voice.",
+    durationSeconds: 2.5,
+    promptInfluence: 0.45,
+  },
+  {
+    id: "volcano-boom-2",
+    prompt:
+      "Volcano eruption blast. Thick low BOOM followed by a long " +
+      "rising whoosh as something is launched high into the sky, " +
+      "with crackling lava spatter falling back down. Fun and " +
+      "cartoony, NOT scary or violent, no music, no voice.",
+    durationSeconds: 2.5,
+    promptInfluence: 0.45,
+  },
+  // ── Water splash (ocean biome) ────────────────────────────────────
+  // Fires when the launched avatar lands back in the sea. Three
+  // variants picked at random per splashdown.
+  {
+    id: "splash-1",
+    prompt:
+      "Big cannonball splash into water. Heavy KERPLOOSH as " +
+      "something lands hard in the sea, water bursting upward then " +
+      "droplets pattering back down. Fun, bright, cartoony. No " +
+      "music, no voice.",
+    durationSeconds: 1.3,
+    promptInfluence: 0.45,
+  },
+  {
+    id: "splash-2",
+    prompt:
+      "Playful splash landing in the ocean. A deep gloopy plunge " +
+      "into water followed by fizzing bubbles and a light spray of " +
+      "droplets. Warm, cheerful, kid-friendly. No music, no voice.",
+    durationSeconds: 1.3,
+    promptInfluence: 0.45,
+  },
+  {
+    id: "splash-3",
+    prompt:
+      "Cartoon water splash. Quick sploosh plop into the sea with a " +
+      "bubbly gurgle underneath and sparkling droplet patter. " +
+      "Bouncy and light-hearted. No music, no voice.",
+    durationSeconds: 1.2,
+    promptInfluence: 0.45,
+  },
 ];
 
 async function exists(p: string): Promise<boolean> {

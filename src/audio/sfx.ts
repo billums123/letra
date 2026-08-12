@@ -38,6 +38,56 @@ export function setSfxGain(v: number): void {
   g.linearRampToValueAtTime(Math.max(target, 0.0001), c.currentTime + 0.05);
 }
 
+// ─── Recorded clip pools ─────────────────────────────────────────────
+// Several cues sound better as a recorded ElevenLabs one-shot than as
+// a synth, but they must never go silent if the asset is missing —
+// before `npm run sfx:generate` has been run, on the very first play
+// while the buffers are still decoding, or offline. makeClipPool owns
+// the lazy fetch + decode and returns a `play` that reports whether it
+// actually made a sound, so every caller can fall through to its
+// procedural version.
+//
+// Pools pick a random clip per play and jitter the playback rate, so a
+// kid triggering the same event twenty times in a row (they will)
+// doesn't hear twenty identical files.
+type ClipPool = { play(gain: number, jitter?: number): boolean };
+
+function makeClipPool(urls: readonly string[]): ClipPool {
+  const buffers: (AudioBuffer | null)[] = urls.map(() => null);
+  let loadStarted = false;
+  return {
+    play(gain, jitter = 0.08) {
+      const c = getCtx();
+      if (!c) return false;
+      if (!loadStarted) {
+        loadStarted = true;
+        urls.forEach((url, i) => {
+          void (async () => {
+            try {
+              const res = await fetch(url);
+              if (!res.ok) return;
+              buffers[i] = await c.decodeAudioData(await res.arrayBuffer());
+            } catch {
+              /* swallow — the procedural fallback already covers this */
+            }
+          })();
+        });
+      }
+      const ready: AudioBuffer[] = [];
+      for (const b of buffers) if (b) ready.push(b);
+      if (ready.length === 0) return false;
+      const src = c.createBufferSource();
+      src.buffer = ready[(Math.random() * ready.length) | 0];
+      src.playbackRate.value = 1 - jitter + Math.random() * jitter * 2;
+      const g = c.createGain();
+      g.gain.value = gain;
+      src.connect(g).connect(getSfxBus(c));
+      src.start();
+      return true;
+    },
+  };
+}
+
 // Lightweight tone helper. `wave` defaults to triangle which sounds friendly
 // (no harsh harmonics like sawtooth, no buzz like square).
 function tone(
@@ -501,34 +551,12 @@ export function playFireworkLaunch() {
   }
 }
 
-// Pre-recorded burst clips (ElevenLabs). We rotate through them at
-// random so consecutive fireworks don't all sound identical. The
-// fetch + decode is lazy and async — the very first burst before the
-// buffers finish loading falls through to the procedural synth so
-// there's never silence.
-const BURST_CLIP_URLS = [
+// Pre-recorded burst clips (ElevenLabs).
+const burstClips = makeClipPool([
   "/audio/sfx/firework-burst-1.mp3",
   "/audio/sfx/firework-burst-2.ogg",
   "/audio/sfx/firework-burst-3.ogg",
-];
-const burstBuffers: (AudioBuffer | null)[] = BURST_CLIP_URLS.map(() => null);
-let burstLoadStarted = false;
-function ensureBurstBuffers(c: AudioContext) {
-  if (burstLoadStarted) return;
-  burstLoadStarted = true;
-  for (let i = 0; i < BURST_CLIP_URLS.length; i++) {
-    void (async () => {
-      try {
-        const res = await fetch(BURST_CLIP_URLS[i]);
-        if (!res.ok) return;
-        const arr = await res.arrayBuffer();
-        burstBuffers[i] = await c.decodeAudioData(arr);
-      } catch {
-        /* swallow — procedural fallback already covers this case */
-      }
-    })();
-  }
-}
+]);
 
 // Aerial burst — uses the pre-recorded ElevenLabs clips when their
 // buffers have finished decoding; otherwise renders the procedural
@@ -537,24 +565,8 @@ function ensureBurstBuffers(c: AudioContext) {
 export function playFireworkBurst() {
   const c = getCtx();
   if (!c) return;
-  const dest = getFxBus(c);
-  ensureBurstBuffers(c);
-  const ready: AudioBuffer[] = [];
-  for (const b of burstBuffers) if (b) ready.push(b);
-  if (ready.length > 0) {
-    const buf = ready[(Math.random() * ready.length) | 0];
-    const src = c.createBufferSource();
-    src.buffer = buf;
-    // Slight pitch jitter (±2 semitones) keeps consecutive plays of
-    // the same clip from sounding mechanically identical.
-    src.playbackRate.value = 0.92 + Math.random() * 0.16;
-    const g = c.createGain();
-    g.gain.value = 0.85;
-    src.connect(g).connect(dest);
-    src.start();
-    return;
-  }
-  playProceduralBurst(c, dest);
+  if (burstClips.play(0.85)) return;
+  playProceduralBurst(c, getFxBus(c));
 }
 
 // Procedural KABOOM synth. Used as the fallback when the recorded
@@ -663,52 +675,18 @@ function playProceduralBurst(c: AudioContext, dest: AudioNode) {
 // a random pick + pitch jitter so consecutive contacts don't feel
 // mechanical. Falls back to a procedural triangle-wave chirp if the
 // clips haven't loaded yet.
-const ALIEN_WAVE_URLS = [
+const alienWaveClips = makeClipPool([
   "/audio/sfx/alien-1.mp3",
   "/audio/sfx/alien-2.mp3",
   "/audio/sfx/alien-3.mp3",
   "/audio/sfx/alien-4.mp3",
-];
-const alienWaveBuffers: (AudioBuffer | null)[] = ALIEN_WAVE_URLS.map(() => null);
-let alienWaveLoadStarted = false;
-function ensureAlienWaveBuffers(c: AudioContext) {
-  if (alienWaveLoadStarted) return;
-  alienWaveLoadStarted = true;
-  for (let i = 0; i < ALIEN_WAVE_URLS.length; i++) {
-    void (async () => {
-      try {
-        const res = await fetch(ALIEN_WAVE_URLS[i]);
-        if (!res.ok) return;
-        const arr = await res.arrayBuffer();
-        alienWaveBuffers[i] = await c.decodeAudioData(arr);
-      } catch {
-        /* swallow — procedural fallback already covers this case */
-      }
-    })();
-  }
-}
+]);
 
 export function playAlienWave() {
   const c = getCtx();
   if (!c) return;
-  const dest = getFxBus(c);
-  ensureAlienWaveBuffers(c);
-  const ready: AudioBuffer[] = [];
-  for (const b of alienWaveBuffers) if (b) ready.push(b);
-  if (ready.length > 0) {
-    const buf = ready[(Math.random() * ready.length) | 0];
-    const src = c.createBufferSource();
-    src.buffer = buf;
-    // Pitch jitter so consecutive plays of the same clip don't feel
-    // mechanically identical (±2 semitones).
-    src.playbackRate.value = 0.92 + Math.random() * 0.16;
-    const g = c.createGain();
-    g.gain.value = 0.7;
-    src.connect(g).connect(dest);
-    src.start();
-    return;
-  }
-  playProceduralAlienWave(c, dest);
+  if (alienWaveClips.play(0.7)) return;
+  playProceduralAlienWave(c, getFxBus(c));
 }
 
 // Procedural fallback — 2-3 short triangle chirps with playful pitch
@@ -750,10 +728,18 @@ export function playWoo() {
   tone(N.G6, 0.55, 0.35, 0.1, "sine");
 }
 
-// ─── Volcano cues (jungle biome) ─────────────────────────────────────────
+// ─── Volcano cues (ocean + jungle biomes) ────────────────────────────────
 // Three-part eruption soundscape: a building rumble while the ground
 // shakes, a KABOOM + rising whoosh at launch, and small lava pops as
-// bombs rain down. All procedural — no assets to fetch.
+// bombs rain down. The rumble and the boom prefer recorded ElevenLabs
+// clips (see scripts/generate-sfx.ts) and fall back to the procedural
+// synths below; the lava pops stay procedural because they fire in
+// rapid bursts and want zero latency.
+const volcanoRumbleClips = makeClipPool(["/audio/sfx/volcano-rumble.mp3"]);
+const volcanoBoomClips = makeClipPool([
+  "/audio/sfx/volcano-boom-1.mp3",
+  "/audio/sfx/volcano-boom-2.mp3",
+]);
 
 // Low ground-shake rumble that swells over ~0.9s. Played the moment
 // the kid drives into the crater, underneath the visual shake, so the
@@ -761,6 +747,9 @@ export function playWoo() {
 export function playVolcanoRumble() {
   const c = getCtx();
   if (!c) return;
+  // Barely any jitter — the rumble is timed against the eruption state
+  // machine, so stretching it would drift off the boom.
+  if (volcanoRumbleClips.play(0.9, 0.03)) return;
   const dest = getSfxBus(c);
   const t0 = c.currentTime;
   // Deep noise bed, low-passed hard and swelling in.
@@ -799,6 +788,7 @@ export function playVolcanoRumble() {
 export function playVolcanoBoom() {
   const c = getCtx();
   if (!c) return;
+  if (volcanoBoomClips.play(0.95)) return;
   const dest = getSfxBus(c);
   const t0 = c.currentTime;
   // 1 — sub-bass punch
@@ -895,11 +885,19 @@ export function playLavaPop() {
 }
 
 // Water splash — the boat (or a launched avatar) plunging into the
-// sea. Noise burst through a falling lowpass + a quick "bloop" pitch
+// sea. Prefers one of the recorded splashes; the procedural fallback
+// is a noise burst through a falling lowpass + a quick "bloop" pitch
 // drop underneath, then a lighter secondary patter for the droplets.
+const splashClips = makeClipPool([
+  "/audio/sfx/splash-1.mp3",
+  "/audio/sfx/splash-2.mp3",
+  "/audio/sfx/splash-3.mp3",
+]);
+
 export function playSplash() {
   const c = getCtx();
   if (!c) return;
+  if (splashClips.play(0.9)) return;
   const dest = getSfxBus(c);
   const t0 = c.currentTime;
   // Main splash body — bandpassed noise sweeping downward.
