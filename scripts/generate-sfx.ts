@@ -186,6 +186,39 @@ const SFX: Spec[] = [
     durationSeconds: 1.2,
     promptInfluence: 0.45,
   },
+  // ── Little splashes ───────────────────────────────────────────────
+  // A much lighter set for the small, frequent water events — fish
+  // arcing out and dropping back in, lava bombs hitting the sea. The
+  // big splash-N clips above are far too heavy for these: they fire
+  // every few seconds, so they have to stay small enough to sit under
+  // the music rather than punch through it.
+  {
+    id: "splash-small-1",
+    prompt:
+      "A small fish jumping out of water and plopping back in. Light " +
+      "quick 'ploop' with a couple of tiny droplet plips after it. " +
+      "Gentle, cute, close-up, quiet. No music, no voice.",
+    durationSeconds: 0.8,
+    promptInfluence: 0.45,
+  },
+  {
+    id: "splash-small-2",
+    prompt:
+      "Tiny water plop, like a pebble dropping into a calm pond. Soft " +
+      "bloop with a short bubbly ripple tail. Delicate and quiet, " +
+      "close-up. No music, no voice.",
+    durationSeconds: 0.7,
+    promptInfluence: 0.45,
+  },
+  {
+    id: "splash-small-3",
+    prompt:
+      "Light playful water plip. A small quick splish as something " +
+      "little breaks the surface of the sea, with a faint fizz of " +
+      "bubbles. Soft, gentle, kid-friendly. No music, no voice.",
+    durationSeconds: 0.7,
+    promptInfluence: 0.45,
+  },
 ];
 
 async function exists(p: string): Promise<boolean> {

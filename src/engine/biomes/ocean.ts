@@ -3,7 +3,14 @@ import type { Biome, BiomeContext } from "./types";
 import { findOpenSpot, freshSeed, mulberry32, makeCloud } from "../world";
 import { makePalmTree } from "./jungle";
 import { rollTimeOfDay, type TimeOfDay } from "./timeOfDay";
-import { playVolcanoRumble, playVolcanoBoom, playLavaPop, playSplash, playWoo } from "../../audio/sfx";
+import {
+  playVolcanoRumble,
+  playVolcanoBoom,
+  playLavaPop,
+  playSplash,
+  playSmallSplash,
+  playWoo,
+} from "../../audio/sfx";
 
 // Ocean biome — the kid putters around open water in a tugboat.
 // Faceted low-poly waves undulate for real (the terrain sampler rides
@@ -1295,7 +1302,10 @@ function buildProps(ctx: BiomeContext): void {
         b.mesh.visible = false;
         if (Math.hypot(bx - ISLAND.x, bz - ISLAND.z) > CRATER_RIM_R) {
           spawnFoam(bx, bz, 0.9 + Math.random() * 0.5);
-          playLavaPop();
+          // A bomb that reaches open water splashes; one that lands on
+          // the island's rock or beach sizzles.
+          if (islandHeight(bx, bz) + sandHeight(bx, bz) < 0.05) playSmallSplash();
+          else playLavaPop();
         }
       }
     }
@@ -1402,6 +1412,7 @@ function buildProps(ctx: BiomeContext): void {
           peak = 1.2 + fishRand() * 1.0;
           fish.group.visible = true;
           spawnFoam(from.x, from.z, 0.5);
+          playSmallSplash();
         }
         return;
       }
@@ -1419,6 +1430,7 @@ function buildProps(ctx: BiomeContext): void {
         timer = 1.5 + fishRand() * 3.5;
         fish.group.visible = false;
         spawnFoam(to.x, to.z, 0.55);
+        playSmallSplash();
         hx = to.x;
         hz = to.z;
       }

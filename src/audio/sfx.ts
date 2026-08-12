@@ -894,6 +894,59 @@ const splashClips = makeClipPool([
   "/audio/sfx/splash-3.mp3",
 ]);
 
+// The little cousin: fish breaking the surface, lava bombs hitting the
+// sea — small water events that fire every few seconds. Deliberately
+// quiet and throttled; the big splash above is a payoff sound and
+// would trample the music if it played this often.
+const smallSplashClips = makeClipPool([
+  "/audio/sfx/splash-small-1.mp3",
+  "/audio/sfx/splash-small-2.mp3",
+  "/audio/sfx/splash-small-3.mp3",
+]);
+let lastSmallSplashAt = 0;
+
+export function playSmallSplash() {
+  const now = performance.now();
+  // Six fish plus a bomb fountain can all land in the same handful of
+  // frames; without this they stack into a wash.
+  if (now - lastSmallSplashAt < 110) return;
+  lastSmallSplashAt = now;
+  const c = getCtx();
+  if (!c) return;
+  if (smallSplashClips.play(0.42, 0.12)) return;
+  // Procedural fallback — one short noise chirp through a falling
+  // bandpass plus a tiny bloop. A miniature of playSplash below.
+  const dest = getSfxBus(c);
+  const t0 = c.currentTime;
+  {
+    const n = startNoise(c, t0, t0 + 0.22);
+    const bp = c.createBiquadFilter();
+    bp.type = "bandpass";
+    bp.frequency.setValueAtTime(1800 + Math.random() * 700, t0);
+    bp.frequency.exponentialRampToValueAtTime(600, t0 + 0.18);
+    bp.Q.value = 0.9;
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(0.16, t0 + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.2);
+    n.connect(bp).connect(g).connect(dest);
+  }
+  {
+    const osc = c.createOscillator();
+    osc.type = "sine";
+    const f = 420 + Math.random() * 220;
+    osc.frequency.setValueAtTime(f, t0);
+    osc.frequency.exponentialRampToValueAtTime(f * 0.45, t0 + 0.13);
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(0.11, t0 + 0.008);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.16);
+    osc.connect(g).connect(dest);
+    osc.start(t0);
+    osc.stop(t0 + 0.2);
+  }
+}
+
 export function playSplash() {
   const c = getCtx();
   if (!c) return;
