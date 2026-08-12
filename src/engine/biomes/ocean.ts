@@ -185,6 +185,13 @@ const COOLDOWN_SECONDS = 3.5;
 // mean sea level. Kept small deliberately: the boat should stop in
 // real water at the dome's edge, not ride a length up the wet sand.
 const SHORE_H = 0.03;
+// How far the avatar's nose reaches beyond its collision circle. The
+// engine models the avatar as a point with PLAYER_RADIUS = 0.55, but
+// the tugboat's bow sticks out to z = 1.70, so stopping its *centre*
+// at the shoreline drove a metre of hull into the sand. Landmass
+// colliders are padded by the difference so the bow — not the centre —
+// is what comes to rest at the water's edge.
+const AVATAR_NOSE = 1.7 - 0.55;
 const SAND_ISLANDS = [
   { x: 18, z: 10, r: 5.0, h: 0.9 },
   { x: -6, z: 21, r: 4.0, h: 0.75 },
@@ -686,7 +693,17 @@ function buildProps(ctx: BiomeContext): void {
         }
         if (tooClose) continue;
         posts.push({ x, z });
-        obstacles.push({ x, z, radius: POST_R });
+        // Pad the fence by the avatar's nose so the bow stops at the
+        // beach instead of burying itself in the flank — except along
+        // the cave channel, where padding would close the corridor the
+        // boat has to fit through. The channel's own walls are low wet
+        // sand, so a bow nudging them costs nothing.
+        const lx = x - ISLAND.x;
+        const lz = z - ISLAND.z;
+        const along = lx * MOUTH_DIR.x + lz * MOUTH_DIR.z;
+        const perp = Math.abs(lx * -MOUTH_DIR.z + lz * MOUTH_DIR.x);
+        const inCorridor = along > CAVE_WALL_ALONG - 0.5 && perp < CHANNEL_FADE_W;
+        obstacles.push({ x, z, radius: inCorridor ? POST_R : POST_R + AVATAR_NOSE });
       }
     }
   }
@@ -1334,8 +1351,8 @@ function buildProps(ctx: BiomeContext): void {
         break;
       }
     }
-    obstacles.push({ x: s.x, z: s.z, radius: shore });
-    obstacles.push({ x: s.x, z: s.z, radius: s.r + 1.2, solid: false });
+    obstacles.push({ x: s.x, z: s.z, radius: shore + AVATAR_NOSE });
+    obstacles.push({ x: s.x, z: s.z, radius: s.r + 1.2 + AVATAR_NOSE, solid: false });
     // One palm near the top of each island. No obstacle of its own —
     // the shoreline disc already keeps the boat well clear of it.
     const palm = makePalmTree(palmRand, 0.75 + palmRand() * 0.3);
