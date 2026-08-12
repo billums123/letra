@@ -5,8 +5,18 @@
 //   npm run sfx:list                — print what would be generated
 //
 // Outputs land in public/audio/sfx/<id>.mp3. The runtime loads each
-// clip into an AudioBuffer the first time it plays — see
-// src/audio/sfxClips.ts.
+// clip into an AudioBuffer the first time it plays — see the clip
+// pools in src/audio/sfx.ts.
+//
+// HEADS UP: the firework-* and alien-wave-* ids below no longer match
+// what the game loads. Those cues were later replaced by hand-picked
+// files (firework-burst-1..3, alien-1..4), so generating them writes
+// clips nothing reads. The specs are kept for reference — if you run
+// this, delete the unreferenced outputs afterwards rather than
+// shipping dead weight in dist/ (mp3s aren't precached — they're
+// runtime-cached on first hit — so nothing ever fetches these).
+// Cross-check what the runtime actually loads against:
+//   grep -o '/audio/sfx/[a-z0-9-]*\.\(mp3\|ogg\)' src/audio/sfx.ts
 
 import { config as loadEnv } from "dotenv";
 import { promises as fs } from "node:fs";

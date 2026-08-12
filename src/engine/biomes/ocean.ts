@@ -85,6 +85,14 @@ const OCEAN_MOODS: Record<
 
 const OCEAN_POOL = ["ocean-dawn", "ocean-day", "ocean-sunset"] as const;
 
+// Amplitudes of the three travelling sines that make up the wave
+// field (see waveHeight). Summed they give the highest crest — and,
+// mirrored, the deepest trough — the sea can ever reach, which is the
+// yardstick for "is this bit of ground under water or not": the cave
+// dredge is measured against it, and so is every island's shoreline.
+const WAVE_AMPS = [0.085, 0.075, 0.06] as const;
+const WAVE_CREST = WAVE_AMPS[0] + WAVE_AMPS[1] + WAVE_AMPS[2];
+
 // ── Volcano island constants ────────────────────────────────────────
 const ISLAND = { x: -16, z: -12 };
 const ISLAND_OUTER_R = 10;
@@ -122,7 +130,7 @@ const MOUTH_TRIGGER_R = 2.2;
 const CHANNEL_HALF_W = 2.15;
 const CHANNEL_FADE_W = 3.8;
 // The inlet is dredged as well as carved: its floor is cut this far
-// below sea level. The wave troughs reach about -0.22, so with the
+// below sea level. The wave troughs reach -WAVE_CREST, so with the
 // floor sitting at exactly y=0 the sea visibly drained out of the cave
 // mouth on every swell and the boat looked beached on its way in.
 // Dredging keeps water over the channel at all times.
@@ -132,7 +140,8 @@ const CHANNEL_FADE_W = 3.8;
 // over-water test reads — still bottoms out at 0, so the boat goes on
 // floating at the wave surface all the way into the dark instead of
 // sliding down into the trench.
-const CHANNEL_DREDGE = 0.7;
+const CHANNEL_MIN_DEPTH = 0.48; // water left over the floor at low trough
+const CHANNEL_DREDGE = WAVE_CREST + CHANNEL_MIN_DEPTH;
 function channelMask(lx: number, lz: number): number {
   const along = lx * MOUTH_DIR.x + lz * MOUTH_DIR.z;
   const wallBlend = smoothstep01((along - (CAVE_WALL_ALONG - 0.6)) / 1.2);
@@ -146,10 +155,32 @@ function islandHeight(x: number, z: number): number {
   const lz = z - ISLAND.z;
   return volcanoProfile(Math.hypot(lx, lz)) * channelMask(lx, lz);
 }
+
+// The cone's *rendered* rock surface, in island-local coords: the
+// carved profile, minus the dredge, plus the rocky jitter. Both the
+// cone mesh and anything that has to lie ON it (the lava flows) read
+// this one function, so they can never drift apart.
+function coneSurfaceY(lx: number, lz: number): number {
+  const d = Math.hypot(lx, lz);
+  const mask = channelMask(lx, lz);
+  const masked = volcanoProfile(d) * mask;
+  const dredge = CHANNEL_DREDGE * (1 - mask);
+  // Jitter everywhere except the crater floor and the carved channel
+  // floor, both of which should stay smooth.
+  if (d > CRATER_FLOOR_R + 0.3 && masked > 0.25) {
+    const n = Math.sin(lx * 4.7 + lz * 3.9) * Math.cos(lx * 2.1 - lz * 5.3);
+    return masked + n * 0.16 * mask - dredge;
+  }
+  return masked - dredge;
+}
 const RUMBLE_SECONDS = 1.0;
 const COOLDOWN_SECONDS = 3.5;
 
-// ── Sandy islands (letters can land on these; palms live here) ─────
+// ── Sandy islands (scenery; palms live here) ───────────────────────
+// The boat is held offshore wherever the sand stands this far above
+// mean sea level. Kept small deliberately: the boat should stop in
+// real water at the dome's edge, not ride a length up the wet sand.
+const SHORE_H = 0.03;
 const SAND_ISLANDS = [
   { x: 18, z: 10, r: 5.0, h: 0.9 },
   { x: -6, z: 21, r: 4.0, h: 0.75 },
@@ -232,9 +263,9 @@ function buildProps(ctx: BiomeContext): void {
   let waveT = 0;
   const waveHeight = (x: number, z: number): number => {
     return (
-      Math.sin(x * 0.55 + waveT * 1.4) * 0.085 +
-      Math.sin(z * 0.42 - waveT * 1.1 + 1.7) * 0.075 +
-      Math.sin((x + z) * 0.3 + waveT * 0.8 + 4.0) * 0.06
+      Math.sin(x * 0.55 + waveT * 1.4) * WAVE_AMPS[0] +
+      Math.sin(z * 0.42 - waveT * 1.1 + 1.7) * WAVE_AMPS[1] +
+      Math.sin((x + z) * 0.3 + waveT * 0.8 + 4.0) * WAVE_AMPS[2]
     );
   };
   // Waves flatten as ground rises out of the sea (beaches, volcano).
@@ -537,14 +568,7 @@ function buildProps(ctx: BiomeContext): void {
       // the carved channel, tapering to nothing in the feather band
       // and zero everywhere the mask leaves the rock alone.
       const dredge = CHANNEL_DREDGE * (1 - mask);
-      // Rocky jitter everywhere except the crater floor and the
-      // carved channel floor, both of which should stay smooth.
-      if (d > CRATER_FLOOR_R + 0.3 && masked > 0.25) {
-        const n = Math.sin(x * 4.7 + z * 3.9) * Math.cos(x * 2.1 - z * 5.3);
-        pos.setY(i, masked + n * 0.16 * mask - dredge);
-      } else {
-        pos.setY(i, masked - dredge);
-      }
+      pos.setY(i, coneSurfaceY(x, z));
       const h = masked / RIM_H;
       if (d < CRATER_RIM_R && mask > 0.5) {
         tmp.copy(cScorch).lerp(cGlow, Math.min(1, Math.max(0, 1.1 - d / CRATER_RIM_R)) * 0.55);
@@ -726,6 +750,201 @@ function buildProps(ctx: BiomeContext): void {
   lavaLight.position.y = FLOOR_H + 1.2;
   volcanoGroup.add(lavaLight);
 
+  // ── Lava flows down the flanks ───────────────────────────────────
+  // Glowing ribbons that spill over the crater rim and run all the way
+  // to the waterline. Each one snakes a little as it descends and
+  // hugs the rock via coneSurfaceY, so it lies on the mountain rather
+  // than floating over it. The glow crawls downhill and the whole set
+  // flares while the volcano is erupting.
+  //
+  // These live on volcanoGroup, so they shake with the mountain during
+  // the rumble for free.
+  // Ramps 0 → 1 while the volcano is erupting; the flows read it to
+  // brighten and speed up. Driven by the state machine further down.
+  let lavaSurge = 0;
+  const lavaFlows: {
+    geo: THREE.BufferGeometry;
+    colors: Float32Array;
+    steps: number;
+    // 0..1 down the flow, per vertex pair — drives the travelling glow
+    ks: number[];
+  }[] = [];
+  // Where each flow meets the sea, in world coords — steam rises here.
+  const lavaFeet: { x: number; z: number }[] = [];
+  {
+    const FLOW_COUNT = 6;
+    // Radians of mountain either side of the cave mouth to leave bare —
+    // a lava river pouring down the tunnel the kid is about to sail
+    // into reads as a wall, not a doorway. (It would also be dropped
+    // outright: on the mouth bearing the carved channel is already at
+    // the waterline two steps below the rim, so the flow has nowhere
+    // to run.)
+    const MOUTH_CLEAR = 1.15;
+    const mouthAngle = Math.atan2(MOUTH_DIR.z, MOUTH_DIR.x);
+    const flowRand = mulberry32(freshSeed());
+    // Fan the flows evenly across the arc that ISN'T the mouth. Slot
+    // jitter is capped at half a slot, so no flow can ever wander into
+    // the cleared wedge.
+    const span = Math.PI * 2 - MOUTH_CLEAR * 2;
+    const slot = span / FLOW_COUNT;
+    for (let f = 0; f < FLOW_COUNT; f++) {
+      const bearing =
+        mouthAngle + MOUTH_CLEAR + (f + 0.5) * slot + (flowRand() - 0.5) * slot * 0.5;
+      const wanderAmp = 0.12 + flowRand() * 0.16;
+      const wanderFreq = 1.4 + flowRand() * 1.6;
+      const wanderPhase = flowRand() * Math.PI * 2;
+
+      const pts: { x: number; z: number; y: number; k: number }[] = [];
+      const rTop = CRATER_RIM_R - 0.25;
+      const rBottom = ISLAND_OUTER_R;
+      for (let r = rTop; r <= rBottom; r += 0.35) {
+        const k = (r - rTop) / (rBottom - rTop);
+        const a = bearing + Math.sin(k * wanderFreq * Math.PI + wanderPhase) * wanderAmp;
+        const x = Math.cos(a) * r;
+        const z = Math.sin(a) * r;
+        const y = coneSurfaceY(x, z);
+        pts.push({ x, z, y, k });
+        // Stop at the waterline — the flow quenches in the sea.
+        if (y <= 0.02) break;
+      }
+      if (pts.length < 3) continue;
+
+      const steps = pts.length;
+      const positions = new Float32Array(steps * 2 * 3);
+      const colors = new Float32Array(steps * 2 * 3);
+      const ks: number[] = [];
+      for (let i = 0; i < steps; i++) {
+        const p = pts[i];
+        // Perpendicular to the direction of travel, in the XZ plane.
+        const nx = i < steps - 1 ? pts[i + 1].x - p.x : p.x - pts[i - 1].x;
+        const nz = i < steps - 1 ? pts[i + 1].z - p.z : p.z - pts[i - 1].z;
+        const nl = Math.hypot(nx, nz) || 1;
+        const px = -nz / nl;
+        const pz = nx / nl;
+        // Narrow at the vent, spreading into a lobe near the shore.
+        const w = 0.2 + p.k * 0.26;
+        // Lift just clear of the rock so it never z-fights the cone.
+        const y = p.y + 0.05;
+        for (const side of [-1, 1]) {
+          const vi = i * 2 + (side < 0 ? 0 : 1);
+          positions[vi * 3 + 0] = p.x + px * w * side;
+          positions[vi * 3 + 1] = y;
+          positions[vi * 3 + 2] = p.z + pz * w * side;
+        }
+        ks.push(p.k);
+      }
+      const idx: number[] = [];
+      for (let i = 0; i < steps - 1; i++) {
+        const a = i * 2;
+        idx.push(a, a + 1, a + 3, a, a + 3, a + 2);
+      }
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+      geo.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+      geo.setIndex(idx);
+      // Basic (unlit) so the lava reads as self-luminous at any time of
+      // day, the same trick the crater pool uses.
+      const mesh = new THREE.Mesh(
+        geo,
+        new THREE.MeshBasicMaterial({ vertexColors: true })
+      );
+      mesh.renderOrder = 1;
+      volcanoGroup.add(mesh);
+      lavaFlows.push({ geo, colors, steps, ks });
+      const foot = pts[pts.length - 1];
+      lavaFeet.push({ x: ISLAND.x + foot.x, z: ISLAND.z + foot.z });
+    }
+  }
+  // Steam where the flows quench in the sea — a small recycled set of
+  // puffs, one drifting up from a random flow foot every second or so.
+  {
+    const STEAM_COUNT = 8;
+    const puffs: { mesh: THREE.Mesh; age: number; life: number; drift: number }[] = [];
+    for (let i = 0; i < STEAM_COUNT; i++) {
+      const m = new THREE.Mesh(
+        new THREE.SphereGeometry(0.34, 8, 6),
+        new THREE.MeshBasicMaterial({
+          color: 0xeef2f4,
+          transparent: true,
+          opacity: 0,
+          depthWrite: false,
+        })
+      );
+      m.visible = false;
+      group.add(m);
+      puffs.push({ mesh: m, age: 0, life: 0, drift: 0 });
+    }
+    let next = 0;
+    let spawnIn = 0.4;
+    tick.push((dt) => {
+      if (lavaFeet.length > 0) {
+        spawnIn -= dt * (1 + lavaSurge * 3);
+        if (spawnIn <= 0) {
+          spawnIn = 0.7 + Math.random() * 0.9;
+          const foot = lavaFeet[(Math.random() * lavaFeet.length) | 0];
+          const p = puffs[next];
+          next = (next + 1) % STEAM_COUNT;
+          p.age = 0;
+          p.life = 1.6 + Math.random() * 1.0;
+          p.drift = Math.random() * Math.PI * 2;
+          p.mesh.visible = true;
+          p.mesh.position.set(
+            foot.x + (Math.random() - 0.5) * 0.5,
+            0.1,
+            foot.z + (Math.random() - 0.5) * 0.5
+          );
+        }
+      }
+      for (const p of puffs) {
+        if (!p.mesh.visible) continue;
+        p.age += dt;
+        const k = p.age / p.life;
+        if (k >= 1) {
+          p.mesh.visible = false;
+          continue;
+        }
+        p.mesh.position.y = 0.1 + k * 2.2;
+        p.mesh.position.x += Math.cos(p.drift) * dt * 0.35;
+        p.mesh.position.z += Math.sin(p.drift) * dt * 0.35;
+        p.mesh.scale.setScalar(0.5 + k * 1.6);
+        (p.mesh.material as THREE.MeshBasicMaterial).opacity =
+          0.4 * Math.min(1, k / 0.2) * Math.max(0, 1 - (k - 0.2) / 0.8);
+      }
+    });
+  }
+  // Recolour the flows each frame: a hot band travels from vent to sea
+  // over the top of a cooling gradient, so the rock looks like it is
+  // moving even though the geometry never changes.
+  {
+    const cHot = new THREE.Color(0xffe07a);
+    const cMid = new THREE.Color(0xff7a1a);
+    const cCool = new THREE.Color(0x8f1e08);
+    const tmp = new THREE.Color();
+    tick.push((_dt, t) => {
+      // `surge` is set by the eruption state machine below.
+      const surge = lavaSurge;
+      const speed = 0.16 + surge * 0.5;
+      for (const flow of lavaFlows) {
+        for (let i = 0; i < flow.steps; i++) {
+          const k = flow.ks[i];
+          // Base gradient: incandescent at the vent, crusted by the sea.
+          tmp.copy(cMid).lerp(cCool, k * (0.85 - surge * 0.5));
+          // Travelling bright band — phase wraps, so pulses keep coming.
+          const phase = (t * speed - k + 4) % 1;
+          const band = Math.max(0, 1 - Math.abs(phase - 0.5) * 5);
+          tmp.lerp(cHot, band * (0.5 + surge * 0.45));
+          for (const side of [0, 1]) {
+            const vi = i * 2 + side;
+            flow.colors[vi * 3 + 0] = tmp.r;
+            flow.colors[vi * 3 + 1] = tmp.g;
+            flow.colors[vi * 3 + 2] = tmp.b;
+          }
+        }
+        flow.geo.attributes.color.needsUpdate = true;
+      }
+    });
+  }
+
   // Crater smoke — same recycled-puff column as the jungle volcano.
   const SMOKE_COUNT = 9;
   const smokePuffs: { mesh: THREE.Mesh; age: number; lifetime: number; drift: number }[] = [];
@@ -861,6 +1080,10 @@ function buildProps(ctx: BiomeContext): void {
     const pulse = 0.9 + Math.sin(t * 2.1) * 0.2 + Math.sin(t * 5.7) * 0.1;
     lavaMat.emissiveIntensity = pulse * (state === "rumbling" ? 1.8 : 1.1);
     lavaLight.intensity = pulse * (state === "rumbling" ? 2.6 : 1.4) + (fountainT > 0 ? 1.2 : 0);
+    // Flank flows swell as the mountain winds up and while it is
+    // throwing lava, then ease back to their idle glow.
+    const surgeTarget = state === "rumbling" || fountainT > 0 ? 1 : 0;
+    lavaSurge += (surgeTarget - lavaSurge) * Math.min(1, dt * (surgeTarget > lavaSurge ? 6 : 1.2));
 
     const smokeBoost = state === "rumbling" ? 2.2 : fountainT > 0 ? 3 : 1;
     for (const p of smokePuffs) {
@@ -1010,6 +1233,15 @@ function buildProps(ctx: BiomeContext): void {
   });
 
   // ── Sandy islands ────────────────────────────────────────────────
+  // Scenery only — a boat is a boat, so it stops at the beach instead
+  // of motoring up onto the sand. Each island gets two obstacles:
+  //
+  //   solid    a disc at the shoreline (where the sand climbs clear of
+  //            the wave crests), so the boat is held just offshore.
+  //   non-solid a wider disc that blocks *spawns* without pushing the
+  //            player, so letters and buoys never land on the sand —
+  //            or in the ring of shallows inside the solid disc —
+  //            where the kid could see them but never reach them.
   const islandSandMat = new THREE.MeshStandardMaterial({ color: 0xf0dca0, roughness: 0.95 });
   const palmRand = mulberry32(freshSeed());
   for (const s of SAND_ISLANDS) {
@@ -1020,7 +1252,19 @@ function buildProps(ctx: BiomeContext): void {
     dome.receiveShadow = true;
     dome.castShadow = false;
     group.add(dome);
-    // One palm near the top of each island.
+    // Shoreline radius: walk in from the dome's edge to the first point
+    // where the sand stands proud of the water.
+    let shore = s.r;
+    for (let d = s.r; d > 0.5; d -= 0.05) {
+      if (s.h * (1 - smoothstep01(d / s.r)) >= SHORE_H) {
+        shore = d;
+        break;
+      }
+    }
+    obstacles.push({ x: s.x, z: s.z, radius: shore });
+    obstacles.push({ x: s.x, z: s.z, radius: s.r + 1.2, solid: false });
+    // One palm near the top of each island. No obstacle of its own —
+    // the shoreline disc already keeps the boat well clear of it.
     const palm = makePalmTree(palmRand, 0.75 + palmRand() * 0.3);
     const offAng = palmRand() * Math.PI * 2;
     const px = s.x + Math.cos(offAng) * s.r * 0.3;
@@ -1028,7 +1272,6 @@ function buildProps(ctx: BiomeContext): void {
     palm.group.position.set(px, sandHeight(px, pz) - 0.05, pz);
     palm.group.rotation.y = palmRand() * Math.PI * 2;
     group.add(palm.group);
-    obstacles.push({ x: px, z: pz, radius: 0.55, onBump: palm.shake });
     tick.push(palm.update);
   }
 
@@ -1095,7 +1338,12 @@ function buildProps(ctx: BiomeContext): void {
   // ── Sea monster ──────────────────────────────────────────────────
   // One very friendly Nessie cruising a wide circle, dipping under
   // now and then. Non-solid — she's scenery with eyes.
-  {
+  //
+  // Switched off for now (the fish stay). The factory and the cruise
+  // logic below are kept intact so she can be flipped back on by
+  // setting SEA_MONSTERS to true.
+  const SEA_MONSTERS = false;
+  if (SEA_MONSTERS) {
     const nessie = makeSeaMonster();
     group.add(nessie.group);
     const orbitR = 30;
