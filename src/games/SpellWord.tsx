@@ -208,6 +208,9 @@ function SpellWordRound({
       const required = word.word[currentIndex.current];
       if (required === undefined) return;
       if (lastCollectPosRef.current) return; // gated above
+      // No collecting while the volcano launch is flying the avatar
+      // over the map — collection distance is XZ-only.
+      if (engine.inFlight) return;
       for (const candidate of lettersRef.current) {
         if (candidate.character.isCollected) continue;
         if (candidate.letter !== required) continue;

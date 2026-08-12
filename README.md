@@ -46,19 +46,26 @@ Plus:
 - **🔁 Replay button** — every prompt is one tap away of being repeated.
 - **Hint timer** — if a kid wanders without making progress, the voice
   gently re-orients them (10 s in Sound Match, 35 s in Spell-the-Word).
-- **🎵 Music** — original chiptune-style background tracks. A dedicated
-  menu theme plus a randomised pool that rolls a fresh track each time
-  the kid enters a game.
+- **🎵 Music** — original background tracks on a toy-instrument palette
+  (toy piano, marimba, ukulele, steel drum). A dedicated menu theme plus
+  a randomised pool that rolls a fresh track each time the kid enters a
+  game, and a 120 BPM party track the end-of-alphabet dance is
+  choreographed against.
 
 ### Personalisation
 
 Picked from the menu before each game:
 
-- **Avatar** — drive a chubby orange **kid**, a low-poly **car**, or a
-  hovering **rocket**. Same omnidirectional movement model on all three.
+- **Avatar** — drive a chubby orange **kid**, a low-poly **car**, a
+  hovering **rocket**, or a googly-eyed **tugboat**. Same omnidirectional
+  movement model on all four.
 - **Biome** — play in the sunny **Park** (trees, mushrooms, lily-pad pond,
-  butterflies) or on the **Moon** (low-grav bounding, planted flag, no
-  flora). New biomes drop in by adding one file in `src/engine/biomes/`.
+  butterflies), on the **Moon** (low-grav bounding, planted flag, no
+  flora), across the floating **Sky** islands, or out on the **Ocean**
+  (live swell the boat really rides, jumping fish, and a volcano island
+  with a sea cave — sail in and it erupts, launching you to a splashdown
+  somewhere across the water). New biomes drop in by adding one file in
+  `src/engine/biomes/`.
 - **Letter case** — UPPERCASE, lowercase, or Mixed for Spell-the-Word and
   Find-the-Alphabet. Mixed rolls per-letter in Find-the-Alphabet and
   per-word in Spell-the-Word.
@@ -135,6 +142,26 @@ calls.
 The voice defaults to *Rachel* (a warm, friendly American voice). Override
 with `ELEVENLABS_VOICE_ID` in `.env`.
 
+### Music and sound effects
+
+Two more one-shot generators, both incremental and both committed to the
+repo once generated, so a fresh clone never has to run them:
+
+```bash
+npm run music:generate   # background tracks  -> public/audio/music/
+npm run sfx:generate     # one-shot SFX       -> public/audio/sfx/
+```
+
+Both take `--force` to regenerate and `--list` to preview. The key needs
+the **`sound_generation`** permission for `sfx:generate` — a key scoped to
+text-to-speech only will 401 on every clip.
+
+Every recorded SFX has a procedural WebAudio fallback in `src/audio/sfx.ts`,
+so the game is never silent if a clip is missing or still decoding. Note
+that a few specs in `scripts/generate-sfx.ts` are historical and no longer
+match what the runtime loads — see the header comment there before
+committing whatever it writes.
+
 ### How the runtime decides
 
 On boot the audio player tries to fetch `public/audio/manifest.json` AND
@@ -193,8 +220,10 @@ Audio is **pre-baked** to static MP3s — credits are precious, and a
 - The Helvetiker glyph is a stylised geometric font. A future iteration could
   swap in a curvy schoolbook font (e.g. Andika or Sassoon) to better match the
   letter shapes most pre-K classrooms use.
-- Two biomes ship today (Park + Moon). The biome registry makes adding more
-  a one-file affair — forest, beach, and underwater are obvious next picks.
+- Four biomes ship today (Park, Moon, Sky, Ocean), with a Jungle built but
+  unlisted while its look gets more love. The biome registry makes adding
+  more a one-file affair — underwater and a snowfield are obvious next
+  picks.
 - Audio is American English only. ElevenLabs supports many languages — adding
   Spanish or Mandarin would mostly mean a re-run of the generation script
   with translated prompts.

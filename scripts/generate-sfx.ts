@@ -5,8 +5,18 @@
 //   npm run sfx:list                — print what would be generated
 //
 // Outputs land in public/audio/sfx/<id>.mp3. The runtime loads each
-// clip into an AudioBuffer the first time it plays — see
-// src/audio/sfxClips.ts.
+// clip into an AudioBuffer the first time it plays — see the clip
+// pools in src/audio/sfx.ts.
+//
+// HEADS UP: the firework-* and alien-wave-* ids below no longer match
+// what the game loads. Those cues were later replaced by hand-picked
+// files (firework-burst-1..3, alien-1..4), so generating them writes
+// clips nothing reads. The specs are kept for reference — if you run
+// this, delete the unreferenced outputs afterwards rather than
+// shipping dead weight in dist/ (mp3s aren't precached — they're
+// runtime-cached on first hit — so nothing ever fetches these).
+// Cross-check what the runtime actually loads against:
+//   grep -o '/audio/sfx/[a-z0-9-]*\.\(mp3\|ogg\)' src/audio/sfx.ts
 
 import { config as loadEnv } from "dotenv";
 import { promises as fs } from "node:fs";
@@ -105,6 +115,108 @@ const SFX: Spec[] = [
       "to see you. Cartoony, kid-friendly, warm and playful. No " +
       "words, no music, no scary sounds.",
     durationSeconds: 0.9,
+    promptInfluence: 0.45,
+  },
+  // ── Volcano eruption (ocean + jungle biomes) ──────────────────────
+  // Three-beat sequence: the rumble plays the moment the boat is
+  // swallowed by the sea cave, then one of the two booms fires as the
+  // avatar is launched. Two boom variants so repeat eruptions — and a
+  // kid WILL do this twenty times in a row — don't feel canned.
+  {
+    id: "volcano-rumble",
+    prompt:
+      "Deep low earth rumble building up before a volcano erupts. " +
+      "Sub-bass ground shaking growl, gravel trembling, swelling " +
+      "steadily louder. Adventurous and exciting, NOT scary, no " +
+      "screaming, no music, no voice.",
+    // The eruption state machine holds `rumbling` for 1.0s; a slightly
+    // longer clip lets the tail bleed under the boom instead of
+    // cutting off dead.
+    durationSeconds: 1.6,
+    promptInfluence: 0.5,
+  },
+  {
+    id: "volcano-boom-1",
+    prompt:
+      "Big cartoon volcano erupting. Huge deep KABOOM explosion of " +
+      "lava, then a whooshing blast of air rushing upward and " +
+      "bubbling molten rock spraying out. Playful adventure-movie " +
+      "energy, NOT a bomb or gunshot, no music, no voice.",
+    durationSeconds: 2.5,
+    promptInfluence: 0.45,
+  },
+  {
+    id: "volcano-boom-2",
+    prompt:
+      "Volcano eruption blast. Thick low BOOM followed by a long " +
+      "rising whoosh as something is launched high into the sky, " +
+      "with crackling lava spatter falling back down. Fun and " +
+      "cartoony, NOT scary or violent, no music, no voice.",
+    durationSeconds: 2.5,
+    promptInfluence: 0.45,
+  },
+  // ── Water splash (ocean biome) ────────────────────────────────────
+  // Fires when the launched avatar lands back in the sea. Three
+  // variants picked at random per splashdown.
+  {
+    id: "splash-1",
+    prompt:
+      "Big cannonball splash into water. Heavy KERPLOOSH as " +
+      "something lands hard in the sea, water bursting upward then " +
+      "droplets pattering back down. Fun, bright, cartoony. No " +
+      "music, no voice.",
+    durationSeconds: 1.3,
+    promptInfluence: 0.45,
+  },
+  {
+    id: "splash-2",
+    prompt:
+      "Playful splash landing in the ocean. A deep gloopy plunge " +
+      "into water followed by fizzing bubbles and a light spray of " +
+      "droplets. Warm, cheerful, kid-friendly. No music, no voice.",
+    durationSeconds: 1.3,
+    promptInfluence: 0.45,
+  },
+  {
+    id: "splash-3",
+    prompt:
+      "Cartoon water splash. Quick sploosh plop into the sea with a " +
+      "bubbly gurgle underneath and sparkling droplet patter. " +
+      "Bouncy and light-hearted. No music, no voice.",
+    durationSeconds: 1.2,
+    promptInfluence: 0.45,
+  },
+  // ── Little splashes ───────────────────────────────────────────────
+  // A much lighter set for the small, frequent water events — fish
+  // arcing out and dropping back in, lava bombs hitting the sea. The
+  // big splash-N clips above are far too heavy for these: they fire
+  // every few seconds, so they have to stay small enough to sit under
+  // the music rather than punch through it.
+  {
+    id: "splash-small-1",
+    prompt:
+      "A small fish jumping out of water and plopping back in. Light " +
+      "quick 'ploop' with a couple of tiny droplet plips after it. " +
+      "Gentle, cute, close-up, quiet. No music, no voice.",
+    durationSeconds: 0.8,
+    promptInfluence: 0.45,
+  },
+  {
+    id: "splash-small-2",
+    prompt:
+      "Tiny water plop, like a pebble dropping into a calm pond. Soft " +
+      "bloop with a short bubbly ripple tail. Delicate and quiet, " +
+      "close-up. No music, no voice.",
+    durationSeconds: 0.7,
+    promptInfluence: 0.45,
+  },
+  {
+    id: "splash-small-3",
+    prompt:
+      "Light playful water plip. A small quick splish as something " +
+      "little breaks the surface of the sea, with a faint fizz of " +
+      "bubbles. Soft, gentle, kid-friendly. No music, no voice.",
+    durationSeconds: 0.7,
     promptInfluence: 0.45,
   },
 ];

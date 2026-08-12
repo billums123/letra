@@ -5,7 +5,8 @@ import { VirtualJoystick } from "../input/VirtualJoystick";
 import { MainMenu } from "../ui/MainMenu";
 import { audio } from "../audio/Player";
 import { music } from "../audio/music";
-import { setSfxGain } from "../audio/sfx";
+import { setSfxGain, primeSfxClips } from "../audio/sfx";
+import { onAudioContextStateChange } from "../audio/audioCtx";
 import { MENU_TRACK, pickGameTrack } from "../audio/songs";
 import { SpellWordGame } from "../games/SpellWord";
 import { FindAlphabetGame } from "../games/FindAlphabet";
@@ -196,6 +197,16 @@ export function Game() {
     music.setUserVolume(audioVolume);
     setSfxGain(audioVolume);
   }, [audioVolume]);
+
+  // Pull the recorded one-shots down as soon as the game mounts, and
+  // again whenever the audio context wakes up, so the first time a kid
+  // triggers one they get the real clip instead of the synth fallback.
+  // The volcano was the tell: its fallback is nearly all sub-bass, so
+  // the first eruption of a session sounded like nothing at all.
+  useEffect(() => {
+    primeSfxClips();
+    return onAudioContextStateChange(() => primeSfxClips());
+  }, []);
 
   // Master mute. Voice + sfx route through user-level vetoes; music is
   // stopped by the music effect above, but we kill the SFX bus here so

@@ -38,6 +38,119 @@ export function setSfxGain(v: number): void {
   g.linearRampToValueAtTime(Math.max(target, 0.0001), c.currentTime + 0.05);
 }
 
+// ─── Recorded clip pools ─────────────────────────────────────────────
+// Several cues sound better as a recorded ElevenLabs one-shot than as
+// a synth, but they must never go silent if the asset is missing —
+// before `npm run sfx:generate` has been run, on the very first play
+// while the buffers are still decoding, or offline. makeClipPool owns
+// the lazy fetch + decode and returns a `play` that reports whether it
+// actually made a sound, so every caller can fall through to its
+// procedural version.
+//
+// Pools pick a random clip per play and jitter the playback rate, so a
+// kid triggering the same event twenty times in a row (they will)
+// doesn't hear twenty identical files.
+type ClipPool = { play(gain: number, jitter?: number): boolean; prime(): void };
+
+const allPools: ClipPool[] = [];
+
+function makeClipPool(urls: readonly string[]): ClipPool {
+  // Fetching and decoding are deliberately separate steps. Fetching
+  // needs no AudioContext, so it can start the moment a game mounts —
+  // before the kid has done anything that would unlock audio. Decoding
+  // needs a context, so it waits for one and then runs off the bytes
+  // already in hand.
+  const raw: (ArrayBuffer | null)[] = urls.map(() => null);
+  const buffers: (AudioBuffer | null)[] = urls.map(() => null);
+  let fetchStarted = false;
+  const decoding = urls.map(() => false);
+
+  function decodeOne(c: AudioContext, i: number): void {
+    if (buffers[i] || decoding[i]) return;
+    const bytes = raw[i];
+    if (!bytes) return;
+    decoding[i] = true;
+    void (async () => {
+      try {
+        // decodeAudioData detaches the buffer it is given, so hand it a
+        // copy — otherwise a context swap (iOS interruption) would find
+        // raw emptied and could never re-decode.
+        buffers[i] = await c.decodeAudioData(bytes.slice(0));
+      } catch {
+        /* swallow — the procedural fallback already covers this */
+      } finally {
+        decoding[i] = false;
+      }
+    })();
+  }
+
+  function ensureFetched(): void {
+    if (fetchStarted) return;
+    fetchStarted = true;
+    urls.forEach((url, i) => {
+      void (async () => {
+        try {
+          const res = await fetch(url);
+          if (!res.ok) return;
+          raw[i] = await res.arrayBuffer();
+          // Decode the moment the bytes land. Kicking decoding off from
+          // prime() instead would be too early — the fetch it just
+          // started has not resolved, so there would be nothing to
+          // decode and nothing would retry until the first play(), by
+          // which point it is too late to be audible.
+          const c = getCtx();
+          if (c) decodeOne(c, i);
+        } catch {
+          /* swallow — the procedural fallback already covers this */
+        }
+      })();
+    });
+  }
+
+  function ensureDecoded(c: AudioContext): void {
+    for (let i = 0; i < urls.length; i++) decodeOne(c, i);
+  }
+
+  const pool: ClipPool = {
+    // Start pulling the bytes down, and decode them if audio is already
+    // live. Call this well before the sound is needed: the first play()
+    // of an un-primed pool can only fall back to the synth, and for the
+    // volcano that fallback is nearly all sub-bass — inaudible on a
+    // tablet speaker, which reads as "the eruption made no sound".
+    prime() {
+      ensureFetched();
+      const c = getCtx();
+      if (c) ensureDecoded(c);
+    },
+    play(gain, jitter = 0.08) {
+      const c = getCtx();
+      if (!c) return false;
+      ensureFetched();
+      ensureDecoded(c);
+      const ready: AudioBuffer[] = [];
+      for (const b of buffers) if (b) ready.push(b);
+      if (ready.length === 0) return false;
+      const src = c.createBufferSource();
+      src.buffer = ready[(Math.random() * ready.length) | 0];
+      src.playbackRate.value = 1 - jitter + Math.random() * jitter * 2;
+      const g = c.createGain();
+      g.gain.value = gain;
+      src.connect(g).connect(getSfxBus(c));
+      src.start();
+      return true;
+    },
+  };
+  allPools.push(pool);
+  return pool;
+}
+
+// Warm every recorded clip. Cheap (the whole SFX set is a couple of
+// hundred KB) and idempotent, so games can call it on mount and again
+// once audio unlocks without worrying about double work.
+export function primeSfxClips(): void {
+  for (const p of allPools) p.prime();
+}
+
 // Lightweight tone helper. `wave` defaults to triangle which sounds friendly
 // (no harsh harmonics like sawtooth, no buzz like square).
 function tone(
@@ -501,34 +614,12 @@ export function playFireworkLaunch() {
   }
 }
 
-// Pre-recorded burst clips (ElevenLabs). We rotate through them at
-// random so consecutive fireworks don't all sound identical. The
-// fetch + decode is lazy and async — the very first burst before the
-// buffers finish loading falls through to the procedural synth so
-// there's never silence.
-const BURST_CLIP_URLS = [
+// Pre-recorded burst clips (ElevenLabs).
+const burstClips = makeClipPool([
   "/audio/sfx/firework-burst-1.mp3",
   "/audio/sfx/firework-burst-2.ogg",
   "/audio/sfx/firework-burst-3.ogg",
-];
-const burstBuffers: (AudioBuffer | null)[] = BURST_CLIP_URLS.map(() => null);
-let burstLoadStarted = false;
-function ensureBurstBuffers(c: AudioContext) {
-  if (burstLoadStarted) return;
-  burstLoadStarted = true;
-  for (let i = 0; i < BURST_CLIP_URLS.length; i++) {
-    void (async () => {
-      try {
-        const res = await fetch(BURST_CLIP_URLS[i]);
-        if (!res.ok) return;
-        const arr = await res.arrayBuffer();
-        burstBuffers[i] = await c.decodeAudioData(arr);
-      } catch {
-        /* swallow — procedural fallback already covers this case */
-      }
-    })();
-  }
-}
+]);
 
 // Aerial burst — uses the pre-recorded ElevenLabs clips when their
 // buffers have finished decoding; otherwise renders the procedural
@@ -537,24 +628,8 @@ function ensureBurstBuffers(c: AudioContext) {
 export function playFireworkBurst() {
   const c = getCtx();
   if (!c) return;
-  const dest = getFxBus(c);
-  ensureBurstBuffers(c);
-  const ready: AudioBuffer[] = [];
-  for (const b of burstBuffers) if (b) ready.push(b);
-  if (ready.length > 0) {
-    const buf = ready[(Math.random() * ready.length) | 0];
-    const src = c.createBufferSource();
-    src.buffer = buf;
-    // Slight pitch jitter (±2 semitones) keeps consecutive plays of
-    // the same clip from sounding mechanically identical.
-    src.playbackRate.value = 0.92 + Math.random() * 0.16;
-    const g = c.createGain();
-    g.gain.value = 0.85;
-    src.connect(g).connect(dest);
-    src.start();
-    return;
-  }
-  playProceduralBurst(c, dest);
+  if (burstClips.play(0.85)) return;
+  playProceduralBurst(c, getFxBus(c));
 }
 
 // Procedural KABOOM synth. Used as the fallback when the recorded
@@ -663,52 +738,18 @@ function playProceduralBurst(c: AudioContext, dest: AudioNode) {
 // a random pick + pitch jitter so consecutive contacts don't feel
 // mechanical. Falls back to a procedural triangle-wave chirp if the
 // clips haven't loaded yet.
-const ALIEN_WAVE_URLS = [
+const alienWaveClips = makeClipPool([
   "/audio/sfx/alien-1.mp3",
   "/audio/sfx/alien-2.mp3",
   "/audio/sfx/alien-3.mp3",
   "/audio/sfx/alien-4.mp3",
-];
-const alienWaveBuffers: (AudioBuffer | null)[] = ALIEN_WAVE_URLS.map(() => null);
-let alienWaveLoadStarted = false;
-function ensureAlienWaveBuffers(c: AudioContext) {
-  if (alienWaveLoadStarted) return;
-  alienWaveLoadStarted = true;
-  for (let i = 0; i < ALIEN_WAVE_URLS.length; i++) {
-    void (async () => {
-      try {
-        const res = await fetch(ALIEN_WAVE_URLS[i]);
-        if (!res.ok) return;
-        const arr = await res.arrayBuffer();
-        alienWaveBuffers[i] = await c.decodeAudioData(arr);
-      } catch {
-        /* swallow — procedural fallback already covers this case */
-      }
-    })();
-  }
-}
+]);
 
 export function playAlienWave() {
   const c = getCtx();
   if (!c) return;
-  const dest = getFxBus(c);
-  ensureAlienWaveBuffers(c);
-  const ready: AudioBuffer[] = [];
-  for (const b of alienWaveBuffers) if (b) ready.push(b);
-  if (ready.length > 0) {
-    const buf = ready[(Math.random() * ready.length) | 0];
-    const src = c.createBufferSource();
-    src.buffer = buf;
-    // Pitch jitter so consecutive plays of the same clip don't feel
-    // mechanically identical (±2 semitones).
-    src.playbackRate.value = 0.92 + Math.random() * 0.16;
-    const g = c.createGain();
-    g.gain.value = 0.7;
-    src.connect(g).connect(dest);
-    src.start();
-    return;
-  }
-  playProceduralAlienWave(c, dest);
+  if (alienWaveClips.play(0.7)) return;
+  playProceduralAlienWave(c, getFxBus(c));
 }
 
 // Procedural fallback — 2-3 short triangle chirps with playful pitch
@@ -748,4 +789,274 @@ export function playWoo() {
   // sparkle tail
   tone(N.E6, 0.5, 0.3, 0.12, "sine");
   tone(N.G6, 0.55, 0.35, 0.1, "sine");
+}
+
+// ─── Volcano cues (ocean + jungle biomes) ────────────────────────────────
+// Three-part eruption soundscape: a building rumble while the ground
+// shakes, a KABOOM + rising whoosh at launch, and small lava pops as
+// bombs rain down. The rumble and the boom prefer recorded ElevenLabs
+// clips (see scripts/generate-sfx.ts) and fall back to the procedural
+// synths below; the lava pops stay procedural because they fire in
+// rapid bursts and want zero latency.
+const volcanoRumbleClips = makeClipPool(["/audio/sfx/volcano-rumble.mp3"]);
+const volcanoBoomClips = makeClipPool([
+  "/audio/sfx/volcano-boom-1.mp3",
+  "/audio/sfx/volcano-boom-2.mp3",
+]);
+
+// Low ground-shake rumble that swells over ~0.9s. Played the moment
+// the kid drives into the crater, underneath the visual shake, so the
+// boom that follows feels earned rather than instant.
+export function playVolcanoRumble() {
+  const c = getCtx();
+  if (!c) return;
+  // Barely any jitter — the rumble is timed against the eruption state
+  // machine, so stretching it would drift off the boom.
+  if (volcanoRumbleClips.play(0.9, 0.03)) return;
+  const dest = getSfxBus(c);
+  const t0 = c.currentTime;
+  // Deep noise bed, low-passed hard and swelling in.
+  {
+    const n = startNoise(c, t0, t0 + 1.1);
+    const lp = c.createBiquadFilter();
+    lp.type = "lowpass";
+    lp.frequency.setValueAtTime(90, t0);
+    lp.frequency.exponentialRampToValueAtTime(220, t0 + 0.9);
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(0.5, t0 + 0.7);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 1.1);
+    n.connect(lp).connect(g).connect(dest);
+  }
+  // Sub-bass wobble underneath — an LFO-like slow pitch wiggle reads
+  // as the mountain itself groaning.
+  {
+    const osc = c.createOscillator();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(42, t0);
+    osc.frequency.linearRampToValueAtTime(58, t0 + 0.45);
+    osc.frequency.linearRampToValueAtTime(38, t0 + 0.9);
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(0.4, t0 + 0.5);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 1.05);
+    osc.connect(g).connect(dest);
+    osc.start(t0);
+    osc.stop(t0 + 1.1);
+  }
+}
+
+// The eruption itself: sub-bass KABOOM + low noise body + a rising
+// two-oscillator whoosh that tracks the avatar sailing skyward.
+export function playVolcanoBoom() {
+  const c = getCtx();
+  if (!c) return;
+  if (volcanoBoomClips.play(0.95)) return;
+  const dest = getSfxBus(c);
+  const t0 = c.currentTime;
+  // 1 — sub-bass punch
+  {
+    const osc = c.createOscillator();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(60, t0);
+    osc.frequency.exponentialRampToValueAtTime(26, t0 + 0.5);
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(0.75, t0 + 0.012);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.65);
+    osc.connect(g).connect(dest);
+    osc.start(t0);
+    osc.stop(t0 + 0.7);
+  }
+  // 2 — boom body (low-passed noise)
+  {
+    const n = startNoise(c, t0, t0 + 0.9);
+    const lp = c.createBiquadFilter();
+    lp.type = "lowpass";
+    lp.frequency.setValueAtTime(200, t0);
+    lp.frequency.exponentialRampToValueAtTime(75, t0 + 0.6);
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(0.6, t0 + 0.015);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.85);
+    n.connect(lp).connect(g).connect(dest);
+  }
+  // 3 — rising launch whoosh: detuned sine pair sweeping up, like the
+  // firework shell whistle but bigger and slower to match the arc.
+  {
+    const s = t0 + 0.06;
+    const e = t0 + 0.9;
+    const osc1 = c.createOscillator();
+    osc1.type = "sine";
+    osc1.frequency.setValueAtTime(300, s);
+    osc1.frequency.exponentialRampToValueAtTime(1900, e);
+    const osc2 = c.createOscillator();
+    osc2.type = "sine";
+    osc2.frequency.setValueAtTime(450, s);
+    osc2.frequency.exponentialRampToValueAtTime(2800, e);
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.0001, s);
+    g.gain.exponentialRampToValueAtTime(0.12, s + 0.1);
+    g.gain.exponentialRampToValueAtTime(0.0001, e);
+    osc1.connect(g);
+    osc2.connect(g);
+    g.connect(dest);
+    osc1.start(s);
+    osc1.stop(e + 0.05);
+    osc2.start(s);
+    osc2.stop(e + 0.05);
+  }
+}
+
+// Small "bloop" pop for a lava bomb hitting the ground. Throttled hard
+// because a fountain drops many bombs in a burst and we want texture,
+// not a drum roll.
+let lastLavaPopAt = 0;
+export function playLavaPop() {
+  const now = performance.now();
+  if (now - lastLavaPopAt < 120) return;
+  lastLavaPopAt = now;
+  const c = getCtx();
+  if (!c) return;
+  const dest = getSfxBus(c);
+  const t0 = c.currentTime;
+  const osc = c.createOscillator();
+  osc.type = "sine";
+  const base = 200 + Math.random() * 120;
+  osc.frequency.setValueAtTime(base, t0);
+  osc.frequency.exponentialRampToValueAtTime(base * 0.45, t0 + 0.12);
+  const g = c.createGain();
+  g.gain.setValueAtTime(0.0001, t0);
+  g.gain.exponentialRampToValueAtTime(0.22, t0 + 0.008);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.14);
+  osc.connect(g).connect(dest);
+  osc.start(t0);
+  osc.stop(t0 + 0.18);
+  // Tiny sizzle layer on some pops so the field of splats varies.
+  if (Math.random() < 0.4) {
+    const n = startNoise(c, t0, t0 + 0.1);
+    const bp = c.createBiquadFilter();
+    bp.type = "bandpass";
+    bp.frequency.value = 1400 + Math.random() * 800;
+    bp.Q.value = 1.5;
+    const ng = c.createGain();
+    ng.gain.setValueAtTime(0.0001, t0);
+    ng.gain.exponentialRampToValueAtTime(0.06, t0 + 0.01);
+    ng.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.1);
+    n.connect(bp).connect(ng).connect(dest);
+  }
+}
+
+// Water splash — the boat (or a launched avatar) plunging into the
+// sea. Prefers one of the recorded splashes; the procedural fallback
+// is a noise burst through a falling lowpass + a quick "bloop" pitch
+// drop underneath, then a lighter secondary patter for the droplets.
+const splashClips = makeClipPool([
+  "/audio/sfx/splash-1.mp3",
+  "/audio/sfx/splash-2.mp3",
+  "/audio/sfx/splash-3.mp3",
+]);
+
+// The little cousin: fish breaking the surface, lava bombs hitting the
+// sea — small water events that fire every few seconds. Deliberately
+// quiet and throttled; the big splash above is a payoff sound and
+// would trample the music if it played this often.
+const smallSplashClips = makeClipPool([
+  "/audio/sfx/splash-small-1.mp3",
+  "/audio/sfx/splash-small-2.mp3",
+  "/audio/sfx/splash-small-3.mp3",
+]);
+let lastSmallSplashAt = 0;
+
+export function playSmallSplash() {
+  const now = performance.now();
+  // Six fish plus a bomb fountain can all land in the same handful of
+  // frames; without this they stack into a wash.
+  if (now - lastSmallSplashAt < 110) return;
+  lastSmallSplashAt = now;
+  const c = getCtx();
+  if (!c) return;
+  if (smallSplashClips.play(0.26, 0.12)) return;
+  // Procedural fallback — one short noise chirp through a falling
+  // bandpass plus a tiny bloop. A miniature of playSplash below.
+  const dest = getSfxBus(c);
+  const t0 = c.currentTime;
+  {
+    const n = startNoise(c, t0, t0 + 0.22);
+    const bp = c.createBiquadFilter();
+    bp.type = "bandpass";
+    bp.frequency.setValueAtTime(1800 + Math.random() * 700, t0);
+    bp.frequency.exponentialRampToValueAtTime(600, t0 + 0.18);
+    bp.Q.value = 0.9;
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(0.1, t0 + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.2);
+    n.connect(bp).connect(g).connect(dest);
+  }
+  {
+    const osc = c.createOscillator();
+    osc.type = "sine";
+    const f = 420 + Math.random() * 220;
+    osc.frequency.setValueAtTime(f, t0);
+    osc.frequency.exponentialRampToValueAtTime(f * 0.45, t0 + 0.13);
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(0.07, t0 + 0.008);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.16);
+    osc.connect(g).connect(dest);
+    osc.start(t0);
+    osc.stop(t0 + 0.2);
+  }
+}
+
+export function playSplash() {
+  const c = getCtx();
+  if (!c) return;
+  if (splashClips.play(0.9)) return;
+  const dest = getSfxBus(c);
+  const t0 = c.currentTime;
+  // Main splash body — bandpassed noise sweeping downward.
+  {
+    const n = startNoise(c, t0, t0 + 0.55);
+    const lp = c.createBiquadFilter();
+    lp.type = "lowpass";
+    lp.frequency.setValueAtTime(2600, t0);
+    lp.frequency.exponentialRampToValueAtTime(500, t0 + 0.45);
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(0.45, t0 + 0.015);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.5);
+    n.connect(lp).connect(g).connect(dest);
+  }
+  // Bloop underneath — sine dropping an octave.
+  {
+    const osc = c.createOscillator();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(320, t0);
+    osc.frequency.exponentialRampToValueAtTime(120, t0 + 0.22);
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(0.3, t0 + 0.012);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.28);
+    osc.connect(g).connect(dest);
+    osc.start(t0);
+    osc.stop(t0 + 0.32);
+  }
+  // Droplet patter — a few tiny delayed high blips.
+  for (let i = 0; i < 4; i++) {
+    const at = t0 + 0.12 + i * 0.06 + Math.random() * 0.04;
+    const osc = c.createOscillator();
+    osc.type = "sine";
+    const f = 900 + Math.random() * 900;
+    osc.frequency.setValueAtTime(f, at);
+    osc.frequency.exponentialRampToValueAtTime(f * 0.6, at + 0.08);
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.0001, at);
+    g.gain.exponentialRampToValueAtTime(0.07, at + 0.008);
+    g.gain.exponentialRampToValueAtTime(0.0001, at + 0.09);
+    osc.connect(g).connect(dest);
+    osc.start(at);
+    osc.stop(at + 0.12);
+  }
 }

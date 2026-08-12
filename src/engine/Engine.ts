@@ -50,6 +50,7 @@ export class Engine {
   private tmpTargetTilt = new THREE.Quaternion();
   private tmpNormal = new THREE.Vector3();
   private static readonly WORLD_UP = new THREE.Vector3(0, 1, 0);
+  private static readonly ZERO_MOVE = { x: 0, y: 0 };
 
   // Game-mode hook: called every frame so modes can react to the player position.
   // The function decides whether anything happens; engine just calls it.
@@ -59,6 +60,61 @@ export class Engine {
   // can fire the obstacle's onBump callback once on the rising edge of
   // a collision instead of every frame the player is wedged against it.
   private prevOverlap = new Set<Obstacle>();
+
+  // Ballistic launch state (jungle volcano, etc). While set, the tick
+  // loop flies the avatar along a parabolic arc instead of applying
+  // input / collision / terrain-follow, and the camera anchor tracks
+  // the flight height so the avatar stays in frame at the apex.
+  private flight: {
+    t: number;
+    duration: number;
+    fromX: number;
+    fromZ: number;
+    fromGroundY: number;
+    toX: number;
+    toZ: number;
+    toGroundY: number;
+    peakY: number;
+    spin: number;
+    onLand?: () => void;
+  } | null = null;
+  private tmpTumble = new THREE.Quaternion();
+  private static readonly TUMBLE_AXIS = new THREE.Vector3(1, 0, 0);
+  // Touchdown squash-and-stretch timer (seconds remaining). Applied to
+  // the player group's scale for a beat after landing so the arrival
+  // reads as an impact instead of a freeze-frame stop.
+  private landSquash = 0;
+  private static readonly LAND_SQUASH_DURATION = 0.38;
+
+  get inFlight(): boolean {
+    return this.flight !== null;
+  }
+
+  // Fling the avatar to (x, z) on a ballistic arc. Ignored if a flight
+  // is already running. Ground heights at both ends come from the
+  // biome's terrain sampler so a launch out of a crater lands flush on
+  // flat ground (and vice versa).
+  launchPlayer(
+    to: { x: number; z: number },
+    opts: { duration?: number; peakY?: number; onLand?: () => void } = {}
+  ): void {
+    if (this.flight) return;
+    const pp = this.player.group.position;
+    const sample = this.terrainHeight;
+    this.flight = {
+      t: 0,
+      duration: opts.duration ?? 1.6,
+      fromX: pp.x,
+      fromZ: pp.z,
+      fromGroundY: sample ? sample(pp.x, pp.z) : 0,
+      toX: to.x,
+      toZ: to.z,
+      toGroundY: sample ? sample(to.x, to.z) : 0,
+      peakY: opts.peakY ?? 12,
+      spin: 0,
+      onLand: opts.onLand,
+    };
+  }
 
   // WebGL context-loss bookkeeping. iOS Safari silently kills the GL
   // context when the tab backgrounds or memory pressure spikes; without
@@ -145,7 +201,14 @@ export class Engine {
     // a getter so they can null-check during teardown. Biomes that
     // deform the ground can also register a height sampler we read in
     // the per-frame loop so the avatar dips into depressions.
-    const world = buildWorld(biome, () => this.player?.group.position ?? null);
+    const world = buildWorld(
+      biome,
+      () => this.player?.group.position ?? null,
+      (to, opts) => this.launchPlayer(to, opts),
+      (visible) => {
+        if (this.player) this.player.group.visible = visible;
+      }
+    );
     this.scene.add(world.group);
     this.terrainHeight = world.terrainHeight;
     this.isWalkable = world.isWalkable;
@@ -225,6 +288,34 @@ export class Engine {
       const prevX = pp.x;
       const prevZ = pp.z;
 
+      // Ballistic flight (volcano launch etc.) replaces the whole
+      // input → collision → terrain pipeline while airborne: position
+      // comes from the arc, and obstacles/boundary/walkable clamps are
+      // skipped because the avatar is above all of them. The avatar
+      // still gets a zero-input update so idle animation + engine
+      // audio keep running.
+      const flight = this.flight;
+      if (flight) {
+        this.player.update(dt, Engine.ZERO_MOVE);
+        flight.t += dt;
+        const k = Math.min(1, flight.t / flight.duration);
+        pp.x = flight.fromX + (flight.toX - flight.fromX) * k;
+        pp.z = flight.fromZ + (flight.toZ - flight.fromZ) * k;
+        const baseY = flight.fromGroundY + (flight.toGroundY - flight.fromGroundY) * k;
+        // Parabolic arc: peaks at k=0.5, zero at both ends. Ground Y
+        // is lerped underneath so crater-rim → flat-ground flights
+        // stay smooth.
+        pp.y = baseY + flight.peakY * 4 * k * (1 - k);
+        // Two full front-flips across the flight; ends at an exact
+        // multiple of 2π so touchdown orientation is clean.
+        flight.spin = (Math.PI * 4) * k;
+        if (k >= 1) {
+          this.flight = null;
+          this.landSquash = Engine.LAND_SQUASH_DURATION;
+          flight.onLand?.();
+        }
+      } else {
+
       // Player update from current input
       const input = readInput();
       this.player.update(dt, input.move);
@@ -300,6 +391,8 @@ export class Engine {
         pp.y += this.terrainHeight(pp.x, pp.z);
       }
 
+      } // end grounded (non-flight) branch
+
       // Avatar orientation — compose yaw (from the avatar) with a
       // terrain-tilt quaternion that aligns the avatar's local +Y to
       // the ground normal. We sample the height field with a small
@@ -309,7 +402,7 @@ export class Engine {
       // slerp toward the target so slope discontinuities don't snap.
       this.tmpYawQuat.setFromAxisAngle(Engine.WORLD_UP, this.player.facing());
       this.tmpTargetTilt.identity();
-      if (this.terrainHeight && this.player.terrainAlign !== false) {
+      if (!this.flight && this.terrainHeight && this.player.terrainAlign !== false) {
         const sample = this.terrainHeight;
         const walkable = this.isWalkable;
         const eps = 0.35;
@@ -335,6 +428,23 @@ export class Engine {
       // leaves local +Y along the normal and local +Z along the
       // projection of the facing direction onto the slope plane.
       this.player.group.quaternion.copy(this.currentTilt).multiply(this.tmpYawQuat);
+      // Mid-flight tumble — front-flips about the avatar's local X so
+      // the launch reads as a joyful somersault rather than a frozen
+      // statue sliding along an arc.
+      if (this.flight) {
+        this.tmpTumble.setFromAxisAngle(Engine.TUMBLE_AXIS, this.flight.spin);
+        this.player.group.quaternion.multiply(this.tmpTumble);
+      }
+      // Touchdown squash-and-stretch: strongest the frame we land,
+      // easing back to rest. Pure scale, so it composes with whatever
+      // pose the avatar is in.
+      if (this.landSquash > 0) {
+        this.landSquash = Math.max(0, this.landSquash - dt);
+        const k = 1 - this.landSquash / Engine.LAND_SQUASH_DURATION;
+        const squash = (1 - k) * (1 - k);
+        this.player.group.scale.set(1 + 0.22 * squash, 1 - 0.3 * squash, 1 + 0.22 * squash);
+        if (this.landSquash === 0) this.player.group.scale.set(1, 1, 1);
+      }
 
       // Sun follow — keep each shadow camera centered on the player so
       // the directional-light frustum doesn't clip the player's shadow
@@ -351,7 +461,15 @@ export class Engine {
       // makes the whole world feel like it's nodding. Anchor Y to the
       // terrain so the camera dips into craters along with the player.
       const pos = this.player.position();
-      const cameraAnchorY = this.terrainHeight ? this.terrainHeight(pos.x, pos.z) : 0;
+      // While airborne, anchor the camera to (most of) the flight
+      // height so the avatar stays in frame at the apex; the 0.08
+      // position lerp below smooths both the climb and the settle
+      // back to ground level after touchdown.
+      const cameraAnchorY = this.flight
+        ? pos.y * 0.8
+        : this.terrainHeight
+          ? this.terrainHeight(pos.x, pos.z)
+          : 0;
       this.tmpVec.set(pos.x, cameraAnchorY, pos.z).add(this.cameraOffset);
       this.camera.position.lerp(this.tmpVec, 0.08);
       this.tmpVec.set(pos.x, cameraAnchorY, pos.z).add(this.cameraLookOffset);

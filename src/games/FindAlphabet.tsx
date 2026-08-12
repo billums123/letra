@@ -185,6 +185,10 @@ export function FindAlphabetGame() {
         runDanceTick(engine, playerPos);
         return;
       }
+      // Mid-volcano-launch the avatar sweeps over half the map at
+      // altitude; collection is XZ-based so without this guard a
+      // flyover would hoover up letters. No collecting while airborne.
+      if (engine.inFlight) return;
       const next = lettersRef.current[currentIndex.current];
       if (!next) return;
       const d = distanceXZ(playerPos, next.character.positionXZ());

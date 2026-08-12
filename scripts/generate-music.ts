@@ -113,6 +113,22 @@ const TRACKS: Track[] = [
       LOOP_FRAMING,
   },
   {
+    // The ocean biome's signature track. Same toy-instrument palette
+    // and tempo band as the rest of the playlist so it doesn't stick
+    // out when the shuffle lands on it, just steered tropical.
+    id: "island-breeze",
+    name: "Island Breeze",
+    prompt:
+      "Sunny tropical island children's instrumental around 112 BPM. " +
+      "Steel drum melody in C major over a gently swaying ukulele " +
+      "strum, warm upright bass, marimba counter-melody, soft congas " +
+      "and shaker with a light calypso lilt. Breezy, warm, and " +
+      "unhurried — a little boat puttering between palm islands on a " +
+      "bright afternoon. Sweet and kid-friendly, never lounge-y or " +
+      "cheesy. " +
+      LOOP_FRAMING,
+  },
+  {
     // Plays after the kid finds the whole alphabet. The dance party
     // finale animates every letter on this track's beat — see
     // src/games/FindAlphabet.tsx. We pin BPM hard in the prompt so the

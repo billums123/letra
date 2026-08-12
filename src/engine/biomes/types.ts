@@ -44,6 +44,23 @@ export type BiomeContext = {
   // walkable area. ringRadius optionally tightens the letter ring for
   // small dance floors.
   setCelebrationCenter: (center: { x: number; z: number; ringRadius?: number }) => void;
+  // Fling the avatar on a ballistic arc to (x, z). While airborne the
+  // engine suspends input, collision, and terrain-follow, tumbles the
+  // avatar, and keeps the camera tracking the flight; control returns
+  // on touchdown. Biomes use this for launch gags (the jungle volcano
+  // eruption). No-op if a flight is already in progress. onLand fires
+  // the frame the avatar touches down.
+  launchPlayer: (
+    to: { x: number; z: number },
+    opts?: { duration?: number; peakY?: number; onLand?: () => void }
+  ) => void;
+  // Show or hide the avatar mesh. Nothing else changes — position,
+  // collision, and camera tracking carry on as normal, so the camera
+  // keeps watching the spot the avatar occupies. Used for "swallowed"
+  // beats: the ocean volcano hides the boat once it is inside the sea
+  // cave so it reads as gone into the mountain rather than parked
+  // against the back wall, then shows it again as it is launched out.
+  setPlayerVisible: (visible: boolean) => void;
 };
 
 export type Biome = {
@@ -52,7 +69,7 @@ export type Biome = {
   emoji: string;
   // Suggested avatar for this biome — used by the picker so e.g. the
   // moon defaults to the rocket. Players can still override.
-  recommendedAvatar?: "kid" | "car" | "rocket";
+  recommendedAvatar?: "kid" | "car" | "rocket" | "boat";
   // Apply this biome's background colour, fog, lights to the scene.
   // Returns a dispose function the engine calls on teardown so biome-
   // owned lights can be removed cleanly.

@@ -39,7 +39,7 @@ export type PendingEarn = {
 // "rocket" hovers a couple of units off the ground and tilts in the
 // direction it's flying. All three share the same omnidirectional
 // movement model so controls feel identical regardless of choice.
-export type AvatarKind = "kid" | "car" | "rocket";
+export type AvatarKind = "kid" | "car" | "rocket" | "boat";
 
 // Letter case the kid picks before entering Spell the Word or Find the
 // Alphabet. "mixed" is interpreted per-game: for Find the Alphabet each
@@ -203,7 +203,7 @@ function saveAudioMuted(m: boolean) {
 function loadAvatar(): AvatarKind {
   try {
     const raw = localStorage.getItem(AVATAR_KEY);
-    if (raw === "kid" || raw === "car" || raw === "rocket") return raw;
+    if (raw === "kid" || raw === "car" || raw === "rocket" || raw === "boat") return raw;
   } catch {
     // localStorage may be disabled — default to the kid.
   }
