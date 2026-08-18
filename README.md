@@ -73,10 +73,20 @@ where you started. Landing on the north pole is deliberate: it is the
 one spot where the sphere camera and the flat camera are the same
 arithmetic, so the handover from flying to walking is invisible.
 
-Getting home is the sunspots — dark whirls in the plasma, each with a
-column of cool blue light standing over it that clears the horizon from
-a long way off, so there is always one in sight to drive toward. Drive
-in and the sun spits you back down to a splashdown.
+Getting home is the portals — pools of ocean set into the plasma,
+ringed white-hot where the two meet, each under a shaft of cool light
+with a pulsing star at its tip. The beacon is what clears the horizon
+from a long way off, so there is always one in sight to drive toward.
+Drive in and the sun drops you back into the sea.
+
+Two things follow the altitude fade that drains the sky to black. The
+music goes with it: the same track, run through a filter that closes
+down and a long reverb that opens up, so it arrives in orbit sounding
+like it is being played in a very large empty room, and comes back on
+the way down. And the flat world resolves into a planet — the whole
+ocean lives inside a front-face-only sphere, so from the inside every
+triangle faces away and nothing draws at all, while from the sun it is
+a little blue world with an atmosphere, hanging among the stars.
 
 `npm run test:planet` checks the parts that are easy to get subtly
 wrong and impossible to eyeball: that a full lap returns to exactly

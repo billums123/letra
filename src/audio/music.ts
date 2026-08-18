@@ -26,6 +26,23 @@ type ActiveTrack = {
   masterGain: GainNode;
 };
 
+// The "we are in space now" effects bus. Every track plays through it,
+// and it is transparent until something asks for it: at amount 0 the
+// signal is dry through an open filter, so a kid who never leaves the
+// water hears exactly what they always heard.
+//
+// The effect itself is the ordinary distance cue — a lowpass closing
+// down, a long tail, and a slap-back — applied hard enough to read as
+// vacuum. It is the same song throughout; only the room changes.
+type SpaceBus = {
+  input: GainNode;
+  tone: BiquadFilterNode;
+  dry: GainNode;
+  wet: GainNode;
+  delay: DelayNode;
+  feedback: GainNode;
+};
+
 class MusicPlayer {
   private active: ActiveTrack | null = null;
   // Track most-recent play() request so a slow decode can't override
@@ -66,9 +83,23 @@ class MusicPlayer {
   private watchdog: number | null = null;
   // Wired once on first play().
   private resumeWired = false;
+  // Effects bus, built on first use and then reused for the life of
+  // the page — a ConvolverNode's impulse response is not free to make.
+  private bus: SpaceBus | null = null;
+  private spaceAmount = 0;
+  // Last amount actually written to the audio graph. setSpaceAmount is
+  // called from the render loop, and there is no point rewriting six
+  // AudioParams sixty times a second for a value that moves this
+  // slowly.
+  private spaceWritten = -1;
 
   async play(track: Track, volume = 0.18): Promise<void> {
     this.wireResumeHandlers();
+    // A different track means a different place, and nowhere else is
+    // in space. Without this, leaving the sun via the Home button —
+    // which never runs the biome tick that would wind it back down —
+    // strands the menu theme in reverb.
+    if (this.active?.track.id !== track.id) this.setSpaceAmount(0);
     this.intendedTrack = track;
     this.intendedVolume = volume;
     if (this.active && this.active.track.id === track.id && !this.interrupted) {
@@ -101,7 +132,7 @@ class MusicPlayer {
 
     const master = c.createGain();
     master.gain.value = 0.0001;
-    master.connect(c.destination);
+    master.connect(this.ensureBus(c).input);
     // Start at the current target — which honours an in-progress duck so
     // a track that comes in while the voice is talking starts dipped.
     master.gain.linearRampToValueAtTime(
@@ -117,6 +148,7 @@ class MusicPlayer {
   }
 
   stop(): void {
+    this.setSpaceAmount(0);
     if (this.active) {
       this.fadeOutAndStop(this.active, 0.06);
       this.active = null;
@@ -227,6 +259,74 @@ class MusicPlayer {
     }, this.DUCK_RELEASE_MS);
   }
 
+  // 0 = the track as recorded, 1 = the same track heard from orbit.
+  // Driven from the ocean biome's altitude fade, so the music drains
+  // away with the sky and comes back with it.
+  setSpaceAmount(k: number): void {
+    const next = Math.max(0, Math.min(1, k));
+    this.spaceAmount = next;
+    const c = getMusicCtx();
+    if (!c) return;
+    // Only touch the graph when it would actually move — this runs
+    // every frame. The endpoints always get written, so the effect
+    // lands exactly off and exactly on.
+    if (next === this.spaceWritten) return;
+    if (next !== 0 && next !== 1 && Math.abs(next - this.spaceWritten) < 0.008) return;
+    this.spaceWritten = next;
+    const bus = this.ensureBus(c);
+    const at = c.currentTime;
+    const set = (p: AudioParam, v: number) => {
+      p.cancelScheduledValues(at);
+      p.setValueAtTime(p.value, at);
+      p.linearRampToValueAtTime(v, at + 0.12);
+    };
+    // Exponential in frequency so the filter sweep sounds even.
+    set(bus.tone.frequency, 20000 * Math.pow(700 / 20000, next));
+    set(bus.dry.gain, 1 - 0.45 * next);
+    set(bus.wet.gain, 0.75 * next);
+    set(bus.feedback.gain, 0.52 * next);
+    // A touch slower as well. Two per cent is under a third of a
+    // semitone — too little to hear as out of tune, plenty to feel as
+    // drifting.
+    if (this.active) set(this.active.source.playbackRate, 1 - 0.02 * next);
+  }
+
+  private ensureBus(c: AudioContext): SpaceBus {
+    if (this.bus) return this.bus;
+    const input = c.createGain();
+    const tone = c.createBiquadFilter();
+    tone.type = "lowpass";
+    tone.frequency.value = 20000;
+    tone.Q.value = 0.6;
+    const dry = c.createGain();
+    dry.gain.value = 1;
+    const wet = c.createGain();
+    wet.gain.value = 0;
+    const delay = c.createDelay(1);
+    delay.delayTime.value = 0.34;
+    const feedback = c.createGain();
+    feedback.gain.value = 0;
+    const verb = c.createConvolver();
+    verb.buffer = makeReverbImpulse(c, 3.4, 2.6);
+
+    // Tone sits in the main path, so the whole signal goes distant —
+    // filtering only the wet half leaves a bright, close dry signal
+    // sitting on top of a far-away one, which reads as a broken mix
+    // rather than as distance.
+    input.connect(tone);
+    tone.connect(dry);
+    dry.connect(c.destination);
+    tone.connect(delay);
+    delay.connect(feedback);
+    feedback.connect(delay);
+    delay.connect(verb);
+    verb.connect(wet);
+    wet.connect(c.destination);
+
+    this.bus = { input, tone, dry, wet, delay, feedback };
+    return this.bus;
+  }
+
   // Settings-panel master volume multiplier (0..1). Scales the
   // currently-playing track without disturbing its intended per-track
   // mix level, and is stored so the next play() inherits the factor.
@@ -269,6 +369,21 @@ class MusicPlayer {
     }
     return promise;
   }
+}
+
+// Exponentially decaying noise, which is all a convolution reverb
+// needs to sound like a very large empty room. Cheaper than shipping
+// an impulse-response file, and nobody is going to identify the hall.
+function makeReverbImpulse(c: AudioContext, seconds: number, decay: number): AudioBuffer {
+  const len = Math.max(1, Math.floor(c.sampleRate * seconds));
+  const ir = c.createBuffer(2, len, c.sampleRate);
+  for (let ch = 0; ch < ir.numberOfChannels; ch++) {
+    const d = ir.getChannelData(ch);
+    for (let i = 0; i < len; i++) {
+      d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, decay);
+    }
+  }
+  return ir;
 }
 
 // Find a positive-going zero crossing near each end of the buffer and

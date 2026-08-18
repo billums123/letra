@@ -4,14 +4,19 @@ import * as THREE from "three";
 // sun.ts so the layout can be checked on its own (see
 // scripts/planet-test.ts) without a DOM to draw into.
 
-// Sunspot size, as an angle at the sun's centre — sized so a kid
+// Portal size, as an angle at the sun's centre — sized so a kid
 // driving in a straight line can hardly miss one.
 export const SPOT_ANGLE = 0.22;
 
-// How tall the beacon over each sunspot stands, in world units. On a
-// 28-unit star this keeps a beacon in sight from about 84 degrees of
+// The bit you actually fall through. The pool of ocean is drawn at
+// exactly this radius, so what triggers the ride home is the thing
+// the kid can see, not an invisible circle around it.
+export const SPOT_TRIGGER = SPOT_ANGLE * 0.75;
+
+// How tall the beacon over each portal stands, in world units. On a
+// 28-unit star this keeps a beacon in sight from about 90 degrees of
 // arc away, which is what the layout below is checked against.
-export const BEAM_HEIGHT = 14;
+export const BEAM_HEIGHT = 20;
 
 // Sunspot positions, as unit directions from the sun's centre.
 //
