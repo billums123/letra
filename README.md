@@ -77,7 +77,22 @@ Getting home is the portals — pools of ocean set into the plasma,
 ringed white-hot where the two meet, each under a shaft of cool light
 with a pulsing star at its tip. The beacon is what clears the horizon
 from a long way off, so there is always one in sight to drive toward.
-Drive in and the sun drops you back into the sea.
+Drive in and the pool swallows the boat, flares, and half a second
+later it is falling out of the sky over the sea.
+
+That half second is doing real work. The trip home used to be an arc
+flown all the way from wherever on the sphere the kid happened to be
+standing, which meant the framing — and whether the path went through
+the star — depended on which portal they used. Dropping out of the sky
+above the destination is the same fall from the same angle every time,
+with the world the right way up from the first frame; the pause covers
+the cut, so it reads as going through something rather than as the
+picture jumping.
+
+Sound follows the avatar out of the world too. Every cue the ocean
+makes carries the position of the thing that made it, so the fish and
+the lava recede as a launch carries the kid up and are silent by the
+time they are standing on a star.
 
 Two things follow the altitude fade that drains the sky to black. The
 music goes with it: the same track, run through a filter that closes

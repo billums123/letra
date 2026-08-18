@@ -274,6 +274,40 @@ export const SFX_CATALOG: SfxCue[] = [
     promptInfluence: 0.5,
     play: "playLavaSplash",
   },
+  {
+    id: "portal-dive",
+    label: "Sun portal",
+    sounds:
+      "Driving into one of the pools of ocean set in the sun's surface: water closing over the boat, then a falling swoop as it drops through. Two takes rotate. Falls back to a bandpassed noise swallow with a tone sliding down two octaves.",
+    usedIn: ["The sun — entering a portal home"],
+    kind: "recorded",
+    slots: ["portal-dive-1.mp3", "portal-dive-2.mp3"],
+    prompt:
+      "Magical water portal swallowing something. A quick gulping " +
+      "whoosh of water closing over, then a shimmering downward swoop " +
+      "as it falls through to somewhere else. Bright, wondrous and " +
+      "friendly for a small child. No music, no voice.",
+    durationSeconds: 1.4,
+    promptInfluence: 0.4,
+    play: "playPortalDive",
+  },
+  {
+    id: "sun-touchdown",
+    label: "Landing on the sun",
+    sounds:
+      "The moment the avatar sets down on the star: a soft low thump with the roar of the surface swelling up around it. Two takes rotate. Falls back to a sine thump under a slow noise swell.",
+    usedIn: ["The sun — arriving after a mega eruption"],
+    kind: "recorded",
+    slots: ["sun-touchdown-1.mp3", "sun-touchdown-2.mp3"],
+    prompt:
+      "Landing softly on the surface of a huge burning star. A warm " +
+      "muffled thump on touchdown, then a deep roaring swell of fire " +
+      "and solar wind rising around you and settling. Awe-struck and " +
+      "warm, not scary. No music, no voice.",
+    durationSeconds: 2.2,
+    promptInfluence: 0.4,
+    play: "playSunTouchdown",
+  },
 ];
 
 export function getCue(id: string): SfxCue | undefined {

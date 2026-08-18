@@ -10,11 +10,6 @@ import { readInput } from "../input/useInput";
 
 const PLAYER_RADIUS = 0.55;
 
-function smoothstep01(t: number): number {
-  const k = Math.min(1, Math.max(0, t));
-  return k * k * (3 - 2 * k);
-}
-
 // Engine — owns the renderer, scene, camera, and per-frame loop.
 // Pure three.js, no R3F. React mounts it via a useEffect.
 
@@ -107,11 +102,13 @@ export class Engine {
     onArrive?: () => void;
     // Set on the outbound leg: the sphere to start walking on landing.
     arriveOn?: { spec: PlanetSpec; landDir: THREE.Vector3; faceHint?: THREE.Vector3 };
-    // Set on the homebound leg: the tangent frame the avatar left the
-    // sphere in. The camera swings out of it and back to world axes
-    // over `frameBlend` seconds — see the camera block in the tick.
-    fromFrame?: THREE.Quaternion;
-    frameBlend?: number;
+    // How hard the camera chases. See the camera block.
+    camLerp?: number;
+    // Consumed on the first frame: place the camera outright instead
+    // of easing it in. Used when the avatar arrives somewhere by
+    // teleport rather than by travelling there, where easing would
+    // mean a long swoop across the map from wherever it used to be.
+    snap?: boolean;
   } | null = null;
   // While set, the flat pipeline is replaced entirely by a walk
   // around a sphere. See planet.ts.
@@ -124,9 +121,6 @@ export class Engine {
   private tmpLook = new THREE.Vector3();
   private tmpUpTarget = new THREE.Vector3();
   private tmpAxis = new THREE.Vector3();
-  private tmpBasis = new THREE.Matrix4();
-  private tmpFrameQuat = new THREE.Quaternion();
-  private static readonly NO_ROTATION = new THREE.Quaternion();
   // Touchdown squash-and-stretch timer (seconds remaining). Applied to
   // the player group's scale for a beat after landing so the arrival
   // reads as an impact instead of a freeze-frame stop.
@@ -229,48 +223,52 @@ export class Engine {
     };
   }
 
-  // Step off the planet and fall back into the flat world at (x, z).
+  // Leave the planet and come down out of the sky at (x, z).
+  //
+  // This is a cut, not a journey. An earlier version flew an arc all
+  // the way home from wherever on the sphere the avatar happened to
+  // be standing, which meant the framing — and, if the exit was on the
+  // far side, whether the path went straight through the star —
+  // depended entirely on where you left from. Nothing about that was
+  // predictable. Dropping out of the sky above the destination is the
+  // same distance every time, from the same angle, with the world the
+  // right way up from the first frame.
+  //
+  // The caller is expected to have covered the cut: hide the avatar,
+  // let the thing it went into be seen swallowing it, then call this.
   leavePlanet(
     to: { x: number; z: number },
-    opts: { duration?: number; arcHeight?: number; onLand?: () => void } = {}
+    opts: { duration?: number; dropFrom?: number; onLand?: () => void } = {}
   ): void {
     if (!this.planet || this.spaceFlight) return;
-    const planet = this.planet;
-    const from = this.player.group.position.clone();
     const landY = this.terrainHeight ? this.terrainHeight(to.x, to.z) : 0;
     const dest = new THREE.Vector3(to.x, landY, to.z);
-    const duration = opts.duration ?? 4.4;
-    const arcHeight = opts.arcHeight ?? 60;
-    // Bow the departure out along the planet's local up, so the kid
-    // is flung off the surface they are standing on rather than
-    // sliding sideways through it.
-    const ctrl = from
-      .clone()
-      .lerp(dest, 0.5)
-      .addScaledVector(planet.dir, arcHeight)
-      .add(new THREE.Vector3(0, arcHeight, 0));
-    // Which way was up on the sphere, and which way the camera was
-    // sitting. Snapping straight to world axes at the moment of
-    // departure whips the camera around the avatar — a half-turn if
-    // the portal happened to be on the far side — and rolls the
-    // horizon over at the same time. Handing the camera the frame it
-    // was already in and rotating it out along the shortest arc is the
-    // difference between falling off a star and being thrown by one.
-    const fromFrame = new THREE.Quaternion().setFromRotationMatrix(
-      this.tmpBasis.makeBasis(planet.east, planet.dir, planet.south)
-    );
+    const duration = opts.duration ?? 2.6;
+    const dropFrom = opts.dropFrom ?? 150;
+    // Offset sideways so it falls at an angle rather than dead
+    // vertically — the camera has nothing to read from a plumb line.
+    const lean = 22;
+    const from = new THREE.Vector3(to.x - lean * 0.4, dropFrom, to.z + lean);
     this.planet = null;
+    this.player.group.position.copy(from);
     this.spaceFlight = {
       t: 0,
       duration,
       from,
-      ctrl,
+      // Control point on the start means the quadratic collapses to
+      // `from + (to - from) * t^2` — a straight line eased like
+      // gravity, slow off the top and fast into the water.
+      ctrl: from.clone(),
       to: dest,
-      flips: Math.max(2, Math.round(duration * 1.1)),
+      flips: 2,
       spin: 0,
       onArrive: opts.onLand,
-      fromFrame,
-      frameBlend: Math.min(2.0, duration * 0.45),
+      // Chases harder than the usual follow. A gravity fall outruns
+      // the default easing badly enough that the camera is still
+      // twenty-odd units back at the moment of the splash, and then
+      // swoops in to catch up afterwards.
+      camLerp: 0.16,
+      snap: true,
     };
   }
 
@@ -708,30 +706,23 @@ export class Engine {
           .point(this.tmpLook, 0)
           .addScaledVector(planet.dir, this.cameraLookOffset.y);
         this.tmpUpTarget.copy(planet.dir);
-      } else if (spaceFlight?.fromFrame && spaceFlight.t < (spaceFlight.frameBlend ?? 0)) {
-        // Leaving a sphere. Rotate the camera's whole frame — offset
-        // and up together — out of the departure tangent frame and
-        // back to world axes along the shortest arc, so it swings
-        // round the avatar instead of cutting across it.
-        const b = smoothstep01(spaceFlight.t / (spaceFlight.frameBlend ?? 1));
-        this.tmpFrameQuat.copy(spaceFlight.fromFrame).slerp(Engine.NO_ROTATION, b);
-        this.tmpVec.copy(this.cameraOffset).applyQuaternion(this.tmpFrameQuat);
-        this.tmpVec.add(
-          this.tmpPoint.set(pos.x, pos.y + (cameraAnchorY - pos.y) * b, pos.z)
-        );
-        this.camera.position.lerp(this.tmpVec, 0.12);
-        this.tmpUpTarget.copy(Engine.WORLD_UP).applyQuaternion(this.tmpFrameQuat);
-        this.tmpLook
-          .copy(this.tmpPoint)
-          .addScaledVector(this.tmpUpTarget, this.cameraLookOffset.y);
-        // Track the blended frame exactly; the rate-limited easing
-        // below would fight it.
-        this.camUp.copy(this.tmpUpTarget);
       } else {
         this.tmpVec
           .set(anchorX, cameraAnchorY, anchorZ)
           .addScaledVector(this.cameraOffset, focusZoom);
-        this.camera.position.lerp(this.tmpVec, 0.08);
+        // A flight that begins with a teleport has nothing to ease
+        // from: the camera's last position was next to a star three
+        // hundred units away, and lerping toward the new one would
+        // fly it across the sky for two seconds while the avatar
+        // falls. Place it, and let the same frame put the world back
+        // the right way up.
+        if (spaceFlight?.snap) {
+          spaceFlight.snap = false;
+          this.camera.position.copy(this.tmpVec);
+          this.camUp.copy(Engine.WORLD_UP);
+        } else {
+          this.camera.position.lerp(this.tmpVec, spaceFlight?.camLerp ?? 0.08);
+        }
         this.tmpLook.set(anchorX, cameraAnchorY, anchorZ).add(this.cameraLookOffset);
         this.tmpUpTarget.copy(Engine.WORLD_UP);
       }
@@ -741,7 +732,7 @@ export class Engine {
       // there reads as a tilted horizon); everywhere else it eases
       // back to world up at a capped rate, which is what carries the
       // camera through the ride home.
-      if (planet || (spaceFlight?.fromFrame && spaceFlight.t < (spaceFlight.frameBlend ?? 0))) {
+      if (planet) {
         this.camUp.copy(this.tmpUpTarget);
       } else {
         const angle = this.camUp.angleTo(this.tmpUpTarget);

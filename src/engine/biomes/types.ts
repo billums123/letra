@@ -79,7 +79,7 @@ export type BiomeContext = {
   ) => void;
   leavePlanet: (
     to: { x: number; z: number },
-    opts?: { duration?: number; arcHeight?: number; onLand?: () => void }
+    opts?: { duration?: number; dropFrom?: number; onLand?: () => void }
   ) => void;
   // Park the follow camera on a fixed world point instead of the
   // avatar, for set-pieces where the avatar is out of sight and the

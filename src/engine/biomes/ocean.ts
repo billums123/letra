@@ -14,7 +14,8 @@ import {
   playSmallSplash,
   playLavaSplash,
   playWoo,
-  playFireworkBurst,
+  playPortalDive,
+  playSunTouchdown,
 } from "../../audio/sfx";
 import { music } from "../../audio/music";
 
@@ -388,6 +389,25 @@ function buildProps(ctx: BiomeContext): void {
   };
   setTerrainHeight(sampleGround);
 
+  // ── Earshot ──────────────────────────────────────────────────────
+  // How loud something happening at (x, y, z) should be from wherever
+  // the avatar currently is. Flat across the whole play area, so the
+  // ocean sounds exactly as it always did while the kid is on it, then
+  // falling away to nothing once they leave — which is what stops the
+  // fish plopping in their ear while they are standing on the sun, and
+  // what makes the lava fountain recede as a launch carries them up.
+  const HEAR_FULL = 26;
+  const HEAR_GONE = 165;
+  function earshot(x: number, z: number, y = 0): number {
+    const p = getPlayerPosition();
+    if (!p) return 1;
+    const d = Math.hypot(p.x - x, p.y - y, p.z - z);
+    if (d <= HEAR_FULL) return 1;
+    if (d >= HEAR_GONE) return 0;
+    const k = (d - HEAR_FULL) / (HEAR_GONE - HEAR_FULL);
+    return 1 - k * k * (3 - 2 * k);
+  }
+
   // ── Swallowed-by-the-mountain test ───────────────────────────────
   // True while the avatar is inside the sea-cave tunnel. Two things
   // read it: the avatar is hidden (it should read as gone INTO the
@@ -713,7 +733,7 @@ function buildProps(ctx: BiomeContext): void {
       // your own ocean hanging in the sky behind you.
       faceHint: new THREE.Vector3(0, 0, -1),
       onArrive: () => {
-        playFireworkBurst();
+        playSunTouchdown();
         // A beat before the sunspots go live, or touching down beside
         // one would bounce the kid straight home again.
         armExitsIn = 1.6;
@@ -723,24 +743,43 @@ function buildProps(ctx: BiomeContext): void {
     wooTimer = 2.2;
   }
 
-  sunWorld.onEnterSpot = () => {
-    if (!offWorld) return;
+  // Driving into a portal. The pool swallows the boat, and a beat
+  // later it is falling out of the sky over the sea. The pause is the
+  // whole point: it gives the kid something to watch at the moment the
+  // camera cuts, so the cut reads as going through rather than as the
+  // picture jumping.
+  let dropIn = -1;
+  sunWorld.onEnterSpot = (dir) => {
+    if (!offWorld || dropIn > 0) return;
     sunWorld.armExits(false);
     armExitsIn = -1;
+    playPortalDive();
+    sunWorld.flashPortal(dir);
+    setPlayerVisible(false);
+    dropIn = 0.55;
+  };
+  // Runs from the space tick, which ticks whether or not the avatar is
+  // on the flat world.
+  function dropHome(dt: number): void {
+    if (dropIn <= 0) return;
+    dropIn -= dt;
+    if (dropIn > 0) return;
+    dropIn = -1;
     offWorld = false;
+    setPlayerVisible(true);
     const dest = pickWaterLanding();
-    const duration = 5.0;
-    // Ease the sky back across the whole descent instead of snapping
-    // it at the surface.
+    const duration = 2.6;
+    // The fall starts well above the space threshold, so the sky
+    // brightens on the way down on its own; the lock just gets out of
+    // the way.
     spaceLockTarget = 0;
     spaceLockRate = 1 / duration;
-    wooTimer = 3.4;
+    wooTimer = 0.5;
     leavePlanet(dest, {
       duration,
-      arcHeight: 70,
       onLand: () => bigSplash(dest.x, dest.z),
     });
-  };
+  }
 
   if (isDev()) {
     // Testing the trip shouldn't mean waiting on a 30% roll and a
@@ -894,6 +933,7 @@ function buildProps(ctx: BiomeContext): void {
         armExitsIn -= dt;
         if (armExitsIn <= 0) sunWorld.armExits(true);
       }
+      dropHome(dt);
       const bg = scene.background;
       if (bg instanceof THREE.Color && bg !== bgRef) {
         bgRef = bg;
@@ -1675,7 +1715,7 @@ function buildProps(ctx: BiomeContext): void {
   function bigSplash(x: number, z: number): void {
     spawnFoam(x, z, 2.6);
     spawnFoam(x, z, 1.4);
-    playSplash();
+    playSplash(earshot(x, z));
     for (const d of droplets) {
       d.active = true;
       d.mesh.visible = true;
@@ -1781,7 +1821,7 @@ function buildProps(ctx: BiomeContext): void {
       if (sputterIn <= 0) {
         sputterIn = 5 + Math.random() * 6;
         fireBomb(false);
-        playLavaPop();
+        playLavaPop(earshot(ISLAND.x, ISLAND.z, RIM_H));
       }
       if (player) {
         const d = Math.hypot(player.x - MOUTH.x, player.z - MOUTH.z);
@@ -1924,8 +1964,9 @@ function buildProps(ctx: BiomeContext): void {
           // A bomb that reaches open water quenches with a steam
           // hiss; one that lands on the island's rock or beach just
           // pops.
-          if (islandHeight(bx, bz) + sandHeight(bx, bz) < 0.05) playLavaSplash();
-          else playLavaPop();
+          const heard = earshot(bx, bz);
+          if (islandHeight(bx, bz) + sandHeight(bx, bz) < 0.05) playLavaSplash(heard);
+          else playLavaPop(heard);
         }
       }
     }
@@ -2069,7 +2110,7 @@ function buildProps(ctx: BiomeContext): void {
           peak = 1.2 + fishRand() * 1.0;
           fish.group.visible = true;
           spawnFoam(from.x, from.z, 0.5);
-          playSmallSplash();
+          playSmallSplash(earshot(from.x, from.z));
         }
         return;
       }
@@ -2087,7 +2128,7 @@ function buildProps(ctx: BiomeContext): void {
         timer = 1.5 + fishRand() * 3.5;
         fish.group.visible = false;
         spawnFoam(to.x, to.z, 0.55);
-        playSmallSplash();
+        playSmallSplash(earshot(to.x, to.z));
         hx = to.x;
         hz = to.z;
       }

@@ -34,6 +34,10 @@ export type SunWorld = {
   // touchdown so a landing right beside one doesn't bounce the kid
   // straight home again.
   armExits: (armed: boolean) => void;
+  // Flare the portal at `dir`. Called the moment the avatar drives
+  // into one: it vanishes, and something has to show that it went
+  // somewhere rather than simply stopped existing.
+  flashPortal: (dir: THREE.Vector3) => void;
 };
 
 // Surface palette, coolest to hottest. Deliberately a narrow range:
@@ -273,6 +277,7 @@ export function buildSunWorld(opts: {
     pool: THREE.Mesh;
     shaft: THREE.Mesh;
     spark: THREE.Sprite;
+    flash: number;
   }> = [];
   const localViewer = new THREE.Vector3();
   for (const dir of SPOT_DIRS) {
@@ -293,7 +298,7 @@ export function buildSunWorld(opts: {
     pivot.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
     pivot.add(pool, rim, scorch, shaft, spark);
     group.add(pivot);
-    portals.push({ dir, pivot, pool, shaft, spark });
+    portals.push({ dir, pivot, pool, shaft, spark, flash: 0 });
   }
 
   // ── Light ────────────────────────────────────────────────────────
@@ -344,6 +349,18 @@ export function buildSunWorld(opts: {
     armExits(next) {
       armed = next;
       if (!next) insidePortal = false;
+    },
+    flashPortal(dir) {
+      let best: (typeof portals)[number] | null = null;
+      let bestAngle = Infinity;
+      for (const p of portals) {
+        const a = dir.angleTo(p.dir);
+        if (a < bestAngle) {
+          bestAngle = a;
+          best = p;
+        }
+      }
+      if (best) best.flash = 1;
     },
     tick(dt, t, viewer) {
       if (!group.visible) return;
@@ -409,8 +426,12 @@ export function buildSunWorld(opts: {
 
       const sparkPulse = 1 + Math.sin(t * 2.1) * 0.16;
       for (const p of portals) {
-        p.pool.rotation.y += dt * 0.35;
-        p.spark.scale.setScalar(poolR * 1.2 * sparkPulse);
+        // The whirl speeds up sharply for the moment something goes
+        // through it, then settles back.
+        if (p.flash > 0) p.flash = Math.max(0, p.flash - dt * 1.7);
+        const burst = p.flash * p.flash;
+        p.pool.rotation.y += dt * (0.35 + burst * 5);
+        p.spark.scale.setScalar(poolR * 1.2 * (sparkPulse + burst * 1.9));
         // The shaft is one flat plane. Spinning it about the portal's
         // own up-axis to face the viewer is what keeps it reading as a
         // volume of light from every angle, at the cost of one matrix
