@@ -2,6 +2,8 @@ import * as THREE from "three";
 import type { Biome, BiomeContext } from "./types";
 import { findOpenSpot, freshSeed, mulberry32, makeCloud } from "../world";
 import { makePalmTree } from "./jungle";
+import { buildSunWorld } from "./sun";
+import { isDev } from "../../util/isDev";
 import { rollTimeOfDay, type TimeOfDay } from "./timeOfDay";
 import {
   playVolcanoRumble,
@@ -11,6 +13,7 @@ import {
   playSmallSplash,
   playLavaSplash,
   playWoo,
+  playFireworkBurst,
 } from "../../audio/sfx";
 
 // Ocean biome — the kid putters around open water in a tugboat.
@@ -358,6 +361,8 @@ function buildProps(ctx: BiomeContext): void {
     launchPlayer,
     setPlayerVisible,
     setCameraFocus,
+    launchToPlanet,
+    leavePlanet,
   } = ctx;
 
   // ── Wave field ───────────────────────────────────────────────────
@@ -652,6 +657,95 @@ function buildProps(ctx: BiomeContext): void {
     });
   }
 
+  // ── The sun, as a place ──────────────────────────────────────────
+  // The star that rises over the horizon on a mega launch is a real
+  // destination: a sphere the avatar gets flung to and can then walk
+  // all the way around. One object does both jobs, so there is never
+  // a swap between the thing you can see and the thing you land on.
+  const SUN_CENTER = new THREE.Vector3(30, 55, -300);
+  const SUN_RADIUS = 28;
+  const sunWorld = buildSunWorld({ center: SUN_CENTER, radius: SUN_RADIUS });
+  group.add(sunWorld.group);
+  // Holds the sky black while off-world — see the space tick below.
+  let spaceLock = 0;
+  let spaceLockTarget = 0;
+  let spaceLockRate = 1.2;
+  let armExitsIn = -1;
+  let offWorld = false;
+
+  function goToSun(flightSeconds = 6.4): void {
+    if (offWorld) return;
+    offWorld = true;
+    // The boom teleports the avatar to the crater's xz but leaves its
+    // y wherever the tunnel left it. The ordinary launch re-samples
+    // the ground; this one has to do the same or the arc starts
+    // several units below the crater floor.
+    const p = getPlayerPosition();
+    if (p) p.y = sampleGround(p.x, p.z);
+    setCameraFocus(null);
+    spaceLockTarget = 1;
+    spaceLockRate = 1.2;
+    sunWorld.armExits(false);
+    launchToPlanet(sunWorld.spec, {
+      duration: flightSeconds,
+      arcHeight: 95,
+      // Straight down onto the north pole. That is the one landing
+      // where the planet camera and the flat camera agree exactly, so
+      // the handover from flying to walking is invisible.
+      landDir: new THREE.Vector3(0, 1, 0),
+      // Facing away from home, so turning around is rewarded with
+      // your own ocean hanging in the sky behind you.
+      faceHint: new THREE.Vector3(0, 0, -1),
+      onArrive: () => {
+        playFireworkBurst();
+        // A beat before the sunspots go live, or touching down beside
+        // one would bounce the kid straight home again.
+        armExitsIn = 1.6;
+      },
+    });
+    // Timed for the top of the arc, where the stars come out.
+    wooTimer = 2.2;
+  }
+
+  sunWorld.onEnterSpot = () => {
+    if (!offWorld) return;
+    sunWorld.armExits(false);
+    armExitsIn = -1;
+    offWorld = false;
+    const dest = pickWaterLanding();
+    const duration = 5.0;
+    // Ease the sky back across the whole descent instead of snapping
+    // it at the surface.
+    spaceLockTarget = 0;
+    spaceLockRate = 1 / duration;
+    wooTimer = 3.4;
+    leavePlanet(dest, {
+      duration,
+      arcHeight: 70,
+      onLand: () => bigSplash(dest.x, dest.z),
+    });
+  };
+
+  if (isDev()) {
+    // Testing the trip shouldn't mean waiting on a 30% roll and a
+    // drive into the cave. Press U, or call __letraSunTrip().
+    type SunDev = {
+      __letraSunTrip?: () => void;
+      __letraSunLand?: () => void;
+      __letraSunKey?: (e: KeyboardEvent) => void;
+    };
+    const w = window as unknown as SunDev;
+    if (w.__letraSunKey) window.removeEventListener("keydown", w.__letraSunKey);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.code === "KeyU") goToSun();
+    };
+    w.__letraSunKey = onKey;
+    w.__letraSunTrip = () => goToSun();
+    // Skips the ride, for looking at the surface without waiting.
+    w.__letraSunLand = () => goToSun(0.05);
+    window.addEventListener("keydown", onKey);
+  }
+
   // ── Space ────────────────────────────────────────────────────────
   // Every so often the volcano really lets go and throws the boat
   // clear of the atmosphere. Stars, a sun and the sky draining to
@@ -694,55 +788,6 @@ function buildProps(ctx: BiomeContext): void {
     stars.visible = false;
     group.add(stars);
 
-    // Sits low and very far off, so it reads as rising over the
-    // planet's curve. The obvious placement — high in the sky — is
-    // wrong: the flight camera looks about 33 degrees DOWN at the
-    // avatar, so anything overhead is pushed straight off the top of
-    // the frame. Low and distant puts it about 19 degrees off the view
-    // axis, comfortably in shot, and the composition is better for it.
-    const sunAt = new THREE.Vector3(30, 45, -300);
-    const sunMat = new THREE.MeshBasicMaterial({
-      color: 0xfff6d0,
-      transparent: true,
-      opacity: 0,
-      fog: false,
-      depthWrite: false,
-    });
-    const sun = new THREE.Mesh(new THREE.SphereGeometry(17, 20, 16), sunMat);
-    sun.position.copy(sunAt);
-    sun.visible = false;
-    group.add(sun);
-    // Glow. This has to be a gradient, which means a texture: a flat
-    // sphere can't fade out, and dimming one just makes a duller flat
-    // disc — additive at 0.32 over black lands on a muddy brown ring
-    // rather than anything resembling light.
-    const glowTex = (() => {
-      const c = document.createElement("canvas");
-      c.width = 128;
-      c.height = 128;
-      const g = c.getContext("2d")!;
-      const grd = g.createRadialGradient(64, 64, 0, 64, 64, 64);
-      grd.addColorStop(0, "rgba(255,244,205,1)");
-      grd.addColorStop(0.3, "rgba(255,186,96,0.5)");
-      grd.addColorStop(1, "rgba(255,150,50,0)");
-      g.fillStyle = grd;
-      g.fillRect(0, 0, 128, 128);
-      return new THREE.CanvasTexture(c);
-    })();
-    const haloMat = new THREE.SpriteMaterial({
-      map: glowTex,
-      transparent: true,
-      opacity: 0,
-      depthWrite: false,
-      blending: THREE.AdditiveBlending,
-      fog: false,
-    });
-    const halo = new THREE.Sprite(haloMat);
-    halo.scale.setScalar(110);
-    halo.position.copy(sunAt);
-    halo.visible = false;
-    group.add(halo);
-
     // The biome's own sky is captured the first time we see it and
     // whenever applyScene swaps in a new one (a time-of-day change),
     // so the values we lerp away from are always the pristine ones and
@@ -754,10 +799,14 @@ function buildProps(ctx: BiomeContext): void {
     let fogNearBase = 0;
     let fogFarBase = 0;
 
-    tick.push(() => {
+    tick.push((dt, t) => {
       const p = getPlayerPosition();
       const scene = group.parent as THREE.Scene | null;
       if (!p || !scene) return;
+      if (armExitsIn > 0) {
+        armExitsIn -= dt;
+        if (armExitsIn <= 0) sunWorld.armExits(true);
+      }
       const bg = scene.background;
       if (bg instanceof THREE.Color && bg !== bgRef) {
         bgRef = bg;
@@ -771,7 +820,17 @@ function buildProps(ctx: BiomeContext): void {
         fogFarBase = fog.far;
       }
 
-      const k = smoothstep01((p.y - SPACE_START) / (SPACE_FULL - SPACE_START));
+      // Normally the sky drains to black purely as a function of
+      // altitude, which needs no flight state to stay in sync with and
+      // so cannot get stuck on. Standing on the sun is the exception:
+      // it sits only ~80 units up, which would leave the kid on a star
+      // under a blue-ish sky. `spaceLock` holds it full while off-world
+      // and eases back out across the ride home.
+      spaceLock += Math.max(-spaceLockRate * dt, Math.min(spaceLockRate * dt, spaceLockTarget - spaceLock));
+      const k = Math.max(
+        smoothstep01((p.y - SPACE_START) / (SPACE_FULL - SPACE_START)),
+        spaceLock
+      );
       if (bgRef) bgRef.copy(bgBase).lerp(spaceColor, k);
       if (fogRef) {
         fogRef.color.copy(fogBase).lerp(spaceColor, k);
@@ -781,11 +840,11 @@ function buildProps(ctx: BiomeContext): void {
         fogRef.far = fogFarBase + k * 900;
       }
       starMat.opacity = k;
-      sunMat.opacity = Math.min(1, k * 1.5);
-      haloMat.opacity = k * 0.9;
       stars.visible = k > 0.01;
-      sun.visible = k > 0.01;
-      halo.visible = k > 0.01;
+      // Steeper than the stars: a half-transparent star looks like a
+      // ghost, so it goes solid well before the sky finishes draining.
+      sunWorld.setOpacity(Math.min(1, k * 2.4));
+      sunWorld.tick(dt, t, p);
     });
   }
 
@@ -1667,15 +1726,18 @@ function buildProps(ctx: BiomeContext): void {
           fountainT = 3.4;
           for (let i = 0; i < 16; i++) fireEmber();
         }
-        const dest = pickWaterLanding();
-        launchPlayer(dest, {
-          duration: mega ? 5.2 : 1.8,
-          peakY: mega ? 135 : 15,
-          onLand: () => bigSplash(dest.x, dest.z),
-        });
-        // A second whoop near the top of a mega arc, timed for the
-        // moment the stars come out.
-        if (mega) wooTimer = 2.2;
+        if (mega) {
+          // A mega eruption no longer comes back down — it throws the
+          // boat clear of the world entirely and lands it on the sun.
+          goToSun();
+        } else {
+          const dest = pickWaterLanding();
+          launchPlayer(dest, {
+            duration: 1.8,
+            peakY: 15,
+            onLand: () => bigSplash(dest.x, dest.z),
+          });
+        }
       }
     } else if (state === "cooldown") {
       if (stateT >= COOLDOWN_SECONDS) {

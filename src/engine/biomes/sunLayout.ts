@@ -1,0 +1,36 @@
+import * as THREE from "three";
+
+// Where the sun's landmarks sit, kept apart from the mesh building in
+// sun.ts so the layout can be checked on its own (see
+// scripts/planet-test.ts) without a DOM to draw into.
+
+// Sunspot size, as an angle at the sun's centre — sized so a kid
+// driving in a straight line can hardly miss one.
+export const SPOT_ANGLE = 0.22;
+
+// How tall the beacon over each sunspot stands, in world units. On a
+// 28-unit star this keeps a beacon in sight from about 84 degrees of
+// arc away, which is what the layout below is checked against.
+export const BEAM_HEIGHT = 14;
+
+// Sunspot positions, as unit directions from the sun's centre.
+//
+// The first is deliberately ahead of the arrival view — every trip
+// lands on the north pole looking down -Z, so its beacon is already on
+// the horizon when the kid touches down and the way home needs no
+// explaining. It sits 62 degrees of arc out rather than right there —
+// about 26 units to its rim, so getting to it is a proper drive
+// across a star rather than the two-second hop a closer one gave.
+//
+// The other four were relaxed apart from it and from each other until
+// the worst gap anywhere on the star came down to 64 degrees of arc.
+// The coverage check in scripts/planet-test.ts is the only honest way
+// to know a four-year-old can't end up stranded on a featureless
+// orange ball.
+export const SPOT_DIRS: readonly THREE.Vector3[] = [
+  new THREE.Vector3(0.12, 0.47, -0.875).normalize(),
+  new THREE.Vector3(-0.859, 0.495, 0.133).normalize(),
+  new THREE.Vector3(0.072, -0.872, -0.484).normalize(),
+  new THREE.Vector3(0.833, 0.407, 0.375).normalize(),
+  new THREE.Vector3(-0.171, -0.503, 0.847).normalize(),
+];

@@ -52,6 +52,38 @@ Plus:
   game, and a 120 BPM party track the end-of-alphabet dance is
   choreographed against.
 
+### Landing on the sun
+
+Roughly a third of the ocean volcano's eruptions are *mega* eruptions.
+Those no longer come back down: the boat is thrown clear of the world
+and lands on the sun, which is a real place you can walk all the way
+around.
+
+The sun is a sphere, and the flat world's whole pipeline — input,
+avatar animation, camera — assumes a ground plane. Rather than teach
+all of it about spheres, `src/engine/planet.ts` keeps an orthonormal
+tangent frame at the avatar's feet and treats the flat world's axes as
+that frame's axes. The avatar still moves itself in flat coordinates
+exactly as it always has; the engine reads back the delta it applied
+each frame and walks it along the matching great circle, transporting
+the frame with it. So the controls, the turn-to-face, the camera
+framing and the idle bob all behave precisely as they do in the park —
+the ground just curves away, and keep walking and you come back to
+where you started. Landing on the north pole is deliberate: it is the
+one spot where the sphere camera and the flat camera are the same
+arithmetic, so the handover from flying to walking is invisible.
+
+Getting home is the sunspots — dark whirls in the plasma, each with a
+column of cool blue light standing over it that clears the horizon from
+a long way off, so there is always one in sight to drive toward. Drive
+in and the sun spits you back down to a splashdown.
+
+`npm run test:planet` checks the parts that are easy to get subtly
+wrong and impossible to eyeball: that a full lap returns to exactly
+where it started, that the tangent frame stays orthonormal over
+minutes of wandering, and that the sunspot layout leaves no gap on the
+star wide enough to strand a kid with no beacon in sight.
+
 ### Personalisation
 
 Picked from the menu before each game:
@@ -64,8 +96,8 @@ Picked from the menu before each game:
   flora), across the floating **Sky** islands, or out on the **Ocean**
   (live swell the boat really rides, jumping fish, and a volcano island
   with a sea cave — sail in and it erupts, launching you to a splashdown
-  somewhere across the water). New biomes drop in by adding one file in
-  `src/engine/biomes/`.
+  somewhere across the water, or, on a big one, all the way to the sun).
+  New biomes drop in by adding one file in `src/engine/biomes/`.
 - **Letter case** — UPPERCASE, lowercase, or Mixed for Spell-the-Word and
   Find-the-Alphabet. Mixed rolls per-letter in Find-the-Alphabet and
   per-word in Spell-the-Word.

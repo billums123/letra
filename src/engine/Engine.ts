@@ -5,6 +5,7 @@ import { buildWorld, type Obstacle } from "./world";
 import { getBiome } from "./biomes";
 import type { Biome } from "./biomes/types";
 import { subscribeForcedTOD } from "./biomes/timeOfDay";
+import { PlanetWalker, type PlanetSpec } from "./planet";
 import { readInput } from "../input/useInput";
 
 const PLAYER_RADIUS = 0.55;
@@ -84,14 +85,51 @@ export class Engine {
   } | null = null;
   private tmpTumble = new THREE.Quaternion();
   private static readonly TUMBLE_AXIS = new THREE.Vector3(1, 0, 0);
+
+  // Off-world travel. A space flight is a free 3D arc between two
+  // points — unlike `flight` above it is not tied to the ground
+  // plane at either end, because one end is a point in orbit. When it
+  // arrives it either hands the avatar to a PlanetWalker (outbound)
+  // or drops it back into the flat world (homebound).
+  private spaceFlight: {
+    t: number;
+    duration: number;
+    from: THREE.Vector3;
+    ctrl: THREE.Vector3;
+    to: THREE.Vector3;
+    flips: number;
+    spin: number;
+    onArrive?: () => void;
+    // Set on the outbound leg: the sphere to start walking on landing.
+    arriveOn?: { spec: PlanetSpec; landDir: THREE.Vector3; faceHint?: THREE.Vector3 };
+  } | null = null;
+  // While set, the flat pipeline is replaced entirely by a walk
+  // around a sphere. See planet.ts.
+  private planet: PlanetWalker | null = null;
+  // Camera up-vector, eased rather than snapped so the horizon rolls
+  // over smoothly when the avatar leaves the flat world for a sphere
+  // (and back again).
+  private camUp = new THREE.Vector3(0, 1, 0);
+  private tmpPoint = new THREE.Vector3();
+  private tmpLook = new THREE.Vector3();
+  private tmpUpTarget = new THREE.Vector3();
+  private tmpAxis = new THREE.Vector3();
   // Touchdown squash-and-stretch timer (seconds remaining). Applied to
   // the player group's scale for a beat after landing so the arrival
   // reads as an impact instead of a freeze-frame stop.
   private landSquash = 0;
   private static readonly LAND_SQUASH_DURATION = 0.38;
 
+  // True whenever the avatar is not under the kid's control on the
+  // ground. Games use it to hold off letter pickups mid-arc; walking
+  // on a planet is deliberately NOT included, because there the kid
+  // is very much driving.
   get inFlight(): boolean {
-    return this.flight !== null;
+    return this.flight !== null || this.spaceFlight !== null;
+  }
+
+  get onPlanet(): boolean {
+    return this.planet !== null;
   }
 
   // Fling the avatar to (x, z) on a ballistic arc. Ignored if a flight
@@ -126,6 +164,88 @@ export class Engine {
       spin: 0,
       flips,
       onLand: opts.onLand,
+    };
+  }
+
+  // Throw the avatar off the flat world and set it down on a sphere.
+  // The arc is a quadratic Bezier so it can bow out sideways as well
+  // as up — a straight climb to something 300 units away reads as a
+  // dull elevator ride, and the bow keeps the destination in frame
+  // the whole way.
+  launchToPlanet(
+    spec: PlanetSpec,
+    opts: {
+      duration?: number;
+      // Where on the sphere to touch down, as a unit direction from
+      // its centre. Defaults to the north pole, which is also the one
+      // landing where the planet camera and the flat camera agree
+      // exactly, so the handover is invisible.
+      landDir?: THREE.Vector3;
+      // Which way the avatar should be looking on arrival.
+      faceHint?: THREE.Vector3;
+      // How far the arc bows above the straight line, in units.
+      arcHeight?: number;
+      onArrive?: () => void;
+    } = {}
+  ): void {
+    if (this.spaceFlight || this.planet) return;
+    this.flight = null;
+    const landDir = (opts.landDir ?? new THREE.Vector3(0, 1, 0)).clone().normalize();
+    const to = spec.center
+      .clone()
+      .addScaledVector(landDir, spec.radius + (spec.hover ?? 0));
+    const from = this.player.group.position.clone();
+    const duration = opts.duration ?? 5.6;
+    const arcHeight = opts.arcHeight ?? from.distanceTo(to) * 0.35;
+    // Control point on the perpendicular bisector, lifted along world
+    // up. At t=0.5 a quadratic Bezier sits halfway between the
+    // midpoint and the control point, so the actual apex is half of
+    // arcHeight — doubling here keeps the parameter meaning what its
+    // name says.
+    const ctrl = from.clone().lerp(to, 0.5).add(new THREE.Vector3(0, arcHeight * 2, 0));
+    this.spaceFlight = {
+      t: 0,
+      duration,
+      from,
+      ctrl,
+      to,
+      flips: Math.max(2, Math.round(duration * 1.1)),
+      spin: 0,
+      onArrive: opts.onArrive,
+      arriveOn: { spec, landDir, faceHint: opts.faceHint },
+    };
+  }
+
+  // Step off the planet and fall back into the flat world at (x, z).
+  leavePlanet(
+    to: { x: number; z: number },
+    opts: { duration?: number; arcHeight?: number; onLand?: () => void } = {}
+  ): void {
+    if (!this.planet || this.spaceFlight) return;
+    const planet = this.planet;
+    const from = this.player.group.position.clone();
+    const landY = this.terrainHeight ? this.terrainHeight(to.x, to.z) : 0;
+    const dest = new THREE.Vector3(to.x, landY, to.z);
+    const duration = opts.duration ?? 4.4;
+    const arcHeight = opts.arcHeight ?? 60;
+    // Bow the departure out along the planet's local up, so the kid
+    // is flung off the surface they are standing on rather than
+    // sliding sideways through it.
+    const ctrl = from
+      .clone()
+      .lerp(dest, 0.5)
+      .addScaledVector(planet.dir, arcHeight)
+      .add(new THREE.Vector3(0, arcHeight, 0));
+    this.planet = null;
+    this.spaceFlight = {
+      t: 0,
+      duration,
+      from,
+      ctrl,
+      to: dest,
+      flips: Math.max(2, Math.round(duration * 1.1)),
+      spin: 0,
+      onArrive: opts.onLand,
     };
   }
 
@@ -223,7 +343,9 @@ export class Engine {
       },
       (focus) => {
         this.cameraFocus = focus;
-      }
+      },
+      (planet, opts) => this.launchToPlanet(planet, opts),
+      (to, opts) => this.leavePlanet(to, opts)
     );
     this.scene.add(world.group);
     this.terrainHeight = world.terrainHeight;
@@ -310,8 +432,45 @@ export class Engine {
       // skipped because the avatar is above all of them. The avatar
       // still gets a zero-input update so idle animation + engine
       // audio keep running.
+      const spaceFlight = this.spaceFlight;
+      const planet = this.planet;
       const flight = this.flight;
-      if (flight) {
+      if (spaceFlight) {
+        // Free 3D arc between two points in space. Quadratic Bezier
+        // rather than the ground flight's parabola, because neither
+        // end is on the ground plane and the path has to bow toward
+        // wherever the destination happens to be.
+        this.player.update(dt, Engine.ZERO_MOVE);
+        spaceFlight.t += dt;
+        const k = Math.min(1, spaceFlight.t / spaceFlight.duration);
+        const inv = 1 - k;
+        pp.set(0, 0, 0)
+          .addScaledVector(spaceFlight.from, inv * inv)
+          .addScaledVector(spaceFlight.ctrl, 2 * inv * k)
+          .addScaledVector(spaceFlight.to, k * k);
+        spaceFlight.spin = Math.PI * 2 * spaceFlight.flips * k;
+        if (k >= 1) {
+          this.spaceFlight = null;
+          const arriveOn = spaceFlight.arriveOn;
+          if (arriveOn) {
+            this.planet = new PlanetWalker(arriveOn.spec, arriveOn.landDir, arriveOn.faceHint);
+          }
+          this.landSquash = Engine.LAND_SQUASH_DURATION;
+          spaceFlight.onArrive?.();
+        }
+      } else if (planet) {
+        // Walking a sphere. The avatar still moves itself in flat
+        // coordinates — we read back the delta it applied to x/z this
+        // frame (prevX/prevZ hold the surface point we wrote last
+        // frame) and walk that along the matching great circle. Its
+        // y is its own bob, which becomes the lift above the surface.
+        const input = readInput();
+        this.player.update(dt, input.move);
+        const lift = pp.y;
+        planet.step(pp.x - prevX, pp.z - prevZ);
+        planet.tick(dt);
+        planet.point(pp, lift);
+      } else if (flight) {
         this.player.update(dt, Engine.ZERO_MOVE);
         flight.t += dt;
         const k = Math.min(1, flight.t / flight.duration);
@@ -416,9 +575,15 @@ export class Engine {
       // to the player's height for off-surface samples (so the void
       // edge of a sky island doesn't yank the avatar sideways), and
       // slerp toward the target so slope discontinuities don't snap.
+      if (planet) {
+        // On a sphere the "tilt" is the whole tangent frame, so the
+        // planet composes yaw and up in one go.
+        planet.orientation(this.player.group.quaternion, this.player.facing());
+        this.currentTilt.identity();
+      } else {
       this.tmpYawQuat.setFromAxisAngle(Engine.WORLD_UP, this.player.facing());
       this.tmpTargetTilt.identity();
-      if (!this.flight && this.terrainHeight && this.player.terrainAlign !== false) {
+      if (!this.flight && !this.spaceFlight && this.terrainHeight && this.player.terrainAlign !== false) {
         const sample = this.terrainHeight;
         const walkable = this.isWalkable;
         const eps = 0.35;
@@ -447,10 +612,12 @@ export class Engine {
       // Mid-flight tumble — front-flips about the avatar's local X so
       // the launch reads as a joyful somersault rather than a frozen
       // statue sliding along an arc.
-      if (this.flight) {
-        this.tmpTumble.setFromAxisAngle(Engine.TUMBLE_AXIS, this.flight.spin);
+      const tumbling = this.flight ?? this.spaceFlight;
+      if (tumbling) {
+        this.tmpTumble.setFromAxisAngle(Engine.TUMBLE_AXIS, tumbling.spin);
         this.player.group.quaternion.multiply(this.tmpTumble);
       }
+      } // end flat-world orientation
       // Touchdown squash-and-stretch: strongest the frame we land,
       // easing back to rest. Pure scale, so it composes with whatever
       // pose the avatar is in.
@@ -467,7 +634,10 @@ export class Engine {
       // once they walk past its bounds. We snap the target to ground
       // level (y=0) so the angle of the shadow stays consistent.
       for (const s of this.shadowSuns) {
-        s.light.target.position.set(pp.x, 0, pp.z);
+        // Ground level normally; the avatar's own height once it is
+        // off the flat world, or the shadow frustum sits hundreds of
+        // units below whatever it is meant to be covering.
+        s.light.target.position.set(pp.x, planet || this.spaceFlight ? pp.y - 1 : 0, pp.z);
         s.light.position.copy(s.light.target.position).add(s.offset);
         s.light.target.updateMatrixWorld();
       }
@@ -493,7 +663,7 @@ export class Engine {
       const anchorZ = focus ? focus.z : pos.z;
       const cameraAnchorY = focus
         ? focus.y
-        : this.flight
+        : this.flight || this.spaceFlight
           ? // Trail a fixed distance below the avatar rather than a
             // fraction of its height. The two agree exactly up to 15
             // units (a normal volcano launch), but on a mega-launch a
@@ -503,12 +673,46 @@ export class Engine {
           : this.terrainHeight
             ? this.terrainHeight(pos.x, pos.z)
             : 0;
-      this.tmpVec
-        .set(anchorX, cameraAnchorY, anchorZ)
-        .addScaledVector(this.cameraOffset, focusZoom);
-      this.camera.position.lerp(this.tmpVec, 0.08);
-      this.tmpVec.set(anchorX, cameraAnchorY, anchorZ).add(this.cameraLookOffset);
-      this.camera.lookAt(this.tmpVec);
+      if (planet) {
+        // Same offset, read in the tangent frame instead of world
+        // axes — so the framing is identical to the flat game's, and
+        // at the pole of a planet it is literally the same arithmetic.
+        planet.cameraPoint(this.tmpVec, this.cameraOffset);
+        this.camera.position.lerp(this.tmpVec, 0.08);
+        planet
+          .point(this.tmpLook, 0)
+          .addScaledVector(planet.dir, this.cameraLookOffset.y);
+        this.tmpUpTarget.copy(planet.dir);
+      } else {
+        this.tmpVec
+          .set(anchorX, cameraAnchorY, anchorZ)
+          .addScaledVector(this.cameraOffset, focusZoom);
+        this.camera.position.lerp(this.tmpVec, 0.08);
+        this.tmpLook.set(anchorX, cameraAnchorY, anchorZ).add(this.cameraLookOffset);
+        this.tmpUpTarget.copy(Engine.WORLD_UP);
+      }
+      // Which way is up depends on which world we are standing on, so
+      // it has to swing over when the avatar leaves one for the other.
+      // On a planet it tracks the surface normal exactly (any lag
+      // there reads as a tilted horizon); everywhere else it eases
+      // back to world up at a capped rate, which is what carries the
+      // camera through the ride home.
+      if (planet) {
+        this.camUp.copy(this.tmpUpTarget);
+      } else {
+        const angle = this.camUp.angleTo(this.tmpUpTarget);
+        if (angle > 1e-4) {
+          this.tmpAxis.crossVectors(this.camUp, this.tmpUpTarget);
+          if (this.tmpAxis.lengthSq() < 1e-10) {
+            // Exactly upside down — any perpendicular gets us moving.
+            this.tmpAxis.set(1, 0, 0).cross(this.camUp);
+            if (this.tmpAxis.lengthSq() < 1e-10) this.tmpAxis.set(0, 0, 1).cross(this.camUp);
+          }
+          this.camUp.applyAxisAngle(this.tmpAxis.normalize(), Math.min(angle, 1.4 * dt));
+        }
+      }
+      this.camera.up.copy(this.camUp);
+      this.camera.lookAt(this.tmpLook);
 
       // Per-actor update first (so collected letters can hide before render).
       for (const actor of this.actors) actor.update(dt, t);
