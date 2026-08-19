@@ -363,6 +363,7 @@ function buildProps(ctx: BiomeContext): void {
     setTerrainHeight,
     launchPlayer,
     setPlayerVisible,
+    setPlayerAblaze,
     setCameraFocus,
     launchToPlanet,
     leavePlanet,
@@ -734,6 +735,10 @@ function buildProps(ctx: BiomeContext): void {
       faceHint: new THREE.Vector3(0, 0, -1),
       onArrive: () => {
         playSunTouchdown();
+        // Standing on a star has consequences. The kid catches light
+        // and stays lit for the whole visit; nobody else has flames
+        // to catch.
+        setPlayerAblaze(true);
         // A beat before the sunspots go live, or touching down beside
         // one would bounce the kid straight home again.
         armExitsIn = 1.6;
@@ -777,7 +782,12 @@ function buildProps(ctx: BiomeContext): void {
     wooTimer = 0.5;
     leavePlanet(dest, {
       duration,
-      onLand: () => bigSplash(dest.x, dest.z),
+      onLand: () => {
+        bigSplash(dest.x, dest.z);
+        // He falls the whole way home still burning, which is half
+        // the joke, and the sea puts him out on impact.
+        if (setPlayerAblaze(false)) playLavaSplash(earshot(dest.x, dest.z));
+      },
     });
   }
 

@@ -364,6 +364,10 @@ export class Engine {
       (visible) => {
         if (this.player) this.player.group.visible = visible;
       },
+      (ablaze) => {
+        this.player?.setAblaze?.(ablaze);
+        return !!this.player?.setAblaze;
+      },
       (focus) => {
         this.cameraFocus = focus;
       },

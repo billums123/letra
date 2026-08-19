@@ -13,6 +13,10 @@ export type PlayerHandles = {
   // Whether the engine should tilt this avatar to match the terrain
   // incline. Hovering avatars (rocket) opt out by setting this false.
   terrainAlign?: boolean;
+  // Set the avatar alight. Only the kid implements it — a tugboat
+  // driving across a star is funny, a tugboat on fire is a shipwreck —
+  // so everyone else leaves it undefined and the callers no-op.
+  setAblaze?: (on: boolean) => void;
   // Tear-down hook called by Engine.dispose(). Used by avatars that
   // own continuous resources (the car's motor loop, etc.).
   dispose?: () => void;
@@ -107,14 +111,32 @@ function buildKid(): PlayerHandles {
   rightFoot.castShadow = true;
   group.add(rightFoot);
 
+  // ── On fire ──────────────────────────────────────────────────────
+  // What happens when a small child stands on the surface of a star.
+  // Tongues of flame are anchored around him, all of them clear of his
+  // face, and most of them tall enough to stand above his head — which
+  // matters, because on the sun the ground is bright orange and the
+  // only place a flame reads is in silhouette against the black sky.
+  const blaze = makeBlaze();
+  group.add(blaze.group);
+  // The glow on his own skin, so he looks lit from inside rather than
+  // standing in front of a fire.
+  const litMats = [body.material, belly.material, leftFoot.material] as THREE.MeshStandardMaterial[];
+  for (const m of litMats) m.emissive = new THREE.Color(0x000000);
+
   let facing = 0;
   let bob = 0;
   let prevBobAbs = 0;
 
   return {
     group,
+    setAblaze(on) {
+      blaze.setLit(on);
+    },
     update(dt, input) {
       const isMoving = Math.hypot(input.x, input.y) > 0.05;
+      blaze.update(dt, isMoving);
+      for (const m of litMats) m.emissive.setRGB(0.42 * blaze.amount(), 0.14 * blaze.amount(), 0);
       if (isMoving) {
         const speed = SPEED * dt;
         group.position.x += input.x * speed;
@@ -152,6 +174,205 @@ function buildKid(): PlayerHandles {
       return facing;
     },
   };
+}
+
+// ─── Being on fire ───────────────────────────────────────────────────────────
+// A rig of flame tongues plus a few embers, built once and kept
+// hidden until something sets the avatar alight. Everything is a child
+// of the avatar's group, so on the sun the flames stand along the
+// surface normal without anyone having to tell them where up is.
+
+// Bottom to tip. The white-hot base is what carries the shape against
+// a bright orange ground; the deep tip is what reads against black.
+const FLAME_CORE = new THREE.Color(0xfffdf0);
+const FLAME_MID = new THREE.Color(0xffcf46);
+const FLAME_EDGE = new THREE.Color(0xff7a1a);
+const FLAME_TIP = new THREE.Color(0xbf2304);
+
+type FlameSpot = { at: [number, number, number]; r: number; h: number };
+
+// Anchored around him, and deliberately never on the front of his
+// face — the whole point of the avatar is that you can see it is a
+// happy kid, even while he is burning.
+//
+// Many thin tongues rather than a few fat ones. A first pass used
+// eight wide cones and the result read as a party hat: fire is a
+// ragged cluster of thin things at different heights, and it is the
+// raggedness that says "flame" rather than "cone".
+const FLAME_SPOTS: FlameSpot[] = [
+  // Head — three, so the tallest part of him has a broken silhouette.
+  { at: [0, 1.26, -0.06], r: 0.21, h: 1.85 },
+  { at: [-0.15, 1.19, 0.02], r: 0.14, h: 1.3 },
+  { at: [0.16, 1.2, -0.1], r: 0.15, h: 1.5 },
+  // Shoulders.
+  { at: [-0.32, 1.0, -0.16], r: 0.15, h: 1.2 },
+  { at: [0.32, 1.0, -0.16], r: 0.15, h: 1.1 },
+  // Back.
+  { at: [0, 0.68, -0.44], r: 0.16, h: 1.05 },
+  { at: [-0.21, 0.5, -0.4], r: 0.12, h: 0.8 },
+  { at: [0.21, 0.5, -0.4], r: 0.12, h: 0.88 },
+  // Hips.
+  { at: [-0.45, 0.5, 0.0], r: 0.13, h: 0.85 },
+  { at: [0.45, 0.5, 0.0], r: 0.13, h: 0.92 },
+  // Feet.
+  { at: [-0.2, 0.14, 0.06], r: 0.12, h: 0.55 },
+  { at: [0.2, 0.14, 0.06], r: 0.12, h: 0.5 },
+];
+
+const EMBER_COUNT = 12;
+
+type Blaze = {
+  group: THREE.Group;
+  setLit: (on: boolean) => void;
+  // 0 out, 1 fully alight. Eased, so catching fire is a whoosh and
+  // going out is a puff rather than a pair of hard cuts.
+  amount: () => number;
+  update: (dt: number, moving: boolean) => void;
+};
+
+function makeBlaze(): Blaze {
+  const group = new THREE.Group();
+  group.visible = false;
+
+  const flameMat = new THREE.MeshBasicMaterial({
+    vertexColors: true,
+    transparent: true,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+    fog: false,
+  });
+  const emberMat = new THREE.SpriteMaterial({
+    map: makeEmberTexture(),
+    transparent: true,
+    opacity: 0,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    fog: false,
+  });
+
+  const tongues = FLAME_SPOTS.map((spot, i) => {
+    const mesh = new THREE.Mesh(makeTongueGeometry(spot.r, spot.h, i * 2.7), flameMat);
+    mesh.position.set(spot.at[0], spot.at[1], spot.at[2]);
+    return {
+      mesh,
+      // Every tongue flickers on its own clock, or the whole rig
+      // pulses like one balloon.
+      rate: 7 + i * 1.7,
+      phase: i * 1.9,
+      lean: spot.at[2] < 0 ? -1 : 1,
+    };
+  });
+  for (const t of tongues) group.add(t.mesh);
+
+  const embers = Array.from({ length: EMBER_COUNT }, (_, i) => {
+    const sprite = new THREE.Sprite(emberMat);
+    sprite.scale.setScalar(0.13);
+    group.add(sprite);
+    return { sprite, t: i / EMBER_COUNT, speed: 0.5 + (i % 4) * 0.14, spin: i * 2.3 };
+  });
+
+  let lit = false;
+  let amount = 0;
+  let clock = 0;
+
+  return {
+    group,
+    setLit(on) {
+      lit = on;
+    },
+    amount: () => amount,
+    update(dt, moving) {
+      const target = lit ? 1 : 0;
+      // Catches quickly, goes out a touch quicker — water wins.
+      const rate = lit ? 4.2 : 5.5;
+      amount += Math.max(-rate * dt, Math.min(rate * dt, target - amount));
+      group.visible = amount > 0.01;
+      if (!group.visible) return;
+      clock += dt;
+
+      for (const t of tongues) {
+        const flicker = Math.sin(clock * t.rate + t.phase);
+        const tall = amount * (1 + flicker * 0.26);
+        const wide = amount * (1 - flicker * 0.14);
+        t.mesh.scale.set(wide, tall, wide);
+        // Streams backward when he runs, and wanders when he doesn't.
+        const sway = Math.sin(clock * (t.rate * 0.4) + t.phase) * 0.13;
+        t.mesh.rotation.set(sway * t.lean + (moving ? -0.28 : 0), clock * 0.6 + t.phase, sway);
+      }
+
+      emberMat.opacity = amount * 0.9;
+      for (const e of embers) {
+        e.t += dt * e.speed;
+        if (e.t >= 1) e.t -= 1;
+        // Up and outward from around his middle, shrinking as it goes.
+        const rise = e.t;
+        const swirl = e.spin + rise * 4;
+        const spread = 0.24 + rise * 0.4;
+        e.sprite.position.set(
+          Math.cos(swirl) * spread,
+          0.5 + rise * 2.1,
+          Math.sin(swirl) * spread * 0.8 - 0.1
+        );
+        e.sprite.scale.setScalar(0.16 * (1 - rise) * amount);
+      }
+    },
+  };
+}
+
+// One tongue of flame: fat and white-hot at the base, tapering to a
+// transparent tip so it dissolves into the air instead of ending in a
+// cone's flat point.
+function makeTongueGeometry(r: number, h: number, seed: number): THREE.BufferGeometry {
+  const SEG = 8;
+  const RINGS = 8;
+  const geo = new THREE.CylinderGeometry(0.001, r, h, SEG, RINGS, true);
+  const pos = geo.attributes.position;
+  const cols = new Float32Array(pos.count * 4);
+  const c = new THREE.Color();
+  for (let i = 0; i < pos.count; i++) {
+    const y = pos.getY(i);
+    // 0 at the base, 1 at the tip.
+    const u = Math.min(1, Math.max(0, y / h + 0.5));
+    // Narrow where it attaches, widest about a fifth of the way up,
+    // then tapering away — the bulge is what stops it being a cone.
+    const linear = r * (1 - u);
+    const bulge = 0.45 + 0.55 * Math.min(1, u / 0.22);
+    const want = r * Math.pow(1 - u, 0.62) * bulge;
+    const k = linear > 1e-6 ? want / linear : 1;
+    // Curl it as it rises. Dead-straight tongues are the last thing
+    // that still reads as paper streamers rather than as fire, and a
+    // bend costs nothing — each one gets its own so the cluster does
+    // not lean as a unit.
+    const curl = u * u * r;
+    pos.setX(i, pos.getX(i) * k + Math.sin(u * 3.4 + seed) * curl * 1.6);
+    pos.setZ(i, pos.getZ(i) * k + Math.cos(u * 2.7 + seed * 1.3) * curl * 1.1);
+    if (u < 0.3) c.copy(FLAME_CORE).lerp(FLAME_MID, u / 0.3);
+    else if (u < 0.65) c.copy(FLAME_MID).lerp(FLAME_EDGE, (u - 0.3) / 0.35);
+    else c.copy(FLAME_EDGE).lerp(FLAME_TIP, (u - 0.65) / 0.35);
+    cols[i * 4] = c.r;
+    cols[i * 4 + 1] = c.g;
+    cols[i * 4 + 2] = c.b;
+    cols[i * 4 + 3] = 0.94 * Math.pow(1 - u, 0.95);
+  }
+  pos.needsUpdate = true;
+  // Sit the base at the anchor rather than straddling it.
+  geo.translate(0, h / 2, 0);
+  geo.setAttribute("color", new THREE.BufferAttribute(cols, 4));
+  return geo;
+}
+
+function makeEmberTexture(): THREE.CanvasTexture {
+  const c = document.createElement("canvas");
+  c.width = 32;
+  c.height = 32;
+  const g = c.getContext("2d")!;
+  const grd = g.createRadialGradient(16, 16, 0, 16, 16, 16);
+  grd.addColorStop(0, "rgba(255,240,190,1)");
+  grd.addColorStop(0.4, "rgba(255,160,50,0.55)");
+  grd.addColorStop(1, "rgba(255,110,20,0)");
+  g.fillStyle = grd;
+  g.fillRect(0, 0, 32, 32);
+  return new THREE.CanvasTexture(c);
 }
 
 // ─── Car avatar ──────────────────────────────────────────────────────────────

@@ -524,6 +524,7 @@ export function buildWorld(
   getPlayerPosition: () => THREE.Vector3 | null = () => null,
   launchPlayer: BiomeContext["launchPlayer"] = () => {},
   setPlayerVisible: BiomeContext["setPlayerVisible"] = () => {},
+  setPlayerAblaze: BiomeContext["setPlayerAblaze"] = () => false,
   setCameraFocus: BiomeContext["setCameraFocus"] = () => {},
   launchToPlanet: BiomeContext["launchToPlanet"] = () => {},
   leavePlanet: BiomeContext["leavePlanet"] = () => {}
@@ -553,6 +554,7 @@ export function buildWorld(
     },
     launchPlayer,
     setPlayerVisible,
+    setPlayerAblaze,
     setCameraFocus,
     launchToPlanet,
     leavePlanet,

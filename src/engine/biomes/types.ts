@@ -62,6 +62,10 @@ export type BiomeContext = {
   // cave so it reads as gone into the mountain rather than parked
   // against the back wall, then shows it again as it is launched out.
   setPlayerVisible: (visible: boolean) => void;
+  // Set the avatar alight. Returns whether this avatar has flames at
+  // all — only the kid does — so a caller can decide whether the
+  // moment needs a sound to go with it.
+  setPlayerAblaze: (ablaze: boolean) => boolean;
   // Off-world travel. `launchToPlanet` throws the avatar clear of the
   // flat world and sets it down on a sphere it can then walk all the
   // way around (see planet.ts); `leavePlanet` drops it back into the
