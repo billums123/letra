@@ -925,7 +925,6 @@ function buildProps(ctx: BiomeContext): void {
 
   let spoutState: "idle" | "pulling" | "lifting" = "idle";
   let spoutT = 0;
-  let spoutFoamIn = 0;
   tick.push((dt) => {
     const p = getPlayerPosition();
     // It stops dead once it has hold of someone — a tornado that keeps
@@ -941,17 +940,6 @@ function buildProps(ctx: BiomeContext): void {
     spoutObstacle.x = SPOUT.x;
     spoutObstacle.z = SPOUT.z;
     spout.tick(dt, 0);
-    // It drags a wake behind it. Foam rings are the ocean's own —
-    // they expand and fade on the water surface, which is what makes
-    // the funnel look like it is actually touching the sea rather
-    // than hovering over a painted white disc.
-    spoutFoamIn -= dt;
-    if (spoutFoamIn <= 0) {
-      spoutFoamIn = 0.3 + Math.random() * 0.2;
-      const a = Math.random() * Math.PI * 2;
-      const r = Math.random() * 2.6;
-      spawnFoam(SPOUT.x + Math.cos(a) * r, SPOUT.z + Math.sin(a) * r, 1.1 + Math.random() * 0.7);
-    }
     if (!p) return;
     const d = Math.hypot(p.x - SPOUT.x, p.z - SPOUT.z);
     // The howl, tracking how close the boat is. Squared so it stays
