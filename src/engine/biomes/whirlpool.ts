@@ -58,9 +58,14 @@ export function buildWhirlpool(opts: { throat?: number } = {}): Whirlpool {
     side: THREE.DoubleSide,
     fog: false,
   });
+  // `lift` has to clear the wave crest. The wave field runs to about
+  // 0.22 either way, so a skin sitting a few hundredths above the
+  // dish gets poked through by every passing swell — which shows as
+  // hard-edged dark patches tearing across the vortex, and is what a
+  // whirlpool looked like from close up.
   const skins = [
-    { arms: 2, twist: 0.62, lift: 0.07, spin: -0.85, alpha: 1 },
-    { arms: 3, twist: 0.95, lift: 0.13, spin: -1.5, alpha: 0.72 },
+    { arms: 2, twist: 0.62, lift: 0.3, spin: -0.85, alpha: 1 },
+    { arms: 3, twist: 0.95, lift: 0.42, spin: -1.5, alpha: 0.72 },
   ].map((spec) => {
     const mesh = new THREE.Mesh(
       makeSkinGeometry(spec.arms, spec.twist, spec.lift, spec.alpha),
@@ -116,7 +121,8 @@ export function buildWhirlpool(opts: { throat?: number } = {}): Whirlpool {
       })
     );
     mesh.rotation.x = -Math.PI / 2;
-    mesh.position.y = 0.08;
+    // Above the wave crest, same reason as the skins.
+    mesh.position.y = 0.3;
     mesh.frustumCulled = false;
     group.add(mesh);
     return { mesh, phase: i / RIPPLE_COUNT };
@@ -159,7 +165,7 @@ export function buildWhirlpool(opts: { throat?: number } = {}): Whirlpool {
         f.angle += dt * f.rate * speed;
         f.mesh.position.set(
           Math.cos(f.angle) * f.r,
-          eddyDepression(f.r) + 0.22 + Math.sin(clock * 4 + f.angle) * 0.07,
+          eddyDepression(f.r) + 0.4 + Math.sin(clock * 4 + f.angle) * 0.07,
           Math.sin(f.angle) * f.r
         );
         f.mesh.rotation.set(clock * 2, f.angle, 0);

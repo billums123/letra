@@ -442,17 +442,15 @@ function buildProps(ctx: BiomeContext): void {
   // Where the island is in its swallow-and-return cycle. Declared up
   // here because the whirlpool's first retarget runs at build time and
   // asks whether the island is available to hunt.
-  let islandState: "here" | "sinking" | "gone" | "rising" = "here";
+  // "sunk" is terminal: once the whirlpool takes the mountain, it
+  // stays taken, and it turns up on the sea floor.
+  let islandState: "here" | "sinking" | "sunk" = "here";
   // Seconds of immunity after arriving in a world. Without it, coming
   // up out of the sea-floor vent inside the whirlpool sends you
   // straight back down, and being dropped on the vent sends you
   // straight back up — a loop with no way out of it.
   let travelGrace = 0;
-  // Seconds before the whirlpool is allowed to go for the island
-  // again. Without one it hunts the moment the island is back, which
-  // is a great trick the first three times and then means the route
-  // to the sun is missing more often than it is there.
-  let huntCooldown = 0;
+
   const sampleGround = (x: number, z: number): number => {
     if (submerged && seaFloorHeight.at) return seaFloorHeight.at(x, z);
     const solid = islandHeight(x, z) * volcanoPresence + sandHeight(x, z);
@@ -1095,7 +1093,7 @@ function buildProps(ctx: BiomeContext): void {
   let eddyHeading = 0;
   const eddyTarget = { x: EDDY.x, z: EDDY.z };
   function retargetEddy(): void {
-    eddyHuntingIsland = islandState === "here" && huntCooldown <= 0;
+    eddyHuntingIsland = islandState === "here";
     if (eddyHuntingIsland) {
       eddyTarget.x = ISLAND.x;
       eddyTarget.z = ISLAND.z;
@@ -1127,8 +1125,7 @@ function buildProps(ctx: BiomeContext): void {
     // heading for — so after a swallow it wandered off on a full
     // crossing of the map before it even considered going back, and
     // the whole set-piece came round about once a minute.
-    huntCooldown = Math.max(0, huntCooldown - dt);
-    const canHunt = islandState === "here" && huntCooldown <= 0;
+    const canHunt = islandState === "here";
     if (canHunt && !eddyHuntingIsland) {
       eddyHuntingIsland = true;
       eddyTarget.x = ISLAND.x;
@@ -2342,6 +2339,8 @@ function buildProps(ctx: BiomeContext): void {
       // inside it would haul the kid straight back to Saturn, over
       // and over, with no way out.
       if (Math.hypot(x - SPOUT.x, z - SPOUT.z) < SPOUT_TRIGGER_R + 9) continue;
+      // Same for the whirlpool, and for the same reason.
+      if (Math.hypot(x - EDDY.x, z - EDDY.z) < EDDY_RADIUS + 6) continue;
       // Prefer open water: skip sandy islands so the payoff is always
       // the splash.
       if (sandHeight(x, z) > 0.02) continue;
@@ -2411,7 +2410,7 @@ function buildProps(ctx: BiomeContext): void {
         fireBomb(false);
         playLavaPop(earshot(ISLAND.x, ISLAND.z, RIM_H));
       }
-      if (player) {
+      if (player && volcanoPresence >= 1) {
         const d = Math.hypot(player.x - MOUTH.x, player.z - MOUTH.z);
         if (d < MOUTH_TRIGGER_R) {
           state = "rumbling";
@@ -2828,6 +2827,12 @@ function buildProps(ctx: BiomeContext): void {
   // it comes back up on a spring with a bang.
   const SWALLOW_REACH = 14;
   const SWALLOW_SECONDS = 3.2;
+  // Where it comes to rest on the floor: clear of the sea-floor vent,
+  // so the two are separate landmarks down there.
+  const SUNK = { x: 24, z: -18 };
+  // Where every dive puts you down: mid-floor, clear of the vent at
+  // (-18, 14) and of the sunken volcano at (24, -18).
+  const DIVE_ARRIVAL = { x: 2, z: -2 };
   // Long enough that the sea genuinely looks like it lost a
   // mountain, and you can drive over where it was.
   let goneSeconds = 14;
@@ -2836,6 +2841,11 @@ function buildProps(ctx: BiomeContext): void {
   const islandObstacleR = obstacles
     .slice(islandObstacleFrom, islandObstacleTo)
     .map((o) => o.radius);
+  // Collision for the mountain once it is lying on the sea bed. Nine
+  // units, against a trigger at eleven — so driving at it sets it off
+  // before you ever bump into it.
+  const sunkObstacle = { x: SUNK.x, z: SUNK.z, radius: 0 };
+  obstacles.push(sunkObstacle);
 
   tick.push((dt) => {
     // Collision and letter-spawning follow presence, every frame,
@@ -2845,6 +2855,15 @@ function buildProps(ctx: BiomeContext): void {
       const o = obstacles[islandObstacleFrom + i];
       if (!o) continue;
       o.radius = submerged ? 0 : islandObstacleR[i] * volcanoPresence;
+    }
+    // Once it is down there it belongs to the sea floor, so this has
+    // to run BEFORE the surface-only bail below — otherwise the
+    // mountain is hidden by the world swap and never shown again.
+    if (islandState === "sunk") {
+      volcanoPresence = 0;
+      volcanoGroup.visible = submerged;
+      sunkObstacle.radius = submerged ? 9 : 0;
+      return;
     }
     if (submerged) return;
 
@@ -2888,48 +2907,23 @@ function buildProps(ctx: BiomeContext): void {
         bigSplash(EDDY.x, EDDY.z);
       }
       if (k >= 1) {
-        islandState = "gone";
-        islandT = 0;
+        // It does not come back up. It comes to rest on the sea floor,
+        // where a kid who takes the whirlpool down can go and find it
+        // — leaning, half-buried and still smoking.
+        islandState = "sunk";
         volcanoPresence = 0;
+        volcanoGroup.position.set(SUNK.x, seafloor.heightAt(SUNK.x, SUNK.z) - 1.2, SUNK.z);
+        volcanoGroup.rotation.set(0.16, 2.1, -0.24);
+        volcanoGroup.scale.setScalar(1);
+        volcanoGroup.visible = submerged;
       }
       return;
     }
 
-    if (islandState === "gone") {
-      volcanoPresence = 0;
-      if (islandT >= goneSeconds) {
-        islandState = "rising";
-        islandT = 0;
-        volcanoGroup.visible = true;
-        playVolcanoBoom(false, earshot(ISLAND.x, ISLAND.z));
-        bigSplash(ISLAND.x, ISLAND.z);
-        wooTimer = 0.4;
-      }
-      return;
-    }
-
-    // Rising: comes back up through its own hole, overshoots, and
-    // settles on a spring. Overshoot is what makes it read as thrown
-    // back rather than as slid into place.
-    const k = Math.min(1, islandT / RETURN_SECONDS);
-    const spring = 1 - Math.cos(k * Math.PI * 1.5) * Math.pow(1 - k, 2);
-    volcanoGroup.position.set(ISLAND.x, -26 * (1 - spring), ISLAND.z);
-    volcanoGroup.rotation.y = 11 * (1 - k) * (1 - k);
-    volcanoGroup.rotation.z = Math.sin(k * Math.PI * 2) * 0.12 * (1 - k);
-    volcanoGroup.rotation.x = 0.35 * (1 - k) * (1 - k);
-    volcanoGroup.scale.setScalar(0.45 + 0.55 * spring);
-    volcanoPresence = Math.min(1, k * 1.3);
-    if (k >= 1) {
-      islandState = "here";
-      // A breather before it can be taken again — long enough that a
-      // kid heading for the sea cave usually finds the volcano where
-      // they left it.
-      huntCooldown = 12;
-      volcanoPresence = 1;
-      volcanoGroup.position.set(ISLAND.x, 0, ISLAND.z);
-      volcanoGroup.rotation.set(0, 0, 0);
-      volcanoGroup.scale.setScalar(1);
-    }
+    // Sunk: it belongs to the sea floor now, so it is only in the
+    // scene when the avatar is down there.
+    volcanoPresence = 0;
+    volcanoGroup.visible = submerged;
   });
 
   // ── The sea floor ────────────────────────────────────────────────
@@ -2992,17 +2986,18 @@ function buildProps(ctx: BiomeContext): void {
   function goUnderwater(): void {
     if (submerged) return;
     travelGrace = 2.5;
-    // Never set down on the vent itself: the whirlpool roams, and
-    // sooner or later it is directly above the way home.
+    // Always set down in the same clearing, well away from both the
+    // vent and the sunken volcano.
+    //
+    // Arriving wherever the whirlpool happened to be roaming meant
+    // sometimes arriving on top of the way home, and being shoved
+    // twenty units sideways to get clear of it read as being flung
+    // across the sea bed the instant you got there. This is a portal;
+    // portals can put you down somewhere sensible.
     const p0 = getPlayerPosition();
     if (p0) {
-      const d = Math.hypot(p0.x - seafloor.volcano.x, p0.z - seafloor.volcano.z);
-      const clear = seafloor.volcanoR + 14;
-      if (d < clear) {
-        const a = d > 1e-3 ? Math.atan2(p0.z - seafloor.volcano.z, p0.x - seafloor.volcano.x) : 0;
-        p0.x = seafloor.volcano.x + Math.cos(a) * clear;
-        p0.z = seafloor.volcano.z + Math.sin(a) * clear;
-      }
+      p0.x = DIVE_ARRIVAL.x;
+      p0.z = DIVE_ARRIVAL.z;
     }
     // Remember what each surface prop was doing, so surfacing puts
     // the fish that happened to be under back under.
@@ -3020,13 +3015,14 @@ function buildProps(ctx: BiomeContext): void {
     applyWorld();
     const p = getPlayerPosition();
     if (!p) return;
-    // And never surface inside the whirlpool, for the same reason.
-    const d = Math.hypot(p.x - EDDY.x, p.z - EDDY.z);
-    const clear = EDDY_RADIUS + 6;
-    if (d < clear) {
-      const a = d > 1e-3 ? Math.atan2(p.z - EDDY.z, p.x - EDDY.x) : 0;
-      p.x = EDDY.x + Math.cos(a) * clear;
-      p.z = EDDY.z + Math.sin(a) * clear;
+    // And never surface inside the whirlpool: it roams, and coming up
+    // in it sends you straight back down. Sliding out of it looked
+    // like being flung, so pick open water instead — pickWaterLanding
+    // already keeps clear of both the spout and the whirlpool.
+    if (Math.hypot(p.x - EDDY.x, p.z - EDDY.z) < EDDY_RADIUS + 5) {
+      const spot = pickWaterLanding();
+      p.x = spot.x;
+      p.z = spot.z;
     }
     bigSplash(p.x, p.z);
   }
@@ -3038,39 +3034,59 @@ function buildProps(ctx: BiomeContext): void {
   const VENT_RUMBLE = 1.5;
   let ventState: "idle" | "rumbling" = "idle";
   let ventT = 0;
+  // Which of the two mountains down here is going off. The sea-floor
+  // vent only ever pops you back to the surface; the sunken island
+  // volcano keeps the job it always had, so a big one still throws
+  // you at the sun — which is the whole reason it is safe to let the
+  // whirlpool take it in the first place. Lose the island and you
+  // lose the route to the sun, unless the route goes with it.
+  let ventIsSunkVolcano = false;
+  let ventMega = false;
   tick.push((dt, t) => {
     travelGrace = Math.max(0, travelGrace - dt);
     seafloor.tick(dt, t, submerged ? getPlayerPosition() : null);
     if (!submerged) return;
     const p = getPlayerPosition();
     if (!p) return;
-    const d = Math.hypot(p.x - seafloor.volcano.x, p.z - seafloor.volcano.z);
+    const dVent = Math.hypot(p.x - seafloor.volcano.x, p.z - seafloor.volcano.z);
+    const dSunk = Math.hypot(p.x - SUNK.x, p.z - SUNK.z);
     if (ventState === "idle") {
-      if (travelGrace <= 0 && d < seafloor.volcanoR) {
+      if (travelGrace > 0) return;
+      const onSunk = islandState === "sunk" && dSunk < 11;
+      if (onSunk || dVent < seafloor.volcanoR) {
         ventState = "rumbling";
         ventT = 0;
+        ventIsSunkVolcano = onSunk;
+        // Only the island volcano ever throws anyone at the sun, and
+        // only sometimes — same roll it always used.
+        ventMega = onSunk && Math.random() < MEGA_CHANCE;
         playVolcanoRumble();
       }
       return;
     }
     ventT += dt;
-    // Held over the vent while it builds, exactly as the sea cave
-    // holds the boat.
+    const centre = ventIsSunkVolcano ? SUNK : seafloor.volcano;
+    // Held over it while it builds, exactly as the sea cave holds the
+    // boat on the surface.
     const k = Math.min(1, dt * 3);
-    p.x += (seafloor.volcano.x - p.x) * k;
-    p.z += (seafloor.volcano.z - p.z) * k;
+    p.x += (centre.x - p.x) * k;
+    p.z += (centre.z - p.z) * k;
     if (ventT >= VENT_RUMBLE) {
       ventState = "idle";
-      playVolcanoBoom(false);
-      wooTimer = 1.1;
+      playVolcanoBoom(ventMega);
+      wooTimer = ventMega ? 2.4 : 1.1;
+      const mega = ventMega;
       whirlPlayer({
-        center: seafloor.volcano,
+        center: centre,
         // Just clear of the water, so the swap to the surface world
         // is invisible and the splash lands on the same beat.
         topY: 1.5,
-        turns: 2.2,
-        duration: 2.8,
-        onDone: () => surfaceFromDeep(),
+        turns: mega ? 3 : 2.2,
+        duration: mega ? 3.2 : 2.8,
+        onDone: () => {
+          surfaceFromDeep();
+          if (mega) goToSun();
+        },
       });
     }
   });

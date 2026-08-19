@@ -114,7 +114,9 @@ export function buildTornado(opts: { height?: number }): Tornado {
   });
   const spray = new THREE.Mesh(new THREE.RingGeometry(0.9, 3.1, 32), sprayMat);
   spray.rotation.x = -Math.PI / 2;
-  spray.position.y = 0.14;
+  // Clear of the wave crest (~0.22), or every swell pokes through
+  // it and the foam tears into hard dark patches.
+  spray.position.y = 0.3;
   group.add(spray);
 
   const RIPPLE_COUNT = 4;
@@ -132,7 +134,7 @@ export function buildTornado(opts: { height?: number }): Tornado {
   const ripples = Array.from({ length: RIPPLE_COUNT }, (_, i) => {
     const mesh = new THREE.Mesh(rippleGeo, rippleMat.clone());
     mesh.rotation.x = -Math.PI / 2;
-    mesh.position.y = 0.1;
+    mesh.position.y = 0.28;
     mesh.frustumCulled = false;
     group.add(mesh);
     return { mesh, phase: i / RIPPLE_COUNT };
