@@ -357,6 +357,39 @@ export const SFX_CATALOG: SfxCue[] = [
     promptInfluence: 0.35,
     play: "setTornadoAmbience",
   },
+  {
+    id: "whirlpool-suck",
+    label: "Whirlpool",
+    sounds:
+      "The whirlpool taking hold of the boat and pulling it under — a swelling rush of water closing over, with a tone sliding away underneath it. Two takes rotate. Falls back to a noise bed through a closing lowpass over a falling triangle.",
+    usedIn: ["The ocean — driving into the whirlpool, and the dive to the sea floor"],
+    kind: "recorded",
+    slots: ["whirlpool-suck-1.mp3", "whirlpool-suck-2.mp3"],
+    prompt:
+      "A huge whirlpool pulling something under. Rushing swirling " +
+      "water gathering and closing over, then dropping away into the " +
+      "deep. Exciting and adventurous for a small child, not " +
+      "frightening, no screaming, no music, no voice.",
+    durationSeconds: 3.0,
+    promptInfluence: 0.4,
+    play: "playWhirlpool",
+  },
+  {
+    id: "underwater-ambience",
+    label: "Under the sea",
+    sounds:
+      "A looping bed that plays the whole time the avatar is on the sea floor. Low-passed hard and capped low. Falls back to a very smooth brown-noise loop, crossfaded end to end so the loop point vanishes.",
+    usedIn: ["The sea floor"],
+    kind: "recorded",
+    slots: ["underwater-ambience-1.mp3"],
+    prompt:
+      "Calm underwater ambience, heard from deep below the surface. " +
+      "Muffled low water hum, soft and continuous and even, with a " +
+      "few distant bubbles. No music, no voice, no whale song.",
+    durationSeconds: 8,
+    promptInfluence: 0.35,
+    play: "setUnderwaterAmbience",
+  },
 ];
 
 export function getCue(id: string): SfxCue | undefined {

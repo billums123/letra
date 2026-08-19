@@ -7,6 +7,8 @@ import { buildOceanGlobe } from "./oceanGlobe";
 import { buildSaturnWorld } from "./saturn";
 import { SATURN_CENTER, SATURN_RADIUS } from "./saturnLayout";
 import { buildTornado } from "./tornado";
+import { buildWhirlpool } from "./whirlpool";
+import { buildSeafloor, SEA_DEPTH } from "./seafloor";
 import { isDev } from "../../util/isDev";
 import { rollTimeOfDay, type TimeOfDay } from "./timeOfDay";
 import {
@@ -22,6 +24,8 @@ import {
   playSaturnTouchdown,
   playTornado,
   setTornadoAmbience,
+  playWhirlpool,
+  setUnderwaterAmbience,
 } from "../../audio/sfx";
 import { music } from "../../audio/music";
 
@@ -392,7 +396,15 @@ function buildProps(ctx: BiomeContext): void {
     );
   };
   // Waves flatten as ground rises out of the sea (beaches, volcano).
+  // Down on the sea floor the ground is a different field entirely,
+  // forty-six units below the one up here. One sampler, two worlds:
+  // the engine never has to know there are two.
+  let submerged = false;
+  // Assigned once the sea floor is built, further down. TypeScript
+  // cannot see that this closure only runs after that, hence the type.
+  const seaFloorHeight: { at: ((x: number, z: number) => number) | null } = { at: null };
   const sampleGround = (x: number, z: number): number => {
+    if (submerged && seaFloorHeight.at) return seaFloorHeight.at(x, z);
     const solid = islandHeight(x, z) + sandHeight(x, z);
     const damp = Math.max(0, 1 - solid * 3);
     return solid + waveHeight(x, z) * damp;
@@ -409,6 +421,11 @@ function buildProps(ctx: BiomeContext): void {
   const HEAR_FULL = 26;
   const HEAR_GONE = 165;
   function earshot(x: number, z: number, y = 0): number {
+    // Nothing on the surface carries down to the sea floor. The props
+    // are hidden but their ticks keep running, so without this the
+    // fish would still be plopping in the kid's ear forty-six units
+    // above their head.
+    if (submerged) return 0;
     const p = getPlayerPosition();
     if (!p) return 1;
     const d = Math.hypot(p.x - x, p.y - y, p.z - z);
@@ -987,6 +1004,169 @@ function buildProps(ctx: BiomeContext): void {
     }
   });
 
+  // ── The whirlpool ────────────────────────────────────────────────
+  // The waterspout's mirror: same idea, opposite direction. A kid who
+  // has learned that you drive into the spinning thing and it takes
+  // you somewhere gets to use that twice, and the two are told apart
+  // at a glance — one goes up into a storm, the other down a hole in
+  // the sea.
+  //
+  // It roams by the same rules, keeps the same clearance off the
+  // islands and the volcano, and drags anything floating nearby
+  // toward it on the way past.
+  const EDDY = { x: -30, z: 24 };
+  const EDDY_TRIGGER_R = 4.2;
+  const EDDY_NOTICE_R = 18;
+  const EDDY_PULL_SECONDS = 1.4;
+  const EDDY_DIVE_SECONDS = 2.9;
+  // A touch slower again than the waterspout, because a whirlpool
+  // lying flat in the water is harder to spot from a distance.
+  const EDDY_SPEED = 4.1;
+  const EDDY_TURN = 0.75;
+  const eddy = buildWhirlpool({});
+  eddy.group.position.set(EDDY.x, 0, EDDY.z);
+  group.add(eddy.group);
+  const eddyObstacle = { x: EDDY.x, z: EDDY.z, radius: 10, solid: false };
+  obstacles.push(eddyObstacle);
+
+  const eddyRand = mulberry32(freshSeed());
+  let eddyHeading = 0;
+  const eddyTarget = { x: EDDY.x, z: EDDY.z };
+  function retargetEddy(): void {
+    for (let i = 0; i < 60; i++) {
+      const ang = eddyRand() * Math.PI * 2;
+      const dist = Math.sqrt(eddyRand()) * SPOUT_ROAM_R;
+      const x = Math.cos(ang) * dist;
+      const z = Math.sin(ang) * dist;
+      if (Math.hypot(x - EDDY.x, z - EDDY.z) < 22) continue;
+      if (!spoutCanBeAt(x, z)) continue;
+      // And clear of the waterspout, so the two are never on top of
+      // each other and the kid always has a choice of ride.
+      if (Math.hypot(x - SPOUT.x, z - SPOUT.z) < 26) continue;
+      eddyTarget.x = x;
+      eddyTarget.z = z;
+      return;
+    }
+    eddyTarget.x = 0;
+    eddyTarget.z = 0;
+  }
+  retargetEddy();
+  eddyHeading = Math.atan2(eddyTarget.z - EDDY.z, eddyTarget.x - EDDY.x);
+
+  function roamEddy(dt: number): void {
+    let wx = eddyTarget.x - EDDY.x;
+    let wz = eddyTarget.z - EDDY.z;
+    const wl = Math.hypot(wx, wz) || 1;
+    wx /= wl;
+    wz /= wl;
+    for (const b of spoutBlockers) {
+      const dx = EDDY.x - b.x;
+      const dz = EDDY.z - b.z;
+      const d = Math.hypot(dx, dz) || 1;
+      const slack = d - b.r;
+      if (slack > 14) continue;
+      const push = (1 - Math.max(0, slack) / 14) * 2.6;
+      wx += (dx / d) * push;
+      wz += (dz / d) * push;
+    }
+    // And off the waterspout.
+    {
+      const dx = EDDY.x - SPOUT.x;
+      const dz = EDDY.z - SPOUT.z;
+      const d = Math.hypot(dx, dz) || 1;
+      if (d < 26) {
+        const push = (1 - d / 26) * 3;
+        wx += (dx / d) * push;
+        wz += (dz / d) * push;
+      }
+    }
+    const fromCentre = Math.hypot(EDDY.x, EDDY.z);
+    if (fromCentre > SPOUT_ROAM_R - 14) {
+      const push = ((fromCentre - (SPOUT_ROAM_R - 14)) / 14) * 3;
+      wx -= (EDDY.x / (fromCentre || 1)) * push;
+      wz -= (EDDY.z / (fromCentre || 1)) * push;
+    }
+    const want = Math.atan2(wz, wx);
+    let delta = want - eddyHeading;
+    while (delta > Math.PI) delta -= Math.PI * 2;
+    while (delta < -Math.PI) delta += Math.PI * 2;
+    eddyHeading += Math.max(-EDDY_TURN * dt, Math.min(EDDY_TURN * dt, delta));
+    const step = EDDY_SPEED * dt;
+    EDDY.x += Math.cos(eddyHeading) * step;
+    EDDY.z += Math.sin(eddyHeading) * step;
+    for (const b of spoutBlockers) {
+      const dx = EDDY.x - b.x;
+      const dz = EDDY.z - b.z;
+      const d = Math.hypot(dx, dz);
+      if (d < b.r && d > 1e-4) {
+        EDDY.x = b.x + (dx / d) * b.r;
+        EDDY.z = b.z + (dz / d) * b.r;
+      }
+    }
+    const out = Math.hypot(EDDY.x, EDDY.z);
+    if (out > SPOUT_ROAM_R) {
+      EDDY.x *= SPOUT_ROAM_R / out;
+      EDDY.z *= SPOUT_ROAM_R / out;
+    }
+    if (Math.hypot(eddyTarget.x - EDDY.x, eddyTarget.z - EDDY.z) < 7) retargetEddy();
+  }
+
+  let eddyState: "idle" | "pulling" | "diving" = "idle";
+  let eddyT = 0;
+  tick.push((dt) => {
+    const p = getPlayerPosition();
+    if (submerged) {
+      eddy.group.visible = false;
+      return;
+    }
+    eddy.group.visible = true;
+    if (eddyState === "idle") {
+      roamEddy(dt);
+      eddy.setDrift(Math.cos(eddyHeading), Math.sin(eddyHeading));
+    } else {
+      eddy.setDrift(0, 0);
+    }
+    eddy.group.position.set(EDDY.x, 0, EDDY.z);
+    eddyObstacle.x = EDDY.x;
+    eddyObstacle.z = EDDY.z;
+    eddy.tick(dt, 0);
+    if (!p) return;
+    const d = Math.hypot(p.x - EDDY.x, p.z - EDDY.z);
+    if (eddyState === "diving") {
+      eddy.setFury(1);
+      return;
+    }
+    if (eddyState === "idle") {
+      eddy.setFury(away ? 0 : Math.max(0, 1 - d / EDDY_NOTICE_R) * 0.5);
+      if (!away && d < EDDY_TRIGGER_R) {
+        eddyState = "pulling";
+        eddyT = 0;
+        playWhirlpool(earshot(EDDY.x, EDDY.z));
+      }
+      return;
+    }
+    // Reeling in, then straight down the throat of it.
+    eddyT += dt;
+    eddy.setFury(1);
+    const k = Math.min(1, dt * 2.8);
+    p.x += (EDDY.x - p.x) * k;
+    p.z += (EDDY.z - p.z) * k;
+    if (eddyT >= EDDY_PULL_SECONDS) {
+      eddyState = "diving";
+      whirlPlayer({
+        center: EDDY,
+        // Down, not up: the same spiral run the other way.
+        topY: -SEA_DEPTH + 6,
+        turns: 4.2,
+        duration: EDDY_DIVE_SECONDS,
+        onDone: () => {
+          eddyState = "idle";
+          goUnderwater();
+        },
+      });
+    }
+  });
+
   // Driving into a portal. The pool swallows the boat, and a beat
   // later it is falling out of the sky over the sea. The pause is the
   // whole point: it gives the kid something to watch at the moment the
@@ -1091,6 +1271,8 @@ function buildProps(ctx: BiomeContext): void {
   const SPACE_FULL = 100;
   {
     const spaceColor = new THREE.Color(0x05070f);
+    const DEEP_BG = new THREE.Color(0x07293c);
+    const DEEP_FOG = new THREE.Color(0x0b3348);
 
     // The sky rides with the avatar. Fixed to the world's origin, the
     // star shell is a 300-unit ball you are standing in the middle of
@@ -1238,6 +1420,21 @@ function buildProps(ctx: BiomeContext): void {
         smoothstep01((p.y - SPACE_START) / (SPACE_FULL - SPACE_START)),
         spaceLock
       );
+      if (submerged) {
+        // The sky belongs to whoever writes it last, and this tick
+        // writes it every frame — so the deep goes here rather than
+        // anywhere more obvious.
+        if (bgRef) bgRef.copy(DEEP_BG);
+        if (fogRef) {
+          fogRef.color.copy(DEEP_FOG);
+          fogRef.near = 4;
+          fogRef.far = 88;
+        }
+        starMat.opacity = 0;
+        sky.visible = false;
+        globe.setViewerDistance(0);
+        return;
+      }
       if (bgRef) bgRef.copy(bgBase).lerp(spaceColor, k);
       if (fogRef) {
         fogRef.color.copy(fogBase).lerp(spaceColor, k);
@@ -2518,6 +2715,132 @@ function buildProps(ctx: BiomeContext): void {
       buoy.rotation.x = Math.cos(t * 1.1 + spot.z) * 0.12;
     });
   }
+  // ── The sea floor ────────────────────────────────────────────────
+  // Everything above belongs to the surface. Snapshot it before the
+  // floor is built, so going under is a matter of turning one list
+  // off and the other on rather than of tracking forty props by hand.
+  const surfaceProps = [...group.children];
+  const surfaceWasVisible = surfaceProps.map((o) => o.visible);
+  const seafloor = buildSeafloor({ worldRadius });
+  group.add(seafloor.group);
+  seaFloorHeight.at = seafloor.heightAt;
+
+  // Obstacles are one flat list the engine walks every frame, so the
+  // two worlds take turns by zeroing each other's radii. Crude, and
+  // it beats teaching the engine about worlds it will never otherwise
+  // need to know about.
+  const surfaceObstacleR = obstacles.map((o) => o.radius);
+  const floorObstacles = seafloor.obstacles.map((o) => ({
+    x: o.x,
+    z: o.z,
+    radius: 0,
+    real: o.radius,
+  }));
+  for (const o of floorObstacles) obstacles.push(o);
+
+  // The biome's own lights are a warm low sun for a sunset over
+  // water. They are wrong under it, so they get dimmed while the
+  // avatar is down there and the sea floor's own cool pair takes
+  // over. Captured lazily, because applyScene owns them and may have
+  // swapped them for a different time of day since.
+  let surfaceLights: Array<{ light: THREE.Light; intensity: number }> | null = null;
+  function captureSurfaceLights(): void {
+    const scene = group.parent;
+    if (!scene) return;
+    surfaceLights = [];
+    scene.traverse((o) => {
+      if (o instanceof THREE.Light && !seafloor.group.getObjectById(o.id)) {
+        surfaceLights!.push({ light: o, intensity: o.intensity });
+      }
+    });
+  }
+
+  function applyWorld(): void {
+    if (!surfaceLights) captureSurfaceLights();
+    if (surfaceLights) {
+      for (const l of surfaceLights) l.light.intensity = submerged ? l.intensity * 0.14 : l.intensity;
+    }
+    for (let i = 0; i < surfaceProps.length; i++) {
+      surfaceProps[i].visible = submerged ? false : surfaceWasVisible[i];
+    }
+    seafloor.group.visible = submerged;
+    for (let i = 0; i < surfaceObstacleR.length; i++) {
+      obstacles[i].radius = submerged ? 0 : surfaceObstacleR[i];
+    }
+    for (const o of floorObstacles) o.radius = submerged ? o.real : 0;
+    setUnderwaterAmbience(submerged ? 1 : 0);
+    setTornadoAmbience(0);
+  }
+
+  function goUnderwater(): void {
+    if (submerged) return;
+    // Remember what each surface prop was doing, so surfacing puts
+    // the fish that happened to be under back under.
+    for (let i = 0; i < surfaceProps.length; i++) surfaceWasVisible[i] = surfaceProps[i].visible;
+    submerged = true;
+    applyWorld();
+    playSmallSplash(1);
+    wooTimer = 0.6;
+  }
+
+  function surfaceFromDeep(): void {
+    if (!submerged) return;
+    submerged = false;
+    applyWorld();
+    const p = getPlayerPosition();
+    if (p) bigSplash(p.x, p.z);
+  }
+
+  // ── The vent home ────────────────────────────────────────────────
+  // Same deal the island volcano offers on the surface, one world
+  // down: drive into the crater, it winds up, and it throws you all
+  // the way up through the sea to break the surface.
+  const VENT_RUMBLE = 1.5;
+  let ventState: "idle" | "rumbling" = "idle";
+  let ventT = 0;
+  tick.push((dt, t) => {
+    seafloor.tick(dt, t, submerged ? getPlayerPosition() : null);
+    if (!submerged) return;
+    const p = getPlayerPosition();
+    if (!p) return;
+    const d = Math.hypot(p.x - seafloor.volcano.x, p.z - seafloor.volcano.z);
+    if (ventState === "idle") {
+      if (d < seafloor.volcanoR) {
+        ventState = "rumbling";
+        ventT = 0;
+        playVolcanoRumble();
+      }
+      return;
+    }
+    ventT += dt;
+    // Held over the vent while it builds, exactly as the sea cave
+    // holds the boat.
+    const k = Math.min(1, dt * 3);
+    p.x += (seafloor.volcano.x - p.x) * k;
+    p.z += (seafloor.volcano.z - p.z) * k;
+    if (ventT >= VENT_RUMBLE) {
+      ventState = "idle";
+      playVolcanoBoom(false);
+      wooTimer = 1.1;
+      whirlPlayer({
+        center: seafloor.volcano,
+        // Just clear of the water, so the swap to the surface world
+        // is invisible and the splash lands on the same beat.
+        topY: 1.5,
+        turns: 2.2,
+        duration: 2.8,
+        onDone: () => surfaceFromDeep(),
+      });
+    }
+  });
+
+  if (isDev()) {
+    type DeepDev = { __letraDive?: () => void; __letraSurface?: () => void };
+    const w = window as unknown as DeepDev;
+    w.__letraDive = () => goUnderwater();
+    w.__letraSurface = () => surfaceFromDeep();
+  }
+
 }
 
 // ─── Ocean prop factories ─────────────────────────────────────────────
