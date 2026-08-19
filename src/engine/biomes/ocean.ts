@@ -267,7 +267,7 @@ const RUMBLE_SECONDS = 1.0;
 const MEGA_RUMBLE_SECONDS = 3.2;
 // How often an eruption is a mega-launch. Deliberately the minority:
 // the surprise is the point, and it stops being one if it is the norm.
-const MEGA_CHANCE = 0.3;
+const MEGA_CHANCE = 0.42;
 const COOLDOWN_SECONDS = 3.5;
 
 // ── Sandy islands (scenery; palms live here) ───────────────────────
