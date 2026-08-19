@@ -2,6 +2,9 @@ import * as THREE from "three";
 import type { Biome, BiomeContext } from "./types";
 import { findOpenSpot, freshSeed, mulberry32, makeCloud } from "../world";
 import { makePalmTree } from "./jungle";
+import { buildSunWorld } from "./sun";
+import { buildOceanGlobe } from "./oceanGlobe";
+import { isDev } from "../../util/isDev";
 import { rollTimeOfDay, type TimeOfDay } from "./timeOfDay";
 import {
   playVolcanoRumble,
@@ -11,7 +14,10 @@ import {
   playSmallSplash,
   playLavaSplash,
   playWoo,
+  playPortalDive,
+  playSunTouchdown,
 } from "../../audio/sfx";
+import { music } from "../../audio/music";
 
 // Ocean biome — the kid putters around open water in a tugboat.
 // Faceted low-poly waves undulate for real (the terrain sampler rides
@@ -261,7 +267,7 @@ const RUMBLE_SECONDS = 1.0;
 const MEGA_RUMBLE_SECONDS = 3.2;
 // How often an eruption is a mega-launch. Deliberately the minority:
 // the surprise is the point, and it stops being one if it is the norm.
-const MEGA_CHANCE = 0.3;
+const MEGA_CHANCE = 0.42;
 const COOLDOWN_SECONDS = 3.5;
 
 // ── Sandy islands (scenery; palms live here) ───────────────────────
@@ -358,6 +364,8 @@ function buildProps(ctx: BiomeContext): void {
     launchPlayer,
     setPlayerVisible,
     setCameraFocus,
+    launchToPlanet,
+    leavePlanet,
   } = ctx;
 
   // ── Wave field ───────────────────────────────────────────────────
@@ -380,6 +388,25 @@ function buildProps(ctx: BiomeContext): void {
     return solid + waveHeight(x, z) * damp;
   };
   setTerrainHeight(sampleGround);
+
+  // ── Earshot ──────────────────────────────────────────────────────
+  // How loud something happening at (x, y, z) should be from wherever
+  // the avatar currently is. Flat across the whole play area, so the
+  // ocean sounds exactly as it always did while the kid is on it, then
+  // falling away to nothing once they leave — which is what stops the
+  // fish plopping in their ear while they are standing on the sun, and
+  // what makes the lava fountain recede as a launch carries them up.
+  const HEAR_FULL = 26;
+  const HEAR_GONE = 165;
+  function earshot(x: number, z: number, y = 0): number {
+    const p = getPlayerPosition();
+    if (!p) return 1;
+    const d = Math.hypot(p.x - x, p.y - y, p.z - z);
+    if (d <= HEAR_FULL) return 1;
+    if (d >= HEAR_GONE) return 0;
+    const k = (d - HEAR_FULL) / (HEAR_GONE - HEAR_FULL);
+    return 1 - k * k * (3 - 2 * k);
+  }
 
   // ── Swallowed-by-the-mountain test ───────────────────────────────
   // True while the avatar is inside the sea-cave tunnel. Two things
@@ -528,9 +555,18 @@ function buildProps(ctx: BiomeContext): void {
     });
   }
   // Deep-sea skirt beyond the water disc.
+  const skirtMat = new THREE.MeshStandardMaterial({
+    color: 0x175a90,
+    roughness: 0.6,
+    side: THREE.DoubleSide,
+    // Fades out as the world resolves into a globe — it is the only
+    // part of the flat world that reaches past the shell, and left
+    // opaque it hangs off the planet like a saucer.
+    transparent: true,
+  });
   const skirt = new THREE.Mesh(
     new THREE.RingGeometry(waterRadius - 2, waterRadius + 60, 48),
-    new THREE.MeshStandardMaterial({ color: 0x175a90, roughness: 0.6, side: THREE.DoubleSide })
+    skirtMat
   );
   skirt.rotation.x = -Math.PI / 2;
   skirt.position.y = -0.12;
@@ -652,6 +688,119 @@ function buildProps(ctx: BiomeContext): void {
     });
   }
 
+  // ── The sun, as a place ──────────────────────────────────────────
+  // The star that rises over the horizon on a mega launch is a real
+  // destination: a sphere the avatar gets flung to and can then walk
+  // all the way around. One object does both jobs, so there is never
+  // a swap between the thing you can see and the thing you land on.
+  const SUN_CENTER = new THREE.Vector3(30, 55, -300);
+  const SUN_RADIUS = 28;
+  const sunWorld = buildSunWorld({ center: SUN_CENTER, radius: SUN_RADIUS });
+  group.add(sunWorld.group);
+  // The flat world's own far view. Radius just contains the water
+  // disc, so from outside the shell hides everything the ocean is made
+  // of and shows a planet instead.
+  const globe = buildOceanGlobe(waterRadius + 4);
+  group.add(globe.group);
+  // Holds the sky black while off-world — see the space tick below.
+  let spaceLock = 0;
+  let spaceLockTarget = 0;
+  let spaceLockRate = 1.2;
+  let armExitsIn = -1;
+  let offWorld = false;
+
+  function goToSun(flightSeconds = 6.4): void {
+    if (offWorld) return;
+    offWorld = true;
+    // The boom teleports the avatar to the crater's xz but leaves its
+    // y wherever the tunnel left it. The ordinary launch re-samples
+    // the ground; this one has to do the same or the arc starts
+    // several units below the crater floor.
+    const p = getPlayerPosition();
+    if (p) p.y = sampleGround(p.x, p.z);
+    setCameraFocus(null);
+    spaceLockTarget = 1;
+    spaceLockRate = 1.2;
+    sunWorld.armExits(false);
+    launchToPlanet(sunWorld.spec, {
+      duration: flightSeconds,
+      arcHeight: 95,
+      // Straight down onto the north pole. That is the one landing
+      // where the planet camera and the flat camera agree exactly, so
+      // the handover from flying to walking is invisible.
+      landDir: new THREE.Vector3(0, 1, 0),
+      // Facing away from home, so turning around is rewarded with
+      // your own ocean hanging in the sky behind you.
+      faceHint: new THREE.Vector3(0, 0, -1),
+      onArrive: () => {
+        playSunTouchdown();
+        // A beat before the sunspots go live, or touching down beside
+        // one would bounce the kid straight home again.
+        armExitsIn = 1.6;
+      },
+    });
+    // Timed for the top of the arc, where the stars come out.
+    wooTimer = 2.2;
+  }
+
+  // Driving into a portal. The pool swallows the boat, and a beat
+  // later it is falling out of the sky over the sea. The pause is the
+  // whole point: it gives the kid something to watch at the moment the
+  // camera cuts, so the cut reads as going through rather than as the
+  // picture jumping.
+  let dropIn = -1;
+  sunWorld.onEnterSpot = (dir) => {
+    if (!offWorld || dropIn > 0) return;
+    sunWorld.armExits(false);
+    armExitsIn = -1;
+    playPortalDive();
+    sunWorld.flashPortal(dir);
+    setPlayerVisible(false);
+    dropIn = 0.55;
+  };
+  // Runs from the space tick, which ticks whether or not the avatar is
+  // on the flat world.
+  function dropHome(dt: number): void {
+    if (dropIn <= 0) return;
+    dropIn -= dt;
+    if (dropIn > 0) return;
+    dropIn = -1;
+    offWorld = false;
+    setPlayerVisible(true);
+    const dest = pickWaterLanding();
+    const duration = 2.6;
+    // The fall starts well above the space threshold, so the sky
+    // brightens on the way down on its own; the lock just gets out of
+    // the way.
+    spaceLockTarget = 0;
+    spaceLockRate = 1 / duration;
+    wooTimer = 0.5;
+    leavePlanet(dest, {
+      duration,
+      onLand: () => bigSplash(dest.x, dest.z),
+    });
+  }
+
+  if (isDev()) {
+    // Testing the trip shouldn't mean waiting on a 30% roll and a
+    // drive into the cave. Press U, or call __letraSunTrip().
+    type SunDev = {
+      __letraSunTrip?: () => void;
+      __letraSunLand?: () => void;
+      __letraSunKey?: (e: KeyboardEvent) => void;
+    };
+    const w = window as unknown as SunDev;
+    if (w.__letraSunKey) window.removeEventListener("keydown", w.__letraSunKey);
+    const onKey = (e: KeyboardEvent) => {
+      if (e.code === "KeyU") goToSun();
+    };
+    w.__letraSunKey = onKey;
+    w.__letraSunTrip = () => goToSun();
+    // Skips the ride, for looking at the surface without waiting.
+    w.__letraSunLand = () => goToSun(0.05);
+    window.addEventListener("keydown", onKey);
+  }
+
   // ── Space ────────────────────────────────────────────────────────
   // Every so often the volcano really lets go and throws the boat
   // clear of the atmosphere. Stars, a sun and the sky draining to
@@ -663,15 +812,26 @@ function buildProps(ctx: BiomeContext): void {
   {
     const spaceColor = new THREE.Color(0x05070f);
 
-    const STAR_COUNT = 420;
+    // The sky rides with the avatar. Fixed to the world's origin, the
+    // star shell is a 300-unit ball you are standing in the middle of
+    // at home and 300 units to one SIDE of once you are on the sun —
+    // where it shows up edge-on, as a horizontal dotted line ruled
+    // across space. Re-centring it on the avatar every frame is what a
+    // starfield is meant to be: infinitely far away in every
+    // direction, from everywhere.
+    const sky = new THREE.Group();
+    group.add(sky);
+
+    const STAR_COUNT = 900;
     const starRand = mulberry32(freshSeed());
     const starPos = new Float32Array(STAR_COUNT * 3);
     for (let i = 0; i < STAR_COUNT; i++) {
-      // Biased to the upper hemisphere — nobody looks down at stars.
-      const y = starRand() * 1.5 - 0.25;
+      // Even over the whole sphere now: on the sun there is no "down"
+      // to leave empty.
+      const y = starRand() * 2 - 1;
       const r = Math.sqrt(Math.max(0, 1 - y * y));
       const th = starRand() * Math.PI * 2;
-      const R = 300 + starRand() * 80;
+      const R = 300 + starRand() * 90;
       starPos[i * 3] = Math.cos(th) * r * R;
       starPos[i * 3 + 1] = y * R;
       starPos[i * 3 + 2] = Math.sin(th) * r * R;
@@ -691,57 +851,68 @@ function buildProps(ctx: BiomeContext): void {
     });
     const stars = new THREE.Points(starGeo, starMat);
     stars.frustumCulled = false;
-    stars.visible = false;
-    group.add(stars);
+    sky.add(stars);
 
-    // Sits low and very far off, so it reads as rising over the
-    // planet's curve. The obvious placement — high in the sky — is
-    // wrong: the flight camera looks about 33 degrees DOWN at the
-    // avatar, so anything overhead is pushed straight off the top of
-    // the frame. Low and distant puts it about 19 degrees off the view
-    // axis, comfortably in shot, and the composition is better for it.
-    const sunAt = new THREE.Vector3(30, 45, -300);
-    const sunMat = new THREE.MeshBasicMaterial({
-      color: 0xfff6d0,
-      transparent: true,
-      opacity: 0,
-      fog: false,
-      depthWrite: false,
-    });
-    const sun = new THREE.Mesh(new THREE.SphereGeometry(17, 20, 16), sunMat);
-    sun.position.copy(sunAt);
-    sun.visible = false;
-    group.add(sun);
-    // Glow. This has to be a gradient, which means a texture: a flat
-    // sphere can't fade out, and dimming one just makes a duller flat
-    // disc — additive at 0.32 over black lands on a muddy brown ring
-    // rather than anything resembling light.
-    const glowTex = (() => {
-      const c = document.createElement("canvas");
-      c.width = 128;
-      c.height = 128;
-      const g = c.getContext("2d")!;
-      const grd = g.createRadialGradient(64, 64, 0, 64, 64, 64);
-      grd.addColorStop(0, "rgba(255,244,205,1)");
-      grd.addColorStop(0.3, "rgba(255,186,96,0.5)");
-      grd.addColorStop(1, "rgba(255,150,50,0)");
-      g.fillStyle = grd;
-      g.fillRect(0, 0, 128, 128);
-      return new THREE.CanvasTexture(c);
-    })();
-    const haloMat = new THREE.SpriteMaterial({
-      map: glowTex,
-      transparent: true,
-      opacity: 0,
-      depthWrite: false,
-      blending: THREE.AdditiveBlending,
-      fog: false,
-    });
-    const halo = new THREE.Sprite(haloMat);
-    halo.scale.setScalar(110);
-    halo.position.copy(sunAt);
-    halo.visible = false;
-    group.add(halo);
+    // ── Other worlds ─────────────────────────────────────────────
+    // Distant planets, hung in the same viewer-locked sky as the
+    // stars. That means they never move relative to the avatar, which
+    // is both what genuinely distant things do and the only way to
+    // keep them inside the camera's 500-unit far plane from anywhere
+    // in the scene. Kept clear of the sun's own direction so nothing
+    // sits on top of it.
+    const PLANETS: Array<{ dir: [number, number, number]; r: number; a: number; b: number; ring?: number }> = [
+      { dir: [0.82, 0.32, 0.47], r: 17, a: 0xc46a4a, b: 0x8a3f2a },
+      { dir: [-0.66, 0.16, 0.73], r: 24, a: 0x6f7fc4, b: 0x3b4a86, ring: 0xd9c79a },
+      { dir: [-0.42, 0.62, -0.66], r: 11, a: 0x76c2a8, b: 0x2f7d68 },
+      { dir: [0.28, -0.36, 0.89], r: 14, a: 0xd6b062, b: 0x9c7434 },
+    ];
+    const planetMats: THREE.Material[] = [];
+    for (const p of PLANETS) {
+      const dir = new THREE.Vector3(...p.dir).normalize();
+      const geo = new THREE.IcosahedronGeometry(p.r, 3);
+      const pv = geo.attributes.position;
+      const cols = new Float32Array(pv.count * 3);
+      const cc = new THREE.Color();
+      const bandA = new THREE.Color(p.a);
+      const bandB = new THREE.Color(p.b);
+      for (let v = 0; v < pv.count; v++) {
+        // Latitude bands — enough to say "planet" at four degrees
+        // across, and cheaper than a texture.
+        const lat = pv.getY(v) / p.r;
+        const band = 0.5 + 0.5 * Math.sin(lat * 7 + p.r);
+        cc.copy(bandA).lerp(bandB, band * 0.8 + (1 - Math.abs(lat)) * 0.1);
+        cols[v * 3] = cc.r;
+        cols[v * 3 + 1] = cc.g;
+        cols[v * 3 + 2] = cc.b;
+      }
+      geo.setAttribute("color", new THREE.BufferAttribute(cols, 3));
+      const mat = new THREE.MeshBasicMaterial({
+        vertexColors: true,
+        transparent: true,
+        opacity: 0,
+        fog: false,
+      });
+      planetMats.push(mat);
+      const mesh = new THREE.Mesh(geo, mat);
+      mesh.position.copy(dir).multiplyScalar(340);
+      mesh.frustumCulled = false;
+      sky.add(mesh);
+      if (p.ring) {
+        const ringMat = new THREE.MeshBasicMaterial({
+          color: p.ring,
+          transparent: true,
+          opacity: 0,
+          side: THREE.DoubleSide,
+          fog: false,
+        });
+        planetMats.push(ringMat);
+        const ring = new THREE.Mesh(new THREE.RingGeometry(p.r * 1.5, p.r * 2.3, 48), ringMat);
+        ring.position.copy(mesh.position);
+        ring.rotation.set(-1.15, 0.4, 0.3);
+        ring.frustumCulled = false;
+        sky.add(ring);
+      }
+    }
 
     // The biome's own sky is captured the first time we see it and
     // whenever applyScene swaps in a new one (a time-of-day change),
@@ -754,10 +925,15 @@ function buildProps(ctx: BiomeContext): void {
     let fogNearBase = 0;
     let fogFarBase = 0;
 
-    tick.push(() => {
+    tick.push((dt, t) => {
       const p = getPlayerPosition();
       const scene = group.parent as THREE.Scene | null;
       if (!p || !scene) return;
+      if (armExitsIn > 0) {
+        armExitsIn -= dt;
+        if (armExitsIn <= 0) sunWorld.armExits(true);
+      }
+      dropHome(dt);
       const bg = scene.background;
       if (bg instanceof THREE.Color && bg !== bgRef) {
         bgRef = bg;
@@ -771,7 +947,17 @@ function buildProps(ctx: BiomeContext): void {
         fogFarBase = fog.far;
       }
 
-      const k = smoothstep01((p.y - SPACE_START) / (SPACE_FULL - SPACE_START));
+      // Normally the sky drains to black purely as a function of
+      // altitude, which needs no flight state to stay in sync with and
+      // so cannot get stuck on. Standing on the sun is the exception:
+      // it sits only ~80 units up, which would leave the kid on a star
+      // under a blue-ish sky. `spaceLock` holds it full while off-world
+      // and eases back out across the ride home.
+      spaceLock += Math.max(-spaceLockRate * dt, Math.min(spaceLockRate * dt, spaceLockTarget - spaceLock));
+      const k = Math.max(
+        smoothstep01((p.y - SPACE_START) / (SPACE_FULL - SPACE_START)),
+        spaceLock
+      );
       if (bgRef) bgRef.copy(bgBase).lerp(spaceColor, k);
       if (fogRef) {
         fogRef.color.copy(fogBase).lerp(spaceColor, k);
@@ -780,12 +966,25 @@ function buildProps(ctx: BiomeContext): void {
         fogRef.near = fogNearBase + k * 260;
         fogRef.far = fogFarBase + k * 900;
       }
+      sky.position.copy(p);
       starMat.opacity = k;
-      sunMat.opacity = Math.min(1, k * 1.5);
-      haloMat.opacity = k * 0.9;
-      stars.visible = k > 0.01;
-      sun.visible = k > 0.01;
-      halo.visible = k > 0.01;
+      sky.visible = k > 0.01;
+      for (const m of planetMats) m.opacity = k * 0.95;
+      // The flat world resolves into a little planet once it is far
+      // enough away to read as one.
+      globe.setViewerDistance(Math.hypot(p.x, p.y, p.z));
+      const flatFade = 1 - globe.amount();
+      skirtMat.opacity = flatFade;
+      skirt.visible = flatFade > 0.01;
+      distantIslandMat.opacity = flatFade;
+      distantIslandMat.visible = flatFade > 0.01;
+      // Same track, different room: the music goes distant and
+      // reverberant on exactly the curve the sky drains to black on.
+      music.setSpaceAmount(k);
+      // Steeper than the stars: a half-transparent star looks like a
+      // ghost, so it goes solid well before the sky finishes draining.
+      sunWorld.setOpacity(Math.min(1, k * 2.4));
+      sunWorld.tick(dt, t, p);
     });
   }
 
@@ -1516,7 +1715,7 @@ function buildProps(ctx: BiomeContext): void {
   function bigSplash(x: number, z: number): void {
     spawnFoam(x, z, 2.6);
     spawnFoam(x, z, 1.4);
-    playSplash();
+    playSplash(earshot(x, z));
     for (const d of droplets) {
       d.active = true;
       d.mesh.visible = true;
@@ -1622,7 +1821,7 @@ function buildProps(ctx: BiomeContext): void {
       if (sputterIn <= 0) {
         sputterIn = 5 + Math.random() * 6;
         fireBomb(false);
-        playLavaPop();
+        playLavaPop(earshot(ISLAND.x, ISLAND.z, RIM_H));
       }
       if (player) {
         const d = Math.hypot(player.x - MOUTH.x, player.z - MOUTH.z);
@@ -1667,15 +1866,18 @@ function buildProps(ctx: BiomeContext): void {
           fountainT = 3.4;
           for (let i = 0; i < 16; i++) fireEmber();
         }
-        const dest = pickWaterLanding();
-        launchPlayer(dest, {
-          duration: mega ? 5.2 : 1.8,
-          peakY: mega ? 135 : 15,
-          onLand: () => bigSplash(dest.x, dest.z),
-        });
-        // A second whoop near the top of a mega arc, timed for the
-        // moment the stars come out.
-        if (mega) wooTimer = 2.2;
+        if (mega) {
+          // A mega eruption no longer comes back down — it throws the
+          // boat clear of the world entirely and lands it on the sun.
+          goToSun();
+        } else {
+          const dest = pickWaterLanding();
+          launchPlayer(dest, {
+            duration: 1.8,
+            peakY: 15,
+            onLand: () => bigSplash(dest.x, dest.z),
+          });
+        }
       }
     } else if (state === "cooldown") {
       if (stateT >= COOLDOWN_SECONDS) {
@@ -1762,8 +1964,9 @@ function buildProps(ctx: BiomeContext): void {
           // A bomb that reaches open water quenches with a steam
           // hiss; one that lands on the island's rock or beach just
           // pops.
-          if (islandHeight(bx, bz) + sandHeight(bx, bz) < 0.05) playLavaSplash();
-          else playLavaPop();
+          const heard = earshot(bx, bz);
+          if (islandHeight(bx, bz) + sandHeight(bx, bz) < 0.05) playLavaSplash(heard);
+          else playLavaPop(heard);
         }
       }
     }
@@ -1907,7 +2110,7 @@ function buildProps(ctx: BiomeContext): void {
           peak = 1.2 + fishRand() * 1.0;
           fish.group.visible = true;
           spawnFoam(from.x, from.z, 0.5);
-          playSmallSplash();
+          playSmallSplash(earshot(from.x, from.z));
         }
         return;
       }
@@ -1925,7 +2128,7 @@ function buildProps(ctx: BiomeContext): void {
         timer = 1.5 + fishRand() * 3.5;
         fish.group.visible = false;
         spawnFoam(to.x, to.z, 0.55);
-        playSmallSplash();
+        playSmallSplash(earshot(to.x, to.z));
         hx = to.x;
         hz = to.z;
       }
@@ -1976,6 +2179,14 @@ function buildProps(ctx: BiomeContext): void {
   }
 
   // ── Distant islands on the horizon ───────────────────────────────
+  // These sit further out than the far-view shell, so like the
+  // deep-sea skirt they fade with it — otherwise they hang in the
+  // black around the planet as loose green blobs.
+  const distantIslandMat = new THREE.MeshStandardMaterial({
+    color: 0x4a8a5a,
+    roughness: 1,
+    transparent: true,
+  });
   const distRand = mulberry32(freshSeed());
   for (let i = 0; i < 7; i++) {
     const ang = (i / 7) * Math.PI * 2 + distRand() * 0.5;
@@ -1983,10 +2194,7 @@ function buildProps(ctx: BiomeContext): void {
     const x = Math.cos(ang) * dist;
     const z = Math.sin(ang) * dist;
     const r = 4 + distRand() * 7;
-    const dome = new THREE.Mesh(
-      new THREE.SphereGeometry(r, 14, 10),
-      new THREE.MeshStandardMaterial({ color: 0x4a8a5a, roughness: 1 })
-    );
+    const dome = new THREE.Mesh(new THREE.SphereGeometry(r, 14, 10), distantIslandMat);
     dome.scale.set(1, 0.35 + distRand() * 0.2, 1);
     dome.position.set(x, 0, z);
     group.add(dome);
@@ -1996,7 +2204,13 @@ function buildProps(ctx: BiomeContext): void {
   const cloudRand = mulberry32(freshSeed());
   for (let i = 0; i < 10; i++) {
     const c = makeCloud();
-    c.position.set((cloudRand() - 0.5) * 220, 16 + cloudRand() * 12, (cloudRand() - 0.5) * 220);
+    // Kept inside the far-view shell (see oceanGlobe.ts) — clouds
+    // scattered past it float in the black around the planet like
+    // litter. sqrt() spreads them evenly over the disc rather than
+    // bunching them in the middle.
+    const cloudA = cloudRand() * Math.PI * 2;
+    const cloudR = Math.sqrt(cloudRand()) * 74;
+    c.position.set(Math.cos(cloudA) * cloudR, 16 + cloudRand() * 10, Math.sin(cloudA) * cloudR);
     c.scale.setScalar(1 + cloudRand() * 1.2);
     group.add(c);
   }

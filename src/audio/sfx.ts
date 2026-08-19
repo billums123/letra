@@ -38,6 +38,25 @@ export function setSfxGain(v: number): void {
   g.linearRampToValueAtTime(Math.max(target, 0.0001), c.currentTime + 0.05);
 }
 
+// Output node for one cue, attenuated by how far away the thing that
+// made the sound is. A fish plopping at the far edge of the map should
+// not be as loud as one beside the boat, and from the sun it should
+// not be audible at all. Distance is the caller's business — biomes
+// know where their emitters are; this just applies the number.
+function busAt(c: AudioContext, volume: number): AudioNode {
+  const bus = getSfxBus(c);
+  if (volume >= 0.999) return bus;
+  const g = c.createGain();
+  g.gain.value = volume;
+  g.connect(bus);
+  return g;
+}
+
+// Below this a cue is inaudible anyway, and building the graph for it
+// is pure waste — a dozen fish and a lava fountain would otherwise
+// keep allocating nodes for sounds nobody can hear.
+const AUDIBLE = 0.03;
+
 // ─── Recorded clip pools ─────────────────────────────────────────────
 // Several cues sound better as a recorded ElevenLabs one-shot than as
 // a synth, but they must never go silent if the asset is missing —
@@ -840,13 +859,105 @@ const volcanoMegaBoomClips = makeClipPool(["/audio/sfx/volcano-boom-2.mp3"]);
 // Low ground-shake rumble that swells over ~0.9s. Played the moment
 // the kid drives into the crater, underneath the visual shake, so the
 // boom that follows feels earned rather than instant.
-export function playVolcanoRumble() {
+// ─── The sun ─────────────────────────────────────────────────────────
+// Two cues for the trip off-world. Both are recorded, both fall back
+// to a synth so the moment is never silent on a cold cache.
+
+const portalDiveClips = makeClipPool([
+  "/audio/sfx/portal-dive-1.mp3",
+  "/audio/sfx/portal-dive-2.mp3",
+]);
+
+// Driving into a pool of ocean set in the surface of a star. A gulp of
+// water, then the drop.
+export function playPortalDive(volume = 1) {
+  if (volume < AUDIBLE) return;
+  const c = getCtx();
+  if (!c) return;
+  if (portalDiveClips.play(0.85 * volume, 0.06)) return;
+  const dest = busAt(c, volume);
+  const t0 = c.currentTime;
+  // Swallow: bright noise falling away fast, like water closing over.
+  {
+    const n = startNoise(c, t0, t0 + 0.7);
+    const bp = c.createBiquadFilter();
+    bp.type = "bandpass";
+    bp.frequency.setValueAtTime(2200, t0);
+    bp.frequency.exponentialRampToValueAtTime(280, t0 + 0.6);
+    bp.Q.value = 1.1;
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(0.34, t0 + 0.03);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.68);
+    n.connect(bp).connect(g).connect(dest);
+  }
+  // Drop: a tone sliding down two octaves, which is the "falling
+  // through" half of it.
+  {
+    const osc = c.createOscillator();
+    osc.type = "triangle";
+    osc.frequency.setValueAtTime(520, t0 + 0.04);
+    osc.frequency.exponentialRampToValueAtTime(130, t0 + 0.72);
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.0001, t0 + 0.04);
+    g.gain.exponentialRampToValueAtTime(0.22, t0 + 0.1);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.78);
+    osc.connect(g).connect(dest);
+    osc.start(t0 + 0.04);
+    osc.stop(t0 + 0.82);
+  }
+}
+
+const sunTouchdownClips = makeClipPool([
+  "/audio/sfx/sun-touchdown-1.mp3",
+  "/audio/sfx/sun-touchdown-2.mp3",
+]);
+
+// Setting down on the star: a soft thump and the roar of it swelling
+// up around you.
+export function playSunTouchdown(volume = 1) {
+  if (volume < AUDIBLE) return;
+  const c = getCtx();
+  if (!c) return;
+  if (sunTouchdownClips.play(0.8 * volume, 0.05)) return;
+  const dest = busAt(c, volume);
+  const t0 = c.currentTime;
+  {
+    const osc = c.createOscillator();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(150, t0);
+    osc.frequency.exponentialRampToValueAtTime(52, t0 + 0.4);
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(0.5, t0 + 0.015);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.5);
+    osc.connect(g).connect(dest);
+    osc.start(t0);
+    osc.stop(t0 + 0.55);
+  }
+  {
+    // The roar: broad noise swelling in behind the thump and hanging.
+    const n = startNoise(c, t0, t0 + 1.6);
+    const lp = c.createBiquadFilter();
+    lp.type = "lowpass";
+    lp.frequency.setValueAtTime(320, t0);
+    lp.frequency.exponentialRampToValueAtTime(900, t0 + 0.9);
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(0.16, t0 + 0.35);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 1.55);
+    n.connect(lp).connect(g).connect(dest);
+  }
+}
+
+export function playVolcanoRumble(volume = 1) {
+  if (volume < AUDIBLE) return;
   const c = getCtx();
   if (!c) return;
   // Barely any jitter — the rumble is timed against the eruption state
   // machine, so stretching it would drift off the boom.
-  if (volcanoRumbleClips.play(0.9, 0.03)) return;
-  const dest = getSfxBus(c);
+  if (volcanoRumbleClips.play(0.9 * volume, 0.03)) return;
+  const dest = busAt(c, volume);
   const t0 = c.currentTime;
   // Deep noise bed, low-passed hard and swelling in.
   {
@@ -881,12 +992,13 @@ export function playVolcanoRumble() {
 
 // The eruption itself: sub-bass KABOOM + low noise body + a rising
 // two-oscillator whoosh that tracks the avatar sailing skyward.
-export function playVolcanoBoom(mega = false) {
+export function playVolcanoBoom(mega = false, volume = 1) {
+  if (volume < AUDIBLE) return;
   const c = getCtx();
   if (!c) return;
   const pool = mega ? volcanoMegaBoomClips : volcanoBoomClips;
-  if (pool.play(mega ? 1 : 0.95)) return;
-  const dest = getSfxBus(c);
+  if (pool.play((mega ? 1 : 0.95) * volume)) return;
+  const dest = busAt(c, volume);
   const t0 = c.currentTime;
   // 1 — sub-bass punch
   {
@@ -952,15 +1064,16 @@ const lavaHissClips = makeClipPool([
   "/audio/sfx/lava-hiss-3.mp3",
 ]);
 
-export function playLavaSplash() {
+export function playLavaSplash(volume = 1) {
+  if (volume < AUDIBLE) return;
   const now = performance.now();
   if (now - lastSmallSplashAt < 110) return;
   lastSmallSplashAt = now;
   const c = getCtx();
   if (!c) return;
-  if (lavaHissClips.play(0.5, 0.1)) return;
+  if (lavaHissClips.play(0.5 * volume, 0.1)) return;
   // Procedural fallback — a wet plop with a steam hiss layered over it.
-  const dest = getSfxBus(c);
+  const dest = busAt(c, volume);
   const t0 = c.currentTime;
   {
     const osc = c.createOscillator();
@@ -1000,14 +1113,15 @@ const lavaPopClips = makeClipPool([
   "/audio/sfx/lava-pop-2.mp3",
 ]);
 let lastLavaPopAt = 0;
-export function playLavaPop() {
+export function playLavaPop(volume = 1) {
+  if (volume < AUDIBLE) return;
   const now = performance.now();
   if (now - lastLavaPopAt < 120) return;
   lastLavaPopAt = now;
   const c = getCtx();
   if (!c) return;
-  if (lavaPopClips.play(0.5)) return;
-  const dest = getSfxBus(c);
+  if (lavaPopClips.play(0.5 * volume)) return;
+  const dest = busAt(c, volume);
   const t0 = c.currentTime;
   const osc = c.createOscillator();
   osc.type = "sine";
@@ -1057,7 +1171,8 @@ const smallSplashClips = makeClipPool([
 ]);
 let lastSmallSplashAt = 0;
 
-export function playSmallSplash() {
+export function playSmallSplash(volume = 1) {
+  if (volume < AUDIBLE) return;
   const now = performance.now();
   // Six fish plus a bomb fountain can all land in the same handful of
   // frames; without this they stack into a wash.
@@ -1065,10 +1180,10 @@ export function playSmallSplash() {
   lastSmallSplashAt = now;
   const c = getCtx();
   if (!c) return;
-  if (smallSplashClips.play(0.26, 0.12)) return;
+  if (smallSplashClips.play(0.26 * volume, 0.12)) return;
   // Procedural fallback — one short noise chirp through a falling
   // bandpass plus a tiny bloop. A miniature of playSplash below.
-  const dest = getSfxBus(c);
+  const dest = busAt(c, volume);
   const t0 = c.currentTime;
   {
     const n = startNoise(c, t0, t0 + 0.22);
@@ -1099,11 +1214,12 @@ export function playSmallSplash() {
   }
 }
 
-export function playSplash() {
+export function playSplash(volume = 1) {
+  if (volume < AUDIBLE) return;
   const c = getCtx();
   if (!c) return;
-  if (splashClips.play(0.9)) return;
-  const dest = getSfxBus(c);
+  if (splashClips.play(0.9 * volume)) return;
+  const dest = busAt(c, volume);
   const t0 = c.currentTime;
   // Main splash body — bandpassed noise sweeping downward.
   {

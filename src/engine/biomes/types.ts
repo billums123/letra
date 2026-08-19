@@ -1,4 +1,5 @@
 import * as THREE from "three";
+import type { PlanetSpec } from "../planet";
 import type { Obstacle } from "../world";
 
 // A biome is a complete environmental theme — sky / lighting / ground /
@@ -61,6 +62,25 @@ export type BiomeContext = {
   // cave so it reads as gone into the mountain rather than parked
   // against the back wall, then shows it again as it is launched out.
   setPlayerVisible: (visible: boolean) => void;
+  // Off-world travel. `launchToPlanet` throws the avatar clear of the
+  // flat world and sets it down on a sphere it can then walk all the
+  // way around (see planet.ts); `leavePlanet` drops it back into the
+  // flat world at (x, z). Biomes that never leave the ground can
+  // ignore both.
+  launchToPlanet: (
+    planet: PlanetSpec,
+    opts?: {
+      duration?: number;
+      landDir?: THREE.Vector3;
+      faceHint?: THREE.Vector3;
+      arcHeight?: number;
+      onArrive?: () => void;
+    }
+  ) => void;
+  leavePlanet: (
+    to: { x: number; z: number },
+    opts?: { duration?: number; dropFrom?: number; onLand?: () => void }
+  ) => void;
   // Park the follow camera on a fixed world point instead of the
   // avatar, for set-pieces where the avatar is out of sight and the
   // thing worth watching is elsewhere — the ocean volcano uses it so
