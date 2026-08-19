@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import type { Biome, BiomeContext } from "./types";
+import type { Biome, BiomeContext, PortalMorph } from "./types";
 import { findOpenSpot, freshSeed, mulberry32, makeCloud } from "../world";
 import { makePalmTree } from "./jungle";
 import { buildSunWorld } from "./sun";
@@ -21,6 +21,7 @@ import {
   playSunTouchdown,
   playSaturnTouchdown,
   playTornado,
+  setTornadoAmbience,
 } from "../../audio/sfx";
 import { music } from "../../audio/music";
 
@@ -365,10 +366,12 @@ function buildProps(ctx: BiomeContext): void {
     tick,
     worldRadius,
     getPlayerPosition,
+    getCameraPosition,
     setTerrainHeight,
     launchPlayer,
     setPlayerVisible,
     setPlayerAblaze,
+    morphPlayer,
     setCameraFocus,
     launchToPlanet,
     leavePlanet,
@@ -788,26 +791,173 @@ function buildProps(ctx: BiomeContext): void {
   // purpose, that winds up and then throws you somewhere. Here the
   // wind-up is the funnel getting hold of you and reeling you in, and
   // the throw is a spiral up the inside of it.
+  // Live position: it roams. Everything that cares where it is reads
+  // this object rather than a constant.
   const SPOUT = { x: 26, z: 22 };
   const SPOUT_TRIGGER_R = 3.4;
   // How close the boat has to be before the funnel starts to notice.
   const SPOUT_NOTICE_R = 16;
   const PULL_SECONDS = 1.5;
   const CLIMB_SECONDS = 2.7;
+  // Slower than the boat, which does 7. Fast enough that chasing it
+  // from behind never quite closes the gap, slow enough that cutting
+  // the corner does — so getting to Saturn is a bit of a hunt rather
+  // than a walk to a fixed landmark.
+  const SPOUT_SPEED = 4.7;
+  // Radians per second of heading change. Low enough that it commits
+  // to a direction and a kid can read where it is going.
+  const SPOUT_TURN = 0.9;
+  const SPOUT_ROAM_R = 42;
   const spout = buildTornado({});
   spout.group.position.set(SPOUT.x, 0, SPOUT.z);
   group.add(spout.group);
   // Non-solid: the funnel is made of air, so nothing should bump off
-  // it — but letters have no business spawning inside a tornado.
-  obstacles.push({ x: SPOUT.x, z: SPOUT.z, radius: 8, solid: false });
+  // it — but letters have no business spawning inside a tornado. The
+  // entry moves with it, so a spawn check later in the game is tested
+  // against where it actually is.
+  const spoutObstacle = { x: SPOUT.x, z: SPOUT.z, radius: 8, solid: false };
+  obstacles.push(spoutObstacle);
+
+  // Everything the funnel has to keep off, as a circle it may not
+  // enter. Its own clearance is wider than the fish need: the thing is
+  // twenty units across at the top and grabs anything that touches its
+  // foot, so it has no business scraping a beach.
+  const SPOUT_CLEARANCE = 9;
+  const spoutBlockers = [
+    { x: ISLAND.x, z: ISLAND.z, r: ISLAND_OUTER_R + SPOUT_CLEARANCE },
+    ...SAND_ISLANDS.map((isle) => ({ x: isle.x, z: isle.z, r: isle.r + SPOUT_CLEARANCE })),
+  ];
+  function spoutCanBeAt(x: number, z: number): boolean {
+    if (Math.hypot(x, z) > SPOUT_ROAM_R) return false;
+    for (const b of spoutBlockers) if (Math.hypot(x - b.x, z - b.z) < b.r) return false;
+    return true;
+  }
+
+  const spoutRand = mulberry32(freshSeed());
+  let spoutHeading = 0;
+  const spoutTarget = { x: SPOUT.x, z: SPOUT.z };
+  function retargetSpout(): void {
+    for (let i = 0; i < 60; i++) {
+      const ang = spoutRand() * Math.PI * 2;
+      const dist = Math.sqrt(spoutRand()) * SPOUT_ROAM_R;
+      const x = Math.cos(ang) * dist;
+      const z = Math.sin(ang) * dist;
+      // Far enough away that it commits to a crossing rather than
+      // fidgeting on the spot.
+      if (Math.hypot(x - SPOUT.x, z - SPOUT.z) < 22) continue;
+      if (!spoutCanBeAt(x, z)) continue;
+      spoutTarget.x = x;
+      spoutTarget.z = z;
+      return;
+    }
+    // Nowhere better — head for open water in the middle.
+    spoutTarget.x = 0;
+    spoutTarget.z = 0;
+  }
+  retargetSpout();
+  spoutHeading = Math.atan2(spoutTarget.z - SPOUT.z, spoutTarget.x - SPOUT.x);
+
+  // Steering, not pathfinding.
+  //
+  // It always moves, every frame, and is then projected back out of
+  // anything it has ended up inside. An earlier version tested the
+  // ground ahead and refused to move when it was blocked, which is how
+  // it managed to park itself exactly on an island's clearance ring
+  // and stay there: every frame it re-picked a target, every frame the
+  // step was still refused, and it never turned far enough to leave.
+  // Steering plus a projection cannot get stuck, because there is no
+  // branch in it that declines to move.
+  function roamSpout(dt: number): void {
+    let wx = spoutTarget.x - SPOUT.x;
+    let wz = spoutTarget.z - SPOUT.z;
+    const wl = Math.hypot(wx, wz) || 1;
+    wx /= wl;
+    wz /= wl;
+    // Pushed away from anything it is getting close to, hardest when
+    // it is nearly touching — so it curves around an island instead of
+    // driving at it and stopping.
+    for (const b of spoutBlockers) {
+      const dx = SPOUT.x - b.x;
+      const dz = SPOUT.z - b.z;
+      const d = Math.hypot(dx, dz) || 1;
+      const slack = d - b.r;
+      if (slack > 14) continue;
+      const push = (1 - Math.max(0, slack) / 14) * 2.6;
+      wx += (dx / d) * push;
+      wz += (dz / d) * push;
+    }
+    // And away from the edge of the play area.
+    const fromCentre = Math.hypot(SPOUT.x, SPOUT.z);
+    if (fromCentre > SPOUT_ROAM_R - 14) {
+      const push = ((fromCentre - (SPOUT_ROAM_R - 14)) / 14) * 3;
+      wx -= (SPOUT.x / (fromCentre || 1)) * push;
+      wz -= (SPOUT.z / (fromCentre || 1)) * push;
+    }
+
+    const want = Math.atan2(wz, wx);
+    let delta = want - spoutHeading;
+    while (delta > Math.PI) delta -= Math.PI * 2;
+    while (delta < -Math.PI) delta += Math.PI * 2;
+    spoutHeading += Math.max(-SPOUT_TURN * dt, Math.min(SPOUT_TURN * dt, delta));
+
+    const step = SPOUT_SPEED * dt;
+    SPOUT.x += Math.cos(spoutHeading) * step;
+    SPOUT.z += Math.sin(spoutHeading) * step;
+
+    // Projection: whatever the steering did, it ends up somewhere legal.
+    for (const b of spoutBlockers) {
+      const dx = SPOUT.x - b.x;
+      const dz = SPOUT.z - b.z;
+      const d = Math.hypot(dx, dz);
+      if (d < b.r && d > 1e-4) {
+        SPOUT.x = b.x + (dx / d) * b.r;
+        SPOUT.z = b.z + (dz / d) * b.r;
+      }
+    }
+    const out = Math.hypot(SPOUT.x, SPOUT.z);
+    if (out > SPOUT_ROAM_R) {
+      SPOUT.x *= SPOUT_ROAM_R / out;
+      SPOUT.z *= SPOUT_ROAM_R / out;
+    }
+
+    if (Math.hypot(spoutTarget.x - SPOUT.x, spoutTarget.z - SPOUT.z) < 7) retargetSpout();
+  }
 
   let spoutState: "idle" | "pulling" | "lifting" = "idle";
   let spoutT = 0;
+  let spoutFoamIn = 0;
   tick.push((dt) => {
     const p = getPlayerPosition();
+    // It stops dead once it has hold of someone — a tornado that keeps
+    // wandering off while it is reeling the boat in drags them across
+    // the map sideways.
+    if (spoutState === "idle") {
+      roamSpout(dt);
+      spout.setDrift(Math.cos(spoutHeading), Math.sin(spoutHeading));
+    } else {
+      spout.setDrift(0, 0);
+    }
+    spout.group.position.set(SPOUT.x, 0, SPOUT.z);
+    spoutObstacle.x = SPOUT.x;
+    spoutObstacle.z = SPOUT.z;
     spout.tick(dt, 0);
+    // It drags a wake behind it. Foam rings are the ocean's own —
+    // they expand and fade on the water surface, which is what makes
+    // the funnel look like it is actually touching the sea rather
+    // than hovering over a painted white disc.
+    spoutFoamIn -= dt;
+    if (spoutFoamIn <= 0) {
+      spoutFoamIn = 0.3 + Math.random() * 0.2;
+      const a = Math.random() * Math.PI * 2;
+      const r = Math.random() * 2.6;
+      spawnFoam(SPOUT.x + Math.cos(a) * r, SPOUT.z + Math.sin(a) * r, 1.1 + Math.random() * 0.7);
+    }
     if (!p) return;
     const d = Math.hypot(p.x - SPOUT.x, p.z - SPOUT.z);
+    // The howl, tracking how close the boat is. Squared so it stays
+    // out of the way until the funnel is genuinely nearby.
+    const heard = Math.max(0, 1 - d / SPOUT_NOTICE_R);
+    setTornadoAmbience(away || spoutState !== "idle" ? (away ? 0 : 1) : heard * heard);
     if (spoutState === "lifting") {
       // Nothing to do but keep spinning: the engine owns the avatar
       // until the spiral finishes. Crucially it also means the
@@ -855,13 +1005,19 @@ function buildProps(ctx: BiomeContext): void {
   // camera cuts, so the cut reads as going through rather than as the
   // picture jumping.
   let dropIn = -1;
+  // Which way the avatar comes apart on the way through, rolled per
+  // trip so the moment is not the same moment every time, and kept so
+  // it can be run backwards on the other side.
+  const MORPHS: PortalMorph[] = ["shrink", "spaghetti", "scatter"];
+  let morphStyle: PortalMorph = "shrink";
   function enterPortal(world: Away, dir: THREE.Vector3): void {
     if (away !== world || dropIn > 0) return;
     world.armExits(false);
     armExitsIn = -1;
     playPortalDive();
     world.flashPortal(dir);
-    setPlayerVisible(false);
+    morphStyle = MORPHS[Math.floor(Math.random() * MORPHS.length)];
+    morphPlayer(morphStyle, 1, 0.5);
     dropIn = 0.55;
   }
   sunWorld.onEnterSpot = (dir) => enterPortal(sunWorld, dir);
@@ -876,6 +1032,8 @@ function buildProps(ctx: BiomeContext): void {
     dropIn = -1;
     away = null;
     setPlayerVisible(true);
+    // Put back together on the way down, the same way it came apart.
+    morphPlayer(morphStyle, -1, 0.6);
     const dest = pickWaterLanding();
     const duration = 2.6;
     // The fall starts well above the space threshold, so the sky
@@ -1100,7 +1258,8 @@ function buildProps(ctx: BiomeContext): void {
         fogRef.near = fogNearBase + k * 260;
         fogRef.far = fogFarBase + k * 900;
       }
-      sky.position.copy(p);
+      // Centred on the eye, not the avatar: see getCameraPosition.
+      sky.position.copy(getCameraPosition());
       starMat.opacity = k;
       sky.visible = k > 0.01;
       for (const m of planetMats) m.opacity = k * 0.95;

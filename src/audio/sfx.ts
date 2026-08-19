@@ -908,6 +908,146 @@ export function playTornado(volume = 1) {
   }
 }
 
+// The howl you can hear before you get there. A bed rather than a
+// one-shot: it starts when the funnel comes into earshot, tracks how
+// close the boat is, and stops when it leaves. Capped deliberately
+// low — it is weather in the background, and a kid still has to be
+// able to hear the letter they just picked up over it.
+const WIND_URL = "/audio/sfx/tornado-ambience-1.mp3";
+const WIND_MAX = 0.3;
+let windBuffer: AudioBuffer | null = null;
+let windBytes: ArrayBuffer | null = null;
+void fetch(WIND_URL)
+  .then((r) => (r.ok ? r.arrayBuffer() : null))
+  .then((b) => {
+    windBytes = b;
+  })
+  .catch(() => undefined);
+
+let windGain: GainNode | null = null;
+let windStop: (() => void) | null = null;
+let windLevel = 0;
+
+// 0 = nowhere near it, 1 = inside it.
+export function setTornadoAmbience(level: number): void {
+  const next = Math.max(0, Math.min(1, level));
+  if (Math.abs(next - windLevel) < 0.01 && next !== 0) return;
+  windLevel = next;
+  const c = getCtx();
+  if (!c) return;
+  if (next <= 0.005) {
+    if (windGain) {
+      const g = windGain.gain;
+      g.cancelScheduledValues(c.currentTime);
+      g.setValueAtTime(g.value, c.currentTime);
+      g.linearRampToValueAtTime(0.0001, c.currentTime + 0.4);
+      const stop = windStop;
+      windGain = null;
+      windStop = null;
+      setTimeout(() => stop?.(), 600);
+    }
+    return;
+  }
+  if (!windGain) startWind(c);
+  if (!windGain) return;
+  const g = windGain.gain;
+  g.cancelScheduledValues(c.currentTime);
+  g.setValueAtTime(g.value, c.currentTime);
+  g.linearRampToValueAtTime(Math.max(0.0001, next * WIND_MAX), c.currentTime + 0.35);
+}
+
+function startWind(c: AudioContext): void {
+  const gain = c.createGain();
+  gain.gain.value = 0.0001;
+  gain.connect(getSfxBus(c));
+  // Rolled off hard: a tornado heard across open water is all low
+  // rumble and no hiss, and the hiss is what would fight the voice.
+  const lp = c.createBiquadFilter();
+  lp.type = "lowpass";
+  lp.frequency.value = 1400;
+  lp.connect(gain);
+
+  if (!windBuffer && windBytes) {
+    try {
+      // decodeAudioData detaches its input, so hand over a copy and
+      // keep the bytes for a future context.
+      void c.decodeAudioData(windBytes.slice(0)).then((b) => {
+        windBuffer = b;
+      });
+    } catch {
+      /* falls through to the synth bed below */
+    }
+  }
+
+  if (windBuffer) {
+    const src = c.createBufferSource();
+    src.buffer = windBuffer;
+    src.loop = true;
+    // Loop inside the clip, clear of the fades ElevenLabs puts on the
+    // ends — looping the whole thing dips the level every time round,
+    // which reads as pumping rather than as wind.
+    src.loopStart = Math.min(0.4, windBuffer.duration * 0.15);
+    src.loopEnd = Math.max(src.loopStart + 0.5, windBuffer.duration - 0.35);
+    src.connect(lp);
+    src.start();
+    windGain = gain;
+    windStop = () => {
+      try {
+        src.stop();
+      } catch {
+        /* already stopped */
+      }
+      gain.disconnect();
+    };
+    return;
+  }
+
+  // Synth bed. Looping noise through a resonant band that wanders,
+  // which is what wind is; it also loops perfectly, so there is no
+  // seam to hide.
+  const len = Math.floor(c.sampleRate * 4);
+  const buf = c.createBuffer(1, len, c.sampleRate);
+  const d = buf.getChannelData(0);
+  let last = 0;
+  for (let i = 0; i < len; i++) {
+    // Brown-ish noise: smoother and lower than white, which is what
+    // makes it a howl rather than a hiss.
+    last = (last + (Math.random() * 2 - 1) * 0.28) * 0.94;
+    d[i] = last;
+  }
+  // Crossfade the tail into the head so the loop point vanishes.
+  const fade = Math.floor(c.sampleRate * 0.25);
+  for (let i = 0; i < fade; i++) {
+    const k = i / fade;
+    d[i] = d[i] * k + d[len - fade + i] * (1 - k);
+  }
+  const src = c.createBufferSource();
+  src.buffer = buf;
+  src.loop = true;
+  const bp = c.createBiquadFilter();
+  bp.type = "bandpass";
+  bp.frequency.value = 340;
+  bp.Q.value = 1.6;
+  const lfo = c.createOscillator();
+  lfo.frequency.value = 0.13;
+  const lfoGain = c.createGain();
+  lfoGain.gain.value = 190;
+  lfo.connect(lfoGain).connect(bp.frequency);
+  src.connect(bp).connect(lp);
+  src.start();
+  lfo.start();
+  windGain = gain;
+  windStop = () => {
+    try {
+      src.stop();
+      lfo.stop();
+    } catch {
+      /* already stopped */
+    }
+    gain.disconnect();
+  };
+}
+
 const saturnTouchdownClips = makeClipPool([
   "/audio/sfx/saturn-touchdown-1.mp3",
   "/audio/sfx/saturn-touchdown-2.mp3",

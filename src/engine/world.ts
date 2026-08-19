@@ -522,9 +522,11 @@ export type WorldBuildResult = WorldHandles & {
 export function buildWorld(
   biome: Biome,
   getPlayerPosition: () => THREE.Vector3 | null = () => null,
+  getCameraPosition: BiomeContext["getCameraPosition"] = () => new THREE.Vector3(),
   launchPlayer: BiomeContext["launchPlayer"] = () => {},
   setPlayerVisible: BiomeContext["setPlayerVisible"] = () => {},
   setPlayerAblaze: BiomeContext["setPlayerAblaze"] = () => false,
+  morphPlayer: BiomeContext["morphPlayer"] = () => {},
   setCameraFocus: BiomeContext["setCameraFocus"] = () => {},
   launchToPlanet: BiomeContext["launchToPlanet"] = () => {},
   leavePlanet: BiomeContext["leavePlanet"] = () => {},
@@ -544,6 +546,7 @@ export function buildWorld(
     worldRadius: WORLD_RADIUS,
     random: Math.random,
     getPlayerPosition,
+    getCameraPosition,
     setTerrainHeight: (fn) => {
       terrainHeight = fn;
     },
@@ -556,6 +559,7 @@ export function buildWorld(
     launchPlayer,
     setPlayerVisible,
     setPlayerAblaze,
+    morphPlayer,
     setCameraFocus,
     launchToPlanet,
     leavePlanet,

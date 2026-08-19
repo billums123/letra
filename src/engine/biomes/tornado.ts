@@ -18,6 +18,9 @@ export type Tornado = {
   // Winds up as the avatar gets close and again while it is hauling
   // them in. 0 idle, 1 full fury.
   setFury: (fury: number) => void;
+  // Which way it is travelling, so the column can lean into it. The
+  // lean is most of what says "this thing is moving" from a distance.
+  setDrift: (vx: number, vz: number) => void;
   tick: (dt: number, t: number) => void;
   // Where the mouth of it is, for the spiral to be centred on.
   readonly height: number;
@@ -28,10 +31,15 @@ const CLOUD = new THREE.Color(0x8f98a4);
 const SPRAY = new THREE.Color(0xdfe9f2);
 
 // Radius at a height fraction u (0 at the water, 1 at the cloud).
-// Wide at the top where it meets the storm, pinched in the middle,
-// flaring again at the bottom where it tears up the sea.
+//
+// A funnel, which is to say: narrow at the ground and opening steadily
+// all the way to the storm. An earlier version pinched in the middle
+// and flared hard at both ends, which is the shape of a wine glass —
+// it read as a trumpet standing on the sea. The only bulge that
+// belongs is the debris cloud in the bottom tenth, where it is tearing
+// up the water, and the slight neck just above it.
 function funnelRadius(u: number): number {
-  return 1.7 + 7.4 * Math.pow(u, 2.8) + 2.3 * Math.pow(1 - u, 4);
+  return 0.85 + 9.6 * Math.pow(u, 1.4) + 1.7 * Math.pow(1 - u, 9);
 }
 
 export function buildTornado(opts: { height?: number }): Tornado {
@@ -55,9 +63,15 @@ export function buildTornado(opts: { height?: number }): Tornado {
   // lattice, not a vortex; shearing one against the other reads as air
   // moving at different speeds at different depths, which is what it
   // actually is.
+  // The column tilts; the spray does not. A ring of foam is lying on
+  // the sea, and tipping it with the funnel lifts one side of it clear
+  // of the water.
+  const column = new THREE.Group();
+  group.add(column);
+
   const shells = [1, 0.78].map((scale, i) => {
     const mesh = new THREE.Mesh(makeFunnelGeometry(height, scale, i), shellMat);
-    group.add(mesh);
+    column.add(mesh);
     return { mesh, spin: i === 0 ? 2.4 : 3.9 };
   });
 
@@ -81,9 +95,15 @@ export function buildTornado(opts: { height?: number }): Tornado {
     lump.scale.y = 0.62;
     cap.add(lump);
   }
-  group.add(cap);
+  column.add(cap);
 
-  // Torn-up water at the foot of it.
+  // Torn-up water at the foot of it: a small bright disc of froth
+  // where it actually touches, and wave rings running out from it.
+  //
+  // The rings are the bit that reads. One big white annulus was a
+  // painted circle the funnel happened to be standing in; thin rings
+  // that start tight, widen and fade look like water being pushed
+  // away from something, which is what is happening.
   const sprayMat = new THREE.MeshBasicMaterial({
     color: 0xe8f2fa,
     transparent: true,
@@ -92,17 +112,38 @@ export function buildTornado(opts: { height?: number }): Tornado {
     side: THREE.DoubleSide,
     fog: false,
   });
-  const spray = new THREE.Mesh(new THREE.RingGeometry(2.2, 11, 40), sprayMat);
+  const spray = new THREE.Mesh(new THREE.RingGeometry(0.9, 3.1, 32), sprayMat);
   spray.rotation.x = -Math.PI / 2;
   spray.position.y = 0.14;
   group.add(spray);
+
+  const RIPPLE_COUNT = 4;
+  const RIPPLE_PERIOD = 2.3;
+  const rippleMat = new THREE.MeshBasicMaterial({
+    color: 0xf2f9ff,
+    transparent: true,
+    opacity: 0,
+    depthWrite: false,
+    side: THREE.DoubleSide,
+    fog: false,
+  });
+  // Unit ring, scaled up as it travels — one geometry for all of them.
+  const rippleGeo = new THREE.RingGeometry(0.86, 1, 44);
+  const ripples = Array.from({ length: RIPPLE_COUNT }, (_, i) => {
+    const mesh = new THREE.Mesh(rippleGeo, rippleMat.clone());
+    mesh.rotation.x = -Math.PI / 2;
+    mesh.position.y = 0.1;
+    mesh.frustumCulled = false;
+    group.add(mesh);
+    return { mesh, phase: i / RIPPLE_COUNT };
+  });
 
   // Debris caught in the wall of it: chips of water going round.
   const debrisMat = new THREE.MeshBasicMaterial({ color: 0xcfe2f0, fog: false });
   const debrisGeo = new THREE.TetrahedronGeometry(0.26);
   const debris = Array.from({ length: 16 }, (_, i) => {
     const mesh = new THREE.Mesh(debrisGeo, debrisMat);
-    group.add(mesh);
+    column.add(mesh);
     return {
       mesh,
       u: (i / 16) * 0.75,
@@ -114,6 +155,8 @@ export function buildTornado(opts: { height?: number }): Tornado {
 
   let fury = 0;
   let clock = 0;
+  let leanX = 0;
+  let leanZ = 0;
 
   return {
     group,
@@ -121,16 +164,42 @@ export function buildTornado(opts: { height?: number }): Tornado {
     setFury(next) {
       fury = Math.min(1, Math.max(0, next));
     },
+    setDrift(vx, vz) {
+      const len = Math.hypot(vx, vz);
+      if (len < 1e-4) {
+        leanX = 0;
+        leanZ = 0;
+        return;
+      }
+      leanX = vx / len;
+      leanZ = vz / len;
+    },
     tick(dt) {
       clock += dt;
       const speed = 1 + fury * 2.4;
       for (const s of shells) s.mesh.rotation.y += dt * s.spin * speed;
       spray.rotation.z -= dt * 1.6 * speed;
-      spray.scale.setScalar(1 + fury * 0.35 + Math.sin(clock * 3) * 0.03);
-      sprayMat.opacity = 0.42 + fury * 0.4;
+      // Wave rings, each on the same journey a beat apart: tight and
+      // bright at the foot, wide and gone by the time they are out.
+      for (const r of ripples) {
+        const k = (clock / RIPPLE_PERIOD + r.phase) % 1;
+        const spread = 2.2 + k * (11 + fury * 5);
+        r.mesh.scale.set(spread, spread, 1);
+        // Thins as it widens, so it stays a wave and not a hoop.
+        (r.mesh.material as THREE.MeshBasicMaterial).opacity =
+          (0.34 + fury * 0.3) * Math.min(1, k / 0.12) * Math.pow(1 - k, 1.5);
+      }
+      spray.scale.setScalar(1 + fury * 0.3 + Math.sin(clock * 3) * 0.04);
+      sprayMat.opacity = 0.34 + fury * 0.36;
       cap.rotation.y += dt * 0.28 * speed;
-      // A hard lean at full fury, so it looks like it is pulling.
-      group.rotation.z = Math.sin(clock * 0.7) * 0.02 + fury * 0.03;
+      // Leans the way it is going, with the top leading — a funnel
+      // gets dragged along by the storm above it. Rotating about +Z
+      // tips the top toward -X and about +X tips it toward -Z, hence
+      // the signs.
+      const lean = 0.17;
+      const sway = Math.sin(clock * 0.7) * 0.02;
+      column.rotation.z += (-lean * leanX + sway - column.rotation.z) * Math.min(1, dt * 2.5);
+      column.rotation.x += (-lean * leanZ - column.rotation.x) * Math.min(1, dt * 2.5);
       for (const d of debris) {
         d.u += dt * d.climb * speed;
         if (d.u > 0.8) d.u -= 0.8;

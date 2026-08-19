@@ -341,6 +341,22 @@ export const SFX_CATALOG: SfxCue[] = [
     promptInfluence: 0.4,
     play: "playSaturnTouchdown",
   },
+  {
+    id: "tornado-ambience",
+    label: "Waterspout, from a distance",
+    sounds:
+      "A looping bed of wind that fades up as the boat gets near the funnel and away again as it leaves. Low-passed hard and capped low, so it is weather behind everything else rather than on top of it. Falls back to a brown-noise loop through a wandering resonant band, crossfaded end to end so the loop point vanishes.",
+    usedIn: ["The ocean — proximity to the waterspout"],
+    kind: "recorded",
+    slots: ["tornado-ambience-1.mp3"],
+    prompt:
+      "Steady distant roar of a tornado. Deep continuous rushing wind, " +
+      "even and unbroken with no gusts or peaks, no thunder, no " +
+      "debris, no music, no voice. Recorded from far away.",
+    durationSeconds: 6,
+    promptInfluence: 0.35,
+    play: "setTornadoAmbience",
+  },
 ];
 
 export function getCue(id: string): SfxCue | undefined {

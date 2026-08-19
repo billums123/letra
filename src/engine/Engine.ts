@@ -6,9 +6,22 @@ import { getBiome } from "./biomes";
 import type { Biome } from "./biomes/types";
 import { subscribeForcedTOD } from "./biomes/timeOfDay";
 import { PlanetWalker, type PlanetSpec } from "./planet";
+import type { PortalMorph } from "./biomes/types";
 import { readInput } from "../input/useInput";
 
 const PLAYER_RADIUS = 0.55;
+// A per-frame lerp factor turned into a per-second one.
+//
+// `position.lerp(target, 0.08)` every frame is only 0.08 per frame at
+// exactly 60fps. At 120 it converges twice as fast, and — worse — any
+// frame that runs long moves the camera less than the avatar moved,
+// so a stutter in the frame times comes out as a visible shudder in
+// the camera. That is most obvious on the long flights between
+// worlds, where the avatar is crossing three hundred units and the
+// camera is chasing it the whole way.
+function ease(perFrame: number, dt: number): number {
+  return 1 - Math.pow(1 - perFrame, dt * 60);
+}
 
 // Engine — owns the renderer, scene, camera, and per-frame loop.
 // Pure three.js, no R3F. React mounts it via a useEffect.
@@ -138,6 +151,30 @@ export class Engine {
   private tmpLook = new THREE.Vector3();
   private tmpUpTarget = new THREE.Vector3();
   private tmpAxis = new THREE.Vector3();
+  // Going through a portal, and coming out the other side. Purely a
+  // look: it does not move the avatar anywhere, it just takes it apart
+  // (or puts it back together) over half a second while the biome
+  // does the actual travelling.
+  private morph: {
+    style: PortalMorph;
+    // 1 while it is being taken apart, -1 while it is coming back.
+    dir: 1 | -1;
+    t: number;
+    duration: number;
+  } | null = null;
+  // Rest pose of the avatar's own parts, captured the first time one
+  // is scattered so they can be put back exactly.
+  private partRest: Array<{
+    obj: THREE.Object3D;
+    pos: THREE.Vector3;
+    scale: THREE.Vector3;
+    out: THREE.Vector3;
+  }> | null = null;
+  // How far the morph has pulled the avatar down into whatever it is
+  // going through. Read by the planet branch, which owns its height.
+  private morphSink = 0;
+  private tmpMorphQuat = new THREE.Quaternion();
+
   // Touchdown squash-and-stretch timer (seconds remaining). Applied to
   // the player group's scale for a beat after landing so the arrival
   // reads as an impact instead of a freeze-frame stop.
@@ -189,6 +226,31 @@ export class Engine {
       flips,
       onLand: opts.onLand,
     };
+  }
+
+  // Take the avatar apart on the way into a portal, or put it back
+  // together on the way out. `dir` 1 vanishes, -1 reappears.
+  morphPlayer(style: PortalMorph, dir: 1 | -1, duration = 0.5): void {
+    this.morph = { style, dir, t: 0, duration };
+    if (style === "scatter") this.capturePartRest();
+  }
+
+  private capturePartRest(): void {
+    if (this.partRest) return;
+    this.partRest = this.player.group.children.map((obj) => {
+      // Which way each piece flies. Straight out from the avatar's
+      // middle, with anything sitting exactly on the axis pushed
+      // sideways so it does not just stand still.
+      const out = obj.position.clone().setY(obj.position.y - 0.5);
+      if (out.lengthSq() < 1e-4) out.set(0, 1, 0);
+      out.normalize();
+      return {
+        obj,
+        pos: obj.position.clone(),
+        scale: obj.scale.clone(),
+        out,
+      };
+    });
   }
 
   // Take the avatar up a tornado: a spiral around (x, z) that tightens
@@ -414,6 +476,7 @@ export class Engine {
     const world = buildWorld(
       biome,
       () => this.player?.group.position ?? null,
+      () => this.camera.position,
       (to, opts) => this.launchPlayer(to, opts),
       (visible) => {
         if (this.player) this.player.group.visible = visible;
@@ -422,6 +485,7 @@ export class Engine {
         this.player?.setAblaze?.(ablaze);
         return !!this.player?.setAblaze;
       },
+      (style, dir, duration) => this.morphPlayer(style, dir, duration),
       (focus) => {
         this.cameraFocus = focus;
       },
@@ -732,6 +796,66 @@ export class Engine {
         this.player.group.quaternion.copy(this.tmpYawQuat).multiply(this.tmpTumble);
       }
       } // end flat-world orientation
+      // Portal morph. Applied on top of whatever pose the avatar is
+      // already in, so it composes with flight tumble, planet frame
+      // and the landing squash without any of them knowing about it.
+      this.morphSink = 0;
+      const morph = this.morph;
+      if (morph) {
+        morph.t = Math.min(morph.duration, morph.t + dt);
+        const k = morph.t / morph.duration;
+        // 0 = fully present, 1 = fully gone.
+        const gone = morph.dir === 1 ? k : 1 - k;
+        const g = gone * gone * (3 - 2 * gone);
+        if (morph.style === "shrink") {
+          // Straight down to nothing, spinning as it goes.
+          const s2 = Math.max(0, 1 - g);
+          this.player.group.scale.setScalar(s2 * s2);
+          this.tmpMorphQuat.setFromAxisAngle(Engine.WORLD_UP, g * g * 14);
+          this.player.group.quaternion.multiply(this.tmpMorphQuat);
+        } else if (morph.style === "spaghetti") {
+          // Drawn out into a thread and wound down the hole.
+          this.player.group.scale.set(
+            Math.max(0.001, Math.pow(1 - g, 1.6)),
+            Math.max(0.001, (1 - g) * (1 + g * 7)),
+            Math.max(0.001, Math.pow(1 - g, 1.6))
+          );
+          this.tmpMorphQuat.setFromAxisAngle(Engine.WORLD_UP, g * g * 26);
+          this.player.group.quaternion.multiply(this.tmpMorphQuat);
+          this.morphSink = g * 1.6;
+        } else if (this.partRest) {
+          // Comes apart into its own pieces, which spiral outward and
+          // shrink away. Written after the avatar has animated itself
+          // this frame, so these win; they are put back exactly on the
+          // way out.
+          const spin = g * 9;
+          for (const part of this.partRest) {
+            part.obj.position
+              .copy(part.pos)
+              .addScaledVector(part.out, g * 2.6)
+              .setY(part.pos.y + g * 1.4);
+            part.obj.scale.copy(part.scale).multiplyScalar(Math.max(0.001, 1 - g));
+            part.obj.rotateY(dt * spin);
+          }
+          this.tmpMorphQuat.setFromAxisAngle(Engine.WORLD_UP, g * 4);
+          this.player.group.quaternion.multiply(this.tmpMorphQuat);
+        }
+        // A finished vanish holds at fully-gone: the biome hides the
+        // avatar on the same beat and will call for the reappearance
+        // when it puts it back. A finished reappearance is done, and
+        // has to leave everything exactly as it found it.
+        if (morph.dir === -1 && morph.t >= morph.duration) {
+          this.morph = null;
+          this.player.group.scale.set(1, 1, 1);
+          if (this.partRest) {
+            for (const part of this.partRest) {
+              part.obj.position.copy(part.pos);
+              part.obj.scale.copy(part.scale);
+            }
+          }
+        }
+      }
+
       // Touchdown squash-and-stretch: strongest the frame we land,
       // easing back to rest. Pure scale, so it composes with whatever
       // pose the avatar is in.
@@ -792,7 +916,7 @@ export class Engine {
         // axes — so the framing is identical to the flat game's, and
         // at the pole of a planet it is literally the same arithmetic.
         planet.cameraPoint(this.tmpVec, this.cameraOffset);
-        this.camera.position.lerp(this.tmpVec, 0.08);
+        this.camera.position.lerp(this.tmpVec, ease(0.08, dt));
         planet
           .point(this.tmpLook, 0)
           .addScaledVector(planet.dir, this.cameraLookOffset.y);
@@ -812,7 +936,7 @@ export class Engine {
           this.camera.position.copy(this.tmpVec);
           this.camUp.copy(Engine.WORLD_UP);
         } else {
-          this.camera.position.lerp(this.tmpVec, spaceFlight?.camLerp ?? 0.08);
+          this.camera.position.lerp(this.tmpVec, ease(spaceFlight?.camLerp ?? 0.08, dt));
         }
         this.tmpLook.set(anchorX, cameraAnchorY, anchorZ).add(this.cameraLookOffset);
         this.tmpUpTarget.copy(Engine.WORLD_UP);

@@ -26,6 +26,11 @@ export type BiomeContext = {
   // teardown. Biomes should null-check before reading. Used by props
   // that react to the player — e.g. moon aliens waving when bumped.
   getPlayerPosition: () => THREE.Vector3 | null;
+  // Where the camera is. A starfield is meant to be infinitely far
+  // away, which means centred on the eye — centring it on the avatar
+  // instead makes the stars swim whenever the camera is lagging
+  // behind it, which on a flight between worlds is always.
+  getCameraPosition: () => THREE.Vector3;
   // Biomes that deform the ground (e.g. moon craters) call this with
   // a sampler so the engine can drop the avatar into terrain
   // depressions instead of hovering over them. Sampler returns the
@@ -66,6 +71,9 @@ export type BiomeContext = {
   // all — only the kid does — so a caller can decide whether the
   // moment needs a sound to go with it.
   setPlayerAblaze: (ablaze: boolean) => boolean;
+  // Take the avatar apart on the way into a portal (dir 1) or put it
+  // back together on the way out (dir -1).
+  morphPlayer: (style: PortalMorph, dir: 1 | -1, duration?: number) => void;
   // Off-world travel. `launchToPlanet` throws the avatar clear of the
   // flat world and sets it down on a sphere it can then walk all the
   // way around (see planet.ts); `leavePlanet` drops it back into the
@@ -104,6 +112,10 @@ export type BiomeContext = {
   // in both directions, so no easing is needed at the call site.
   setCameraFocus: (focus: { x: number; y: number; z: number; zoom?: number } | null) => void;
 };
+
+// The three ways an avatar can go through a portal. Rolled per trip,
+// so the moment does not become the same moment every time.
+export type PortalMorph = "shrink" | "spaghetti" | "scatter";
 
 export type Biome = {
   id: string;
