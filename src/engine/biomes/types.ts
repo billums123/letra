@@ -81,6 +81,15 @@ export type BiomeContext = {
       onArrive?: () => void;
     }
   ) => void;
+  // Take the avatar up a spiral — the ocean's tornado uses it to lift
+  // the boat off the water before throwing it at Saturn.
+  whirlPlayer: (opts: {
+    center: { x: number; z: number };
+    topY: number;
+    turns?: number;
+    duration?: number;
+    onDone?: () => void;
+  }) => void;
   leavePlanet: (
     to: { x: number; z: number },
     opts?: { duration?: number; dropFrom?: number; onLand?: () => void }

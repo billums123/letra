@@ -308,6 +308,39 @@ export const SFX_CATALOG: SfxCue[] = [
     promptInfluence: 0.4,
     play: "playSunTouchdown",
   },
+  {
+    id: "tornado-suck",
+    label: "Waterspout",
+    sounds:
+      "The tornado on the ocean getting hold of the boat and hauling it up — a rising roar of moving air over a climbing low howl. Two takes rotate. Falls back to a swelling bandpassed noise bed with a filtered saw underneath.",
+    usedIn: ["The ocean — driving into the waterspout, and the climb to Saturn"],
+    kind: "recorded",
+    slots: ["tornado-suck-1.mp3", "tornado-suck-2.mp3"],
+    prompt:
+      "A huge waterspout picking something up. A deep roar of rushing " +
+      "wind and spray building and building, spinning, lifting away " +
+      "into the sky. Exciting and adventurous for a small child, not " +
+      "frightening. No music, no voice.",
+    durationSeconds: 3.0,
+    promptInfluence: 0.4,
+    play: "playTornado",
+  },
+  {
+    id: "saturn-touchdown",
+    label: "Landing on Saturn",
+    sounds:
+      "Setting down on cloud tops: soft, wide and windy, where the star's arrival was a thump and a roar. Two takes rotate. Falls back to a noise swell through a closing lowpass.",
+    usedIn: ["Saturn — arriving after a trip up the waterspout"],
+    kind: "recorded",
+    slots: ["saturn-touchdown-1.mp3", "saturn-touchdown-2.mp3"],
+    prompt:
+      "Landing gently on the cloud tops of a huge gas giant. A soft " +
+      "billowing whoomph settling into wide slow high-altitude wind. " +
+      "Vast, calm and full of wonder. No music, no voice.",
+    durationSeconds: 2.2,
+    promptInfluence: 0.4,
+    play: "playSaturnTouchdown",
+  },
 ];
 
 export function getCue(id: string): SfxCue | undefined {

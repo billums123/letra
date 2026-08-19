@@ -859,6 +859,81 @@ const volcanoMegaBoomClips = makeClipPool(["/audio/sfx/volcano-boom-2.mp3"]);
 // Low ground-shake rumble that swells over ~0.9s. Played the moment
 // the kid drives into the crater, underneath the visual shake, so the
 // boom that follows feels earned rather than instant.
+// ─── The tornado ─────────────────────────────────────────────────────
+const tornadoClips = makeClipPool([
+  "/audio/sfx/tornado-suck-1.mp3",
+  "/audio/sfx/tornado-suck-2.mp3",
+]);
+
+// The waterspout getting hold of the avatar and hauling it up. Plays
+// once, over the pull and the climb.
+export function playTornado(volume = 1) {
+  if (volume < AUDIBLE) return;
+  const c = getCtx();
+  if (!c) return;
+  if (tornadoClips.play(0.9 * volume, 0.05)) return;
+  const dest = busAt(c, volume);
+  const t0 = c.currentTime;
+  // A rising roar of moving air: broad noise swelling through a
+  // filter that opens as the pull tightens.
+  {
+    const n = startNoise(c, t0, t0 + 3.2);
+    const bp = c.createBiquadFilter();
+    bp.type = "bandpass";
+    bp.frequency.setValueAtTime(240, t0);
+    bp.frequency.exponentialRampToValueAtTime(1500, t0 + 2.4);
+    bp.Q.value = 0.9;
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(0.42, t0 + 1.6);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 3.15);
+    n.connect(bp).connect(g).connect(dest);
+  }
+  // A low howl under it, climbing.
+  {
+    const osc = c.createOscillator();
+    osc.type = "sawtooth";
+    osc.frequency.setValueAtTime(48, t0);
+    osc.frequency.exponentialRampToValueAtTime(160, t0 + 2.6);
+    const lp = c.createBiquadFilter();
+    lp.type = "lowpass";
+    lp.frequency.value = 420;
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(0.18, t0 + 1.4);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 3);
+    osc.connect(lp).connect(g).connect(dest);
+    osc.start(t0);
+    osc.stop(t0 + 3.05);
+  }
+}
+
+const saturnTouchdownClips = makeClipPool([
+  "/audio/sfx/saturn-touchdown-1.mp3",
+  "/audio/sfx/saturn-touchdown-2.mp3",
+]);
+
+// Setting down on cloud tops: soft, wide and windy, where the star
+// was a thump and a roar.
+export function playSaturnTouchdown(volume = 1) {
+  if (volume < AUDIBLE) return;
+  const c = getCtx();
+  if (!c) return;
+  if (saturnTouchdownClips.play(0.8 * volume, 0.05)) return;
+  const dest = busAt(c, volume);
+  const t0 = c.currentTime;
+  const n = startNoise(c, t0, t0 + 2);
+  const lp = c.createBiquadFilter();
+  lp.type = "lowpass";
+  lp.frequency.setValueAtTime(900, t0);
+  lp.frequency.exponentialRampToValueAtTime(300, t0 + 1.8);
+  const g = c.createGain();
+  g.gain.setValueAtTime(0.0001, t0);
+  g.gain.exponentialRampToValueAtTime(0.22, t0 + 0.3);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + 1.95);
+  n.connect(lp).connect(g).connect(dest);
+}
+
 // ─── The sun ─────────────────────────────────────────────────────────
 // Two cues for the trip off-world. Both are recorded, both fall back
 // to a synth so the moment is never silent on a cold cache.

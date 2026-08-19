@@ -4,6 +4,9 @@ import { findOpenSpot, freshSeed, mulberry32, makeCloud } from "../world";
 import { makePalmTree } from "./jungle";
 import { buildSunWorld } from "./sun";
 import { buildOceanGlobe } from "./oceanGlobe";
+import { buildSaturnWorld } from "./saturn";
+import { SATURN_CENTER, SATURN_RADIUS } from "./saturnLayout";
+import { buildTornado } from "./tornado";
 import { isDev } from "../../util/isDev";
 import { rollTimeOfDay, type TimeOfDay } from "./timeOfDay";
 import {
@@ -16,6 +19,8 @@ import {
   playWoo,
   playPortalDive,
   playSunTouchdown,
+  playSaturnTouchdown,
+  playTornado,
 } from "../../audio/sfx";
 import { music } from "../../audio/music";
 
@@ -367,6 +372,7 @@ function buildProps(ctx: BiomeContext): void {
     setCameraFocus,
     launchToPlanet,
     leavePlanet,
+    whirlPlayer,
   } = ctx;
 
   // ── Wave field ───────────────────────────────────────────────────
@@ -689,15 +695,25 @@ function buildProps(ctx: BiomeContext): void {
     });
   }
 
-  // ── The sun, as a place ──────────────────────────────────────────
-  // The star that rises over the horizon on a mega launch is a real
-  // destination: a sphere the avatar gets flung to and can then walk
-  // all the way around. One object does both jobs, so there is never
-  // a swap between the thing you can see and the thing you land on.
+  // ── Other worlds ─────────────────────────────────────────────────
+  // Two places the ocean can throw you, reached two different ways.
+  //
+  // The sun is what a mega eruption does with you: the star that has
+  // always risen over the horizon on a big launch turns out to be a
+  // real destination. Saturn is what the waterspout does: drive into
+  // it and it hauls you off the water and slings you across the sky.
+  //
+  // Both work the same once you are there — a sphere you walk with the
+  // tangent frame in planet.ts, portals home, and one altitude fade
+  // that drains the sky, holds the music underwater and hushes the sea
+  // behind you. Only one can be in play at a time, which is what makes
+  // the single set of state below enough.
   const SUN_CENTER = new THREE.Vector3(30, 55, -300);
   const SUN_RADIUS = 28;
   const sunWorld = buildSunWorld({ center: SUN_CENTER, radius: SUN_RADIUS });
   group.add(sunWorld.group);
+  const saturnWorld = buildSaturnWorld({ center: SATURN_CENTER, radius: SATURN_RADIUS });
+  group.add(saturnWorld.group);
   // The flat world's own far view. Radius just contains the water
   // disc, so from outside the shell hides everything the ocean is made
   // of and shows a planet instead.
@@ -708,23 +724,19 @@ function buildProps(ctx: BiomeContext): void {
   let spaceLockTarget = 0;
   let spaceLockRate = 1.2;
   let armExitsIn = -1;
-  let offWorld = false;
 
-  function goToSun(flightSeconds = 6.4): void {
-    if (offWorld) return;
-    offWorld = true;
-    // The boom teleports the avatar to the crater's xz but leaves its
-    // y wherever the tunnel left it. The ordinary launch re-samples
-    // the ground; this one has to do the same or the arc starts
-    // several units below the crater floor.
-    const p = getPlayerPosition();
-    if (p) p.y = sampleGround(p.x, p.z);
+  type Away = typeof sunWorld | typeof saturnWorld;
+  // Which world the avatar is on (or on the way to), and null at home.
+  let away: Away | null = null;
+
+  function leaveTheOcean(world: Away, opts: { arriving: () => void }): void {
+    away = world;
     setCameraFocus(null);
     spaceLockTarget = 1;
     spaceLockRate = 1.2;
-    sunWorld.armExits(false);
-    launchToPlanet(sunWorld.spec, {
-      duration: flightSeconds,
+    world.armExits(false);
+    launchToPlanet(world.spec, {
+      duration: 5.8,
       arcHeight: 95,
       // Straight down onto the north pole. That is the one landing
       // where the planet camera and the flat camera agree exactly, so
@@ -734,19 +746,108 @@ function buildProps(ctx: BiomeContext): void {
       // your own ocean hanging in the sky behind you.
       faceHint: new THREE.Vector3(0, 0, -1),
       onArrive: () => {
+        opts.arriving();
+        // A beat before the portals go live, or touching down beside
+        // one would bounce the kid straight home again.
+        armExitsIn = 1.6;
+      },
+    });
+  }
+
+  function goToSun(): void {
+    if (away) return;
+    // The boom teleports the avatar to the crater's xz but leaves its
+    // y wherever the tunnel left it. The ordinary launch re-samples
+    // the ground; this one has to do the same or the arc starts
+    // several units below the crater floor.
+    const p = getPlayerPosition();
+    if (p) p.y = sampleGround(p.x, p.z);
+    leaveTheOcean(sunWorld, {
+      arriving: () => {
         playSunTouchdown();
         // Standing on a star has consequences. The kid catches light
         // and stays lit for the whole visit; nobody else has flames
         // to catch.
         setPlayerAblaze(true);
-        // A beat before the sunspots go live, or touching down beside
-        // one would bounce the kid straight home again.
-        armExitsIn = 1.6;
       },
     });
     // Timed for the top of the arc, where the stars come out.
     wooTimer = 2.2;
   }
+
+  function goToSaturn(): void {
+    if (away) return;
+    leaveTheOcean(saturnWorld, { arriving: () => playSaturnTouchdown() });
+    wooTimer = 2.2;
+  }
+
+  // ── The waterspout ───────────────────────────────────────────────
+  // The other way off the water, and the one you choose. It works the
+  // way the volcano works, because that is the mechanic the kid knows:
+  // a landmark you can see from across the map, that you drive into on
+  // purpose, that winds up and then throws you somewhere. Here the
+  // wind-up is the funnel getting hold of you and reeling you in, and
+  // the throw is a spiral up the inside of it.
+  const SPOUT = { x: 26, z: 22 };
+  const SPOUT_TRIGGER_R = 3.4;
+  // How close the boat has to be before the funnel starts to notice.
+  const SPOUT_NOTICE_R = 16;
+  const PULL_SECONDS = 1.5;
+  const CLIMB_SECONDS = 2.7;
+  const spout = buildTornado({});
+  spout.group.position.set(SPOUT.x, 0, SPOUT.z);
+  group.add(spout.group);
+  // Non-solid: the funnel is made of air, so nothing should bump off
+  // it — but letters have no business spawning inside a tornado.
+  obstacles.push({ x: SPOUT.x, z: SPOUT.z, radius: 8, solid: false });
+
+  let spoutState: "idle" | "pulling" | "lifting" = "idle";
+  let spoutT = 0;
+  tick.push((dt) => {
+    const p = getPlayerPosition();
+    spout.tick(dt, 0);
+    if (!p) return;
+    const d = Math.hypot(p.x - SPOUT.x, p.z - SPOUT.z);
+    if (spoutState === "lifting") {
+      // Nothing to do but keep spinning: the engine owns the avatar
+      // until the spiral finishes. Crucially it also means the
+      // trigger below cannot fire again while the boat is sitting in
+      // the middle of the funnel being carried up it.
+      spout.setFury(1);
+      return;
+    }
+    if (spoutState === "idle") {
+      // Winds up as you approach, so the thing is visibly reacting to
+      // the boat before it ever grabs it.
+      spout.setFury(away ? 0 : Math.max(0, 1 - d / SPOUT_NOTICE_R) * 0.55);
+      if (!away && d < SPOUT_TRIGGER_R) {
+        spoutState = "pulling";
+        spoutT = 0;
+        playTornado(earshot(SPOUT.x, SPOUT.z));
+      }
+      return;
+    }
+    // Reeling in — the same slurp the volcano uses to swallow the
+    // boat, so the kid has already seen this happen once.
+    spoutT += dt;
+    spout.setFury(1);
+    const k = Math.min(1, dt * 2.6);
+    p.x += (SPOUT.x - p.x) * k;
+    p.z += (SPOUT.z - p.z) * k;
+    if (spoutT >= PULL_SECONDS) {
+      spoutState = "lifting";
+      whirlPlayer({
+        center: SPOUT,
+        topY: spout.height * 0.86,
+        turns: 3.6,
+        duration: CLIMB_SECONDS,
+        onDone: () => {
+          spoutState = "idle";
+          goToSaturn();
+        },
+      });
+    }
+  });
 
   // Driving into a portal. The pool swallows the boat, and a beat
   // later it is falling out of the sky over the sea. The pause is the
@@ -754,15 +855,18 @@ function buildProps(ctx: BiomeContext): void {
   // camera cuts, so the cut reads as going through rather than as the
   // picture jumping.
   let dropIn = -1;
-  sunWorld.onEnterSpot = (dir) => {
-    if (!offWorld || dropIn > 0) return;
-    sunWorld.armExits(false);
+  function enterPortal(world: Away, dir: THREE.Vector3): void {
+    if (away !== world || dropIn > 0) return;
+    world.armExits(false);
     armExitsIn = -1;
     playPortalDive();
-    sunWorld.flashPortal(dir);
+    world.flashPortal(dir);
     setPlayerVisible(false);
     dropIn = 0.55;
-  };
+  }
+  sunWorld.onEnterSpot = (dir) => enterPortal(sunWorld, dir);
+  saturnWorld.onEnterSpot = (dir) => enterPortal(saturnWorld, dir);
+
   // Runs from the space tick, which ticks whether or not the avatar is
   // on the flat world.
   function dropHome(dt: number): void {
@@ -770,7 +874,7 @@ function buildProps(ctx: BiomeContext): void {
     dropIn -= dt;
     if (dropIn > 0) return;
     dropIn = -1;
-    offWorld = false;
+    away = null;
     setPlayerVisible(true);
     const dest = pickWaterLanding();
     const duration = 2.6;
@@ -792,22 +896,42 @@ function buildProps(ctx: BiomeContext): void {
   }
 
   if (isDev()) {
-    // Testing the trip shouldn't mean waiting on a 30% roll and a
-    // drive into the cave. Press U, or call __letraSunTrip().
-    type SunDev = {
+    // Testing a trip shouldn't mean waiting on an eruption roll or
+    // driving across the map. U for the sun, I for Saturn.
+    type WorldDev = {
       __letraSunTrip?: () => void;
       __letraSunLand?: () => void;
-      __letraSunKey?: (e: KeyboardEvent) => void;
+      __letraSaturnTrip?: () => void;
+      __letraWorldKey?: (e: KeyboardEvent) => void;
     };
-    const w = window as unknown as SunDev;
-    if (w.__letraSunKey) window.removeEventListener("keydown", w.__letraSunKey);
+    const w = window as unknown as WorldDev;
+    if (w.__letraWorldKey) window.removeEventListener("keydown", w.__letraWorldKey);
     const onKey = (e: KeyboardEvent) => {
       if (e.code === "KeyU") goToSun();
+      if (e.code === "KeyI") goToSaturn();
     };
-    w.__letraSunKey = onKey;
+    w.__letraWorldKey = onKey;
     w.__letraSunTrip = () => goToSun();
-    // Skips the ride, for looking at the surface without waiting.
-    w.__letraSunLand = () => goToSun(0.05);
+    w.__letraSaturnTrip = () => goToSaturn();
+    // Skips the ride, for looking at a surface without waiting.
+    w.__letraSunLand = () => {
+      if (away) return;
+      const p = getPlayerPosition();
+      if (p) p.y = sampleGround(p.x, p.z);
+      away = sunWorld;
+      setCameraFocus(null);
+      spaceLockTarget = 1;
+      sunWorld.armExits(false);
+      launchToPlanet(sunWorld.spec, {
+        duration: 0.05,
+        landDir: new THREE.Vector3(0, 1, 0),
+        faceHint: new THREE.Vector3(0, 0, -1),
+        onArrive: () => {
+          setPlayerAblaze(true);
+          armExitsIn = 1.6;
+        },
+      });
+    };
     window.addEventListener("keydown", onKey);
   }
 
@@ -941,7 +1065,7 @@ function buildProps(ctx: BiomeContext): void {
       if (!p || !scene) return;
       if (armExitsIn > 0) {
         armExitsIn -= dt;
-        if (armExitsIn <= 0) sunWorld.armExits(true);
+        if (armExitsIn <= 0) away?.armExits(true);
       }
       dropHome(dt);
       const bg = scene.background;
@@ -993,8 +1117,11 @@ function buildProps(ctx: BiomeContext): void {
       music.setSpaceAmount(k);
       // Steeper than the stars: a half-transparent star looks like a
       // ghost, so it goes solid well before the sky finishes draining.
-      sunWorld.setOpacity(Math.min(1, k * 2.4));
+      const worldFade = Math.min(1, k * 2.4);
+      sunWorld.setOpacity(worldFade);
       sunWorld.tick(dt, t, p);
+      saturnWorld.setOpacity(worldFade);
+      saturnWorld.tick(dt, t, p);
     });
   }
 
@@ -1764,6 +1891,11 @@ function buildProps(ctx: BiomeContext): void {
       const x = Math.cos(ang) * dist;
       const z = Math.sin(ang) * dist;
       if (Math.hypot(x - ISLAND.x, z - ISLAND.z) < ISLAND_OUTER_R + 5) continue;
+      // Never drop anyone back into the waterspout. It is a non-solid
+      // obstacle, so the clearance loop below skips it — and landing
+      // inside it would haul the kid straight back to Saturn, over
+      // and over, with no way out.
+      if (Math.hypot(x - SPOUT.x, z - SPOUT.z) < SPOUT_TRIGGER_R + 9) continue;
       // Prefer open water: skip sandy islands so the payoff is always
       // the splash.
       if (sandHeight(x, z) > 0.02) continue;

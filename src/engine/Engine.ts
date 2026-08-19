@@ -110,6 +110,23 @@ export class Engine {
     // mean a long swoop across the map from wherever it used to be.
     snap?: boolean;
   } | null = null;
+  // Being carried up a tornado. Like a flight, this replaces the whole
+  // input → collision → terrain pipeline; unlike one it spirals, and
+  // it ends by handing the avatar to whatever comes next rather than
+  // by putting it back down.
+  private whirl: {
+    t: number;
+    duration: number;
+    cx: number;
+    cz: number;
+    fromAngle: number;
+    fromRadius: number;
+    fromY: number;
+    topY: number;
+    turns: number;
+    spin: number;
+    onDone?: () => void;
+  } | null = null;
   // While set, the flat pipeline is replaced entirely by a walk
   // around a sphere. See planet.ts.
   private planet: PlanetWalker | null = null;
@@ -132,7 +149,7 @@ export class Engine {
   // on a planet is deliberately NOT included, because there the kid
   // is very much driving.
   get inFlight(): boolean {
-    return this.flight !== null || this.spaceFlight !== null;
+    return this.flight !== null || this.spaceFlight !== null || this.whirl !== null;
   }
 
   get onPlanet(): boolean {
@@ -171,6 +188,39 @@ export class Engine {
       spin: 0,
       flips,
       onLand: opts.onLand,
+    };
+  }
+
+  // Take the avatar up a tornado: a spiral around (x, z) that tightens
+  // as it climbs, ending `topY` above the water with the avatar spun
+  // round and pointing nowhere in particular. Whoever asked for it is
+  // expected to do something with them at the top — this move only
+  // gets them off the ground.
+  whirlPlayer(opts: {
+    center: { x: number; z: number };
+    topY: number;
+    turns?: number;
+    duration?: number;
+    onDone?: () => void;
+  }): void {
+    if (this.whirl || this.flight || this.spaceFlight || this.planet) return;
+    const pp = this.player.group.position;
+    const dx = pp.x - opts.center.x;
+    const dz = pp.z - opts.center.z;
+    this.whirl = {
+      t: 0,
+      duration: opts.duration ?? 2.6,
+      cx: opts.center.x,
+      cz: opts.center.z,
+      // Picked up from wherever they actually were, so the spiral
+      // starts under their feet rather than snapping them onto it.
+      fromAngle: Math.atan2(dz, dx),
+      fromRadius: Math.max(0.8, Math.hypot(dx, dz)),
+      fromY: pp.y,
+      topY: opts.topY,
+      turns: opts.turns ?? 3.5,
+      spin: 0,
+      onDone: opts.onDone,
     };
   }
 
@@ -337,7 +387,11 @@ export class Engine {
 
     this.scene = new THREE.Scene();
 
-    this.camera = new THREE.PerspectiveCamera(55, 1, 0.1, 500);
+    // Far enough to see every world from every other one: the ocean,
+    // the sun and Saturn are all inside 600 units of each other, and a
+    // planet that vanishes when you look at it from the wrong place is
+    // worse than the depth precision this costs.
+    this.camera = new THREE.PerspectiveCamera(55, 1, 0.1, 900);
     this.camera.position.copy(this.cameraOffset);
     this.camera.lookAt(0, 1.2, 0);
 
@@ -372,7 +426,8 @@ export class Engine {
         this.cameraFocus = focus;
       },
       (planet, opts) => this.launchToPlanet(planet, opts),
-      (to, opts) => this.leavePlanet(to, opts)
+      (to, opts) => this.leavePlanet(to, opts),
+      (opts) => this.whirlPlayer(opts)
     );
     this.scene.add(world.group);
     this.terrainHeight = world.terrainHeight;
@@ -462,7 +517,27 @@ export class Engine {
       const spaceFlight = this.spaceFlight;
       const planet = this.planet;
       const flight = this.flight;
-      if (spaceFlight) {
+      const whirl = this.whirl;
+      if (whirl) {
+        this.player.update(dt, Engine.ZERO_MOVE);
+        whirl.t += dt;
+        const k = Math.min(1, whirl.t / whirl.duration);
+        const angle = whirl.fromAngle + Math.PI * 2 * whirl.turns * k;
+        // Tightens toward the eye as it rises, and the climb
+        // accelerates — a tornado does not lift things at a
+        // constant rate.
+        const r = whirl.fromRadius * Math.pow(1 - k, 0.7);
+        pp.set(
+          whirl.cx + Math.cos(angle) * r,
+          whirl.fromY + (whirl.topY - whirl.fromY) * Math.pow(k, 1.7),
+          whirl.cz + Math.sin(angle) * r
+        );
+        whirl.spin = angle;
+        if (k >= 1) {
+          this.whirl = null;
+          whirl.onDone?.();
+        }
+      } else if (spaceFlight) {
         // Free 3D arc between two points in space. Quadratic Bezier
         // rather than the ground flight's parabola, because neither
         // end is on the ground plane and the path has to bow toward
@@ -610,7 +685,13 @@ export class Engine {
       } else {
       this.tmpYawQuat.setFromAxisAngle(Engine.WORLD_UP, this.player.facing());
       this.tmpTargetTilt.identity();
-      if (!this.flight && !this.spaceFlight && this.terrainHeight && this.player.terrainAlign !== false) {
+      if (
+        !this.flight &&
+        !this.spaceFlight &&
+        !this.whirl &&
+        this.terrainHeight &&
+        this.player.terrainAlign !== false
+      ) {
         const sample = this.terrainHeight;
         const walkable = this.isWalkable;
         const eps = 0.35;
@@ -643,6 +724,12 @@ export class Engine {
       if (tumbling) {
         this.tmpTumble.setFromAxisAngle(Engine.TUMBLE_AXIS, tumbling.spin);
         this.player.group.quaternion.multiply(this.tmpTumble);
+      }
+      if (whirl) {
+        // Whipped round the eye of it, leaning out of the turn.
+        this.tmpYawQuat.setFromAxisAngle(Engine.WORLD_UP, -whirl.spin * 2.2);
+        this.tmpTumble.setFromAxisAngle(Engine.TUMBLE_AXIS, 0.55);
+        this.player.group.quaternion.copy(this.tmpYawQuat).multiply(this.tmpTumble);
       }
       } // end flat-world orientation
       // Touchdown squash-and-stretch: strongest the frame we land,
@@ -690,7 +777,7 @@ export class Engine {
       const anchorZ = focus ? focus.z : pos.z;
       const cameraAnchorY = focus
         ? focus.y
-        : this.flight || this.spaceFlight
+        : this.flight || this.spaceFlight || this.whirl
           ? // Trail a fixed distance below the avatar rather than a
             // fraction of its height. The two agree exactly up to 15
             // units (a normal volcano launch), but on a mega-launch a

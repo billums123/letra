@@ -1,6 +1,15 @@
 import * as THREE from "three";
 import { PlanetWalker, type PlanetSpec } from "../src/engine/planet";
 import { SPOT_DIRS, SPOT_ANGLE, BEAM_HEIGHT } from "../src/engine/biomes/sunLayout";
+import {
+  SATURN_SPOT_DIRS,
+  SATURN_SPOT_ANGLE,
+  SATURN_SPOT_TRIGGER,
+  SATURN_BEAM_HEIGHT,
+  SATURN_RADIUS,
+  SATURN_AXIS,
+  SATURN_CENTER,
+} from "../src/engine/biomes/saturnLayout";
 
 const R = 28;
 const HOVER = 0.35;
@@ -165,6 +174,59 @@ const check = (name: string, ok: boolean, detail = "") => {
     `${((arrival - SPOT_ANGLE * 0.75) * R).toFixed(1)} units of arc to its rim`);
   check("no two sunspots overlap",
     SPOT_DIRS.every((a, i) => SPOT_DIRS.every((b, j) => i === j || a.angleTo(b) > SPOT_ANGLE * 2)));
+}
+
+// 9. Saturn's portals get the same treatment as the sun's — the
+//    layout is the only thing standing between a kid and a featureless
+//    planet with no way off it.
+{
+  const R = SATURN_RADIUS;
+  const reach =
+    Math.acos(R / (R + 7)) + Math.acos(R / (R + SATURN_BEAM_HEIGHT - 0.6));
+  let worst = 0;
+  const N = 4000;
+  const probe = new THREE.Vector3();
+  for (let i = 0; i < N; i++) {
+    const y = 1 - (2 * i + 1) / N;
+    const r = Math.sqrt(Math.max(0, 1 - y * y));
+    const th = i * Math.PI * (3 - Math.sqrt(5));
+    probe.set(Math.cos(th) * r, y, Math.sin(th) * r);
+    let nearest = Infinity;
+    for (const d of SATURN_SPOT_DIRS) nearest = Math.min(nearest, probe.angleTo(d));
+    worst = Math.max(worst, nearest);
+  }
+  check("a beacon is in sight from everywhere on Saturn", worst < reach * 0.85,
+    `worst gap ${deg(worst)}°, beacons reach ${deg(reach)}°`);
+  const pole = new THREE.Vector3(0, 1, 0);
+  const arrival = pole.angleTo(SATURN_SPOT_DIRS[0]);
+  check("Saturn's arrival view has a beacon in it", arrival < reach * 0.85,
+    `${deg(arrival)}° from the landing pole`);
+  check("Saturn's arrival beacon is a real drive away",
+    (arrival - SATURN_SPOT_TRIGGER) * R > 20,
+    `${((arrival - SATURN_SPOT_TRIGGER) * R).toFixed(1)} units of arc to its rim`);
+  check("no two Saturn portals overlap",
+    SATURN_SPOT_DIRS.every((a, i) =>
+      SATURN_SPOT_DIRS.every((b, j) => i === j || a.angleTo(b) > SATURN_SPOT_ANGLE * 2)));
+  // The rings are the reason to go, and they are only a view if the
+  // landing spot is well off Saturn's own pole. On the pole they lie
+  // flat on the horizon all the way round, which is the dullest
+  // arrangement available.
+  const offAxis = pole.angleTo(SATURN_AXIS);
+  check("you land well off Saturn's pole, so the rings cross the sky",
+    offAxis > 0.6 && offAxis < 1.2, `${deg(offAxis)}° off the ring axis`);
+  // Everything has to be inside the camera's far plane from
+  // everywhere else, or a world vanishes when you look back at it.
+  const FAR = 900;
+  const ocean = new THREE.Vector3(0, 0, 0);
+  const sun = new THREE.Vector3(30, 55, -300);
+  const legs: Array<[string, number]> = [
+    ["ocean → Saturn", ocean.distanceTo(SATURN_CENTER) + R],
+    ["sun → Saturn", sun.distanceTo(SATURN_CENTER) + R],
+    ["Saturn → ocean", SATURN_CENTER.distanceTo(ocean) + 92],
+  ];
+  check("every world is inside the camera's far plane from every other",
+    legs.every(([, d]) => d < FAR),
+    legs.map(([n, d]) => `${n} ${d.toFixed(0)}`).join(", ") + ` (far ${FAR})`);
 }
 
 function deg(rad: number) {

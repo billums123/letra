@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import type { PlanetSpec } from "../planet";
 import { mulberry32, freshSeed } from "../world";
+import { buildPortals, makeRadialTexture } from "./planetPortals";
 import { SPOT_ANGLE, SPOT_TRIGGER, BEAM_HEIGHT, SPOT_DIRS } from "./sunLayout";
 
 // The sun, built as somewhere you can actually stand.
@@ -189,117 +190,19 @@ export function buildSunWorld(opts: {
   }
 
   // ── Portals ──────────────────────────────────────────────────────
-  // Pools of ocean set into the plasma, ringed with white-hot rock
-  // where the two meet, each under a soft shaft of cool light that
-  // clears the horizon from a long way off. Drive into one and the
-  // sun drops the kid back into the sea.
-  const poolMat = new THREE.MeshBasicMaterial({
-    vertexColors: true,
-    transparent: true,
-    opacity: 0,
-    fog: false,
+  // The way home. Shared with every other world you can be set down
+  // on — see planetPortals.ts — with the rim and scorch colours the
+  // only thing a star does differently.
+  const portals = buildPortals({
+    radius,
+    dirs: SPOT_DIRS,
+    angle: SPOT_ANGLE,
+    trigger: SPOT_TRIGGER,
+    beamHeight: BEAM_HEIGHT,
+    rim: 0xfff8e2,
+    scorch: 0x8c2f08,
   });
-  const rimMat = new THREE.MeshBasicMaterial({
-    color: 0xfff8e2,
-    transparent: true,
-    opacity: 0,
-    fog: false,
-    side: THREE.DoubleSide,
-  });
-  const scorchMat = new THREE.MeshBasicMaterial({
-    color: 0x8c2f08,
-    transparent: true,
-    opacity: 0,
-    fog: false,
-    side: THREE.DoubleSide,
-  });
-  fading.push(poolMat, rimMat, scorchMat);
-
-  // One shaft texture and one plane, shared: soft-edged in both axes
-  // so the column has no silhouette to give it away as a cone. The
-  // earlier version was an open cylinder, which from the surface read
-  // as a solid white party hat with a grey lid.
-  const shaftTex = makeShaftTexture();
-  shaftTex.colorSpace = THREE.SRGBColorSpace;
-  const shaftMat = new THREE.MeshBasicMaterial({
-    map: shaftTex,
-    transparent: true,
-    opacity: 0,
-    depthWrite: false,
-    blending: THREE.AdditiveBlending,
-    fog: false,
-    side: THREE.DoubleSide,
-  });
-  const poolR = radius * Math.sin(SPOT_TRIGGER);
-  const shaftGeo = new THREE.PlaneGeometry(poolR * 1.7, BEAM_HEIGHT);
-  // A soft shaft alone is legible up close and a smudge from across
-  // the star. The point of light at its tip is the bit that actually
-  // carries: it is crisp, it pulses, and it is the first thing to
-  // clear the horizon.
-  const sparkMat = new THREE.SpriteMaterial({
-    map: makeRadialTexture([
-      [0, "rgba(238,252,255,1)"],
-      [0.18, "rgba(168,226,255,0.72)"],
-      [1, "rgba(120,196,255,0)"],
-    ]),
-    transparent: true,
-    opacity: 0,
-    depthWrite: false,
-    blending: THREE.AdditiveBlending,
-    fog: false,
-  });
-
-  const poolGeo = makePoolGeometry(radius + 0.06, SPOT_TRIGGER);
-  // Thin and white-hot: this is plasma boiling where it meets the
-  // water, not the lip of a bath.
-  const rimGeo = new THREE.SphereGeometry(
-    radius + 0.13,
-    48,
-    3,
-    0,
-    Math.PI * 2,
-    SPOT_TRIGGER - SPOT_ANGLE * 0.01,
-    SPOT_ANGLE * 0.085
-  );
-  const scorchGeo = new THREE.SphereGeometry(
-    radius + 0.03,
-    48,
-    4,
-    0,
-    Math.PI * 2,
-    SPOT_TRIGGER + SPOT_ANGLE * 0.08,
-    SPOT_ANGLE * 0.22
-  );
-
-  const portals: Array<{
-    dir: THREE.Vector3;
-    pivot: THREE.Group;
-    pool: THREE.Mesh;
-    shaft: THREE.Mesh;
-    spark: THREE.Sprite;
-    flash: number;
-  }> = [];
-  const localViewer = new THREE.Vector3();
-  for (const dir of SPOT_DIRS) {
-    const pool = new THREE.Mesh(poolGeo, poolMat);
-    const rim = new THREE.Mesh(rimGeo, rimMat);
-    const scorch = new THREE.Mesh(scorchGeo, scorchMat);
-    for (const m of [pool, rim, scorch]) m.frustumCulled = false;
-    const shaft = new THREE.Mesh(shaftGeo, shaftMat);
-    shaft.position.y = radius + BEAM_HEIGHT / 2 - 1.2;
-    shaft.frustumCulled = false;
-    const spark = new THREE.Sprite(sparkMat);
-    spark.position.y = radius + BEAM_HEIGHT - 2.4;
-    spark.scale.setScalar(poolR * 1.2);
-    spark.frustumCulled = false;
-    const pivot = new THREE.Group();
-    // Everything is modelled around +Y, so one rotation stands the
-    // whole portal up on its own patch of the sphere.
-    pivot.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
-    pivot.add(pool, rim, scorch, shaft, spark);
-    group.add(pivot);
-    portals.push({ dir, pivot, pool, shaft, spark, flash: 0 });
-  }
+  group.add(portals.group);
 
   // ── Light ────────────────────────────────────────────────────────
   // Standing on a star, the light comes from under your feet. decay 0
@@ -319,15 +222,9 @@ export function buildSunWorld(opts: {
     radius,
     hover,
     onWalk: (dir) => {
-      let hit = false;
-      for (const p of portals) {
-        if (dir.angleTo(p.dir) < SPOT_TRIGGER) {
-          hit = true;
-          if (armed && !insidePortal) world.onEnterSpot?.(p.dir);
-          break;
-        }
-      }
-      insidePortal = hit;
+      const at = portals.inside(dir);
+      if (at && armed && !insidePortal) world.onEnterSpot?.(at);
+      insidePortal = at !== null;
     },
   };
 
@@ -340,9 +237,7 @@ export function buildSunWorld(opts: {
       opacity = Math.min(1, Math.max(0, k));
       for (const m of fading) m.opacity = opacity;
       flareMat.opacity = opacity * 0.95;
-      rimMat.opacity = opacity;
-      shaftMat.opacity = opacity * 0.85;
-      sparkMat.opacity = opacity;
+      portals.setOpacity(opacity);
       glow.intensity = opacity * 2.6;
       group.visible = opacity > 0.01;
     },
@@ -351,16 +246,7 @@ export function buildSunWorld(opts: {
       if (!next) insidePortal = false;
     },
     flashPortal(dir) {
-      let best: (typeof portals)[number] | null = null;
-      let bestAngle = Infinity;
-      for (const p of portals) {
-        const a = dir.angleTo(p.dir);
-        if (a < bestAngle) {
-          bestAngle = a;
-          best = p;
-        }
-      }
-      if (best) best.flash = 1;
+      portals.flash(dir);
     },
     tick(dt, t, viewer) {
       if (!group.visible) return;
@@ -424,24 +310,7 @@ export function buildSunWorld(opts: {
         f.mesh.scale.setScalar(s);
       }
 
-      const sparkPulse = 1 + Math.sin(t * 2.1) * 0.16;
-      for (const p of portals) {
-        // The whirl speeds up sharply for the moment something goes
-        // through it, then settles back.
-        if (p.flash > 0) p.flash = Math.max(0, p.flash - dt * 1.7);
-        const burst = p.flash * p.flash;
-        p.pool.rotation.y += dt * (0.35 + burst * 5);
-        p.spark.scale.setScalar(poolR * 1.2 * (sparkPulse + burst * 1.9));
-        // The shaft is one flat plane. Spinning it about the portal's
-        // own up-axis to face the viewer is what keeps it reading as a
-        // volume of light from every angle, at the cost of one matrix
-        // inverse per portal per frame.
-        if (viewer) {
-          localViewer.copy(viewer);
-          p.pivot.worldToLocal(localViewer);
-          p.shaft.rotation.y = Math.atan2(localViewer.x, localViewer.z);
-        }
-      }
+      portals.tick(dt, t, viewer);
     },
   };
   world.setOpacity(0);
@@ -519,71 +388,3 @@ function makeFlareGeometry(
   return geo;
 }
 
-// The pool of ocean inside a portal: a spherical cap whose vertices
-// carry a spiral so that slowly turning the mesh reads as a whirlpool.
-function makePoolGeometry(r: number, capAngle: number): THREE.BufferGeometry {
-  const geo = new THREE.SphereGeometry(r, 44, 14, 0, Math.PI * 2, 0, capAngle);
-  const pos = geo.attributes.position;
-  const cols = new Float32Array(pos.count * 3);
-  const c = new THREE.Color();
-  for (let i = 0; i < pos.count; i++) {
-    const x = pos.getX(i);
-    const y = pos.getY(i);
-    const z = pos.getZ(i);
-    // How far out from the middle of the pool, 0..1.
-    const out = Math.min(1, Math.acos(Math.max(-1, Math.min(1, y / r))) / capAngle);
-    const ang = Math.atan2(z, x);
-    // Two arms rather than three, wound tighter and with more
-    // contrast, so the whirl actually reads when the mesh turns.
-    const swirl = Math.sin(ang * 2 + out * 9.5);
-    const v = Math.min(1, Math.max(0, 0.26 + out * 0.42 + swirl * 0.32));
-    if (v < 0.5) c.copy(POOL_DEEP).lerp(POOL_MID, v * 2);
-    else c.copy(POOL_MID).lerp(POOL_BRIGHT, (v - 0.5) * 2);
-    cols[i * 3] = c.r;
-    cols[i * 3 + 1] = c.g;
-    cols[i * 3 + 2] = c.b;
-  }
-  geo.setAttribute("color", new THREE.BufferAttribute(cols, 3));
-  return geo;
-}
-
-function makeRadialTexture(stops: Array<[number, string]>): THREE.CanvasTexture {
-  const c = document.createElement("canvas");
-  c.width = 128;
-  c.height = 128;
-  const g = c.getContext("2d")!;
-  const grd = g.createRadialGradient(64, 64, 0, 64, 64, 64);
-  for (const [at, color] of stops) grd.addColorStop(at, color);
-  g.fillStyle = grd;
-  g.fillRect(0, 0, 128, 128);
-  return new THREE.CanvasTexture(c);
-}
-
-// A soft-edged shaft of light: bright at the bottom, gone at the top,
-// and feathered on both sides so the plane it lives on never shows.
-function makeShaftTexture(): THREE.CanvasTexture {
-  const W = 64;
-  const H = 192;
-  const c = document.createElement("canvas");
-  c.width = W;
-  c.height = H;
-  const g = c.getContext("2d")!;
-  const img = g.createImageData(W, H);
-  for (let y = 0; y < H; y++) {
-    // Three flips the image, so row 0 ends up at the TOP of the plane
-    // — which is the top of the shaft, where the light has to be gone.
-    const up = y / (H - 1);
-    const vertical = Math.pow(up, 2.0);
-    for (let x = 0; x < W; x++) {
-      const across = 1 - Math.abs(((x + 0.5) / W) * 2 - 1);
-      const a = Math.pow(across, 2.2) * vertical;
-      const o = (y * W + x) * 4;
-      img.data[o] = 205;
-      img.data[o + 1] = 238;
-      img.data[o + 2] = 255;
-      img.data[o + 3] = Math.round(a * 255);
-    }
-  }
-  g.putImageData(img, 0, 0);
-  return new THREE.CanvasTexture(c);
-}
