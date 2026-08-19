@@ -168,6 +168,7 @@ export class Engine {
     obj: THREE.Object3D;
     pos: THREE.Vector3;
     scale: THREE.Vector3;
+    quat: THREE.Quaternion;
     out: THREE.Vector3;
   }> | null = null;
   // How far the morph has pulled the avatar down into whatever it is
@@ -248,6 +249,7 @@ export class Engine {
         obj,
         pos: obj.position.clone(),
         scale: obj.scale.clone(),
+        quat: obj.quaternion.clone(),
         out,
       };
     });
@@ -828,14 +830,21 @@ export class Engine {
           // shrink away. Written after the avatar has animated itself
           // this frame, so these win; they are put back exactly on the
           // way out.
-          const spin = g * 9;
           for (const part of this.partRest) {
             part.obj.position
               .copy(part.pos)
               .addScaledVector(part.out, g * 2.6)
               .setY(part.pos.y + g * 1.4);
             part.obj.scale.copy(part.scale).multiplyScalar(Math.max(0.001, 1 - g));
-            part.obj.rotateY(dt * spin);
+            // Set from rest every frame rather than nudged, so this
+            // unwinds exactly on the way back. Turning each piece a
+            // little further each frame left them wherever they
+            // happened to stop — which on the kid meant his belly, a
+            // deliberately flattened disc, came back rotated so the
+            // flat side faced sideways and he had an egg stuck to him.
+            part.obj.quaternion.copy(part.quat);
+            part.obj.rotateY(g * 5.5);
+            part.obj.rotateX(g * 2.2);
           }
           this.tmpMorphQuat.setFromAxisAngle(Engine.WORLD_UP, g * 4);
           this.player.group.quaternion.multiply(this.tmpMorphQuat);
@@ -851,6 +860,7 @@ export class Engine {
             for (const part of this.partRest) {
               part.obj.position.copy(part.pos);
               part.obj.scale.copy(part.scale);
+              part.obj.quaternion.copy(part.quat);
             }
           }
         }
