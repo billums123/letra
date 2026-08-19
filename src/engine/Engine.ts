@@ -223,6 +223,32 @@ export class Engine {
     };
   }
 
+  // Throw the avatar off the surface of the planet it is walking on,
+  // along a great circle. Used by the sun's plasma vents.
+  hopOnPlanet(opts: {
+    arc: number;
+    peak: number;
+    duration: number;
+    onLand?: () => void;
+  }): void {
+    const planet = this.planet;
+    if (!planet || planet.airborne) return;
+    planet.launch({
+      ...opts,
+      // Fly the way the avatar is pointing. The nose is local +Z,
+      // which the tangent frame maps to `south` turned by the yaw.
+      heading: planet.south
+        .clone()
+        .multiplyScalar(Math.cos(this.player.facing()))
+        .addScaledVector(planet.east, Math.sin(this.player.facing()))
+        .negate(),
+      onLand: () => {
+        this.landSquash = Engine.LAND_SQUASH_DURATION;
+        opts.onLand?.();
+      },
+    });
+  }
+
   // Leave the planet and come down out of the sky at (x, z).
   //
   // This is a cut, not a journey. An earlier version flew an arc all
@@ -368,7 +394,8 @@ export class Engine {
         this.cameraFocus = focus;
       },
       (planet, opts) => this.launchToPlanet(planet, opts),
-      (to, opts) => this.leavePlanet(to, opts)
+      (to, opts) => this.leavePlanet(to, opts),
+      (opts) => this.hopOnPlanet(opts)
     );
     this.scene.add(world.group);
     this.terrainHeight = world.terrainHeight;
@@ -489,10 +516,9 @@ export class Engine {
         // y is its own bob, which becomes the lift above the surface.
         const input = readInput();
         this.player.update(dt, input.move);
-        const lift = pp.y;
-        planet.step(pp.x - prevX, pp.z - prevZ);
-        planet.tick(dt);
-        planet.point(pp, lift);
+        const bob = pp.y;
+        planet.advance(dt, pp.x - prevX, pp.z - prevZ);
+        planet.point(pp, bob + planet.lift);
       } else if (flight) {
         this.player.update(dt, Engine.ZERO_MOVE);
         flight.t += dt;
@@ -602,6 +628,10 @@ export class Engine {
         // On a sphere the "tilt" is the whole tangent frame, so the
         // planet composes yaw and up in one go.
         planet.orientation(this.player.group.quaternion, this.player.facing());
+        if (planet.airborne) {
+          this.tmpTumble.setFromAxisAngle(Engine.TUMBLE_AXIS, planet.spin);
+          this.player.group.quaternion.multiply(this.tmpTumble);
+        }
         this.currentTilt.identity();
       } else {
       this.tmpYawQuat.setFromAxisAngle(Engine.WORLD_UP, this.player.facing());

@@ -1,6 +1,12 @@
 import * as THREE from "three";
 import { PlanetWalker, type PlanetSpec } from "../src/engine/planet";
-import { SPOT_DIRS, SPOT_ANGLE, BEAM_HEIGHT } from "../src/engine/biomes/sunLayout";
+import {
+  SPOT_DIRS,
+  SPOT_ANGLE,
+  BEAM_HEIGHT,
+  GEYSER_DIRS,
+  GEYSER_ANGLE,
+} from "../src/engine/biomes/sunLayout";
 
 const R = 28;
 const HOVER = 0.35;
@@ -165,6 +171,72 @@ const check = (name: string, ok: boolean, detail = "") => {
     `${((arrival - SPOT_ANGLE * 0.75) * R).toFixed(1)} units of arc to its rim`);
   check("no two sunspots overlap",
     SPOT_DIRS.every((a, i) => SPOT_DIRS.every((b, j) => i === j || a.angleTo(b) > SPOT_ANGLE * 2)));
+}
+
+// 9. Hops. A plasma vent throws the avatar along a great circle; the
+//    whole move is a rotation of the tangent frame plus a parabola of
+//    height, so it has to come back down exactly on the surface,
+//    exactly the requested distance away, with the frame still square.
+{
+  const w = new PlanetWalker(spec(), new THREE.Vector3(0, 1, 0), new THREE.Vector3(0, 0, -1));
+  const start = w.dir.clone();
+  const ARC = 0.7;
+  w.launch({ arc: ARC, peak: 13, duration: 2.5 });
+  check("a hop leaves the ground", w.airborne);
+  let highest = 0;
+  let highestAt = 0;
+  const p = new THREE.Vector3();
+  let frames = 0;
+  // Fly it out, feeding joystick the whole way: input while airborne
+  // must be ignored, or the arc below will not come out exact.
+  while (w.airborne && frames < 400) {
+    w.advance(1 / 60, 0.2, -0.2);
+    frames++;
+    if (w.lift > highest) {
+      highest = w.lift;
+      highestAt = frames / 150;
+    }
+  }
+  w.point(p);
+  const worstRadius = Math.abs(p.distanceTo(CENTER) - (R + HOVER));
+  check("a hop comes back down", !w.airborne && frames < 400, `${frames} frames`);
+  check("it lands flush on the surface", worstRadius < 1e-9, `off by ${worstRadius.toExponential(2)}`);
+  // Exact to six places despite joystick being fed the whole flight,
+  // which is also the proof that steering is ignored in mid-air.
+  check("it travels exactly the arc it was given, and only that",
+    Math.abs(start.angleTo(w.dir) - ARC) < 1e-6,
+    `${start.angleTo(w.dir).toFixed(6)} vs ${ARC}`);
+  check("the peak is halfway across", Math.abs(highestAt - 0.5) < 0.02 && Math.abs(highest - 13) < 0.01,
+    `peak ${highest.toFixed(2)} at k=${highestAt.toFixed(2)}`);
+  check("the frame is still square after a hop",
+    Math.abs(w.dir.length() - 1) < 1e-9 &&
+    Math.abs(w.dir.dot(w.south)) < 1e-9 &&
+    Math.abs(w.dir.dot(w.east)) < 1e-9 &&
+    Math.abs(w.south.dot(w.east)) < 1e-9);
+  // And the ground still works afterwards.
+  const afterLanding = w.dir.clone();
+  w.advance(1 / 60, 0, -1);
+  check("walking still works after landing", afterLanding.angleTo(w.dir) > 1e-6);
+}
+
+// 10. Vents have to keep clear of the portals. A vent inside a portal
+//     would fire the launch and the ride home on the same frame.
+{
+  let closest = Infinity;
+  for (const g of GEYSER_DIRS) for (const p of SPOT_DIRS) closest = Math.min(closest, g.angleTo(p));
+  check("no vent overlaps a portal", closest > SPOT_ANGLE + GEYSER_ANGLE + 0.1,
+    `closest ${deg(closest)}°, needs more than ${deg(SPOT_ANGLE + GEYSER_ANGLE + 0.1)}°`);
+  let closestPair = Infinity;
+  GEYSER_DIRS.forEach((a, i) =>
+    GEYSER_DIRS.forEach((b, j) => {
+      if (j > i) closestPair = Math.min(closestPair, a.angleTo(b));
+    })
+  );
+  check("vents are spread out", closestPair > GEYSER_ANGLE * 4, `closest pair ${deg(closestPair)}°`);
+  const fromPole = new THREE.Vector3(0, 1, 0).angleTo(GEYSER_DIRS[0]);
+  check("one vent is a short drive from where every arrival lands",
+    fromPole > GEYSER_ANGLE * 2 && fromPole * R < 14,
+    `${deg(fromPole)}°, ${(fromPole * R).toFixed(1)} units of arc`);
 }
 
 function deg(rad: number) {

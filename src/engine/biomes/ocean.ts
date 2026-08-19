@@ -16,6 +16,8 @@ import {
   playWoo,
   playPortalDive,
   playSunTouchdown,
+  playGeyserCharge,
+  playGeyserBlow,
 } from "../../audio/sfx";
 import { music } from "../../audio/music";
 
@@ -267,7 +269,7 @@ const RUMBLE_SECONDS = 1.0;
 const MEGA_RUMBLE_SECONDS = 3.2;
 // How often an eruption is a mega-launch. Deliberately the minority:
 // the surprise is the point, and it stops being one if it is the norm.
-const MEGA_CHANCE = 0.3;
+const MEGA_CHANCE = 0.42;
 const COOLDOWN_SECONDS = 3.5;
 
 // ── Sandy islands (scenery; palms live here) ───────────────────────
@@ -366,6 +368,7 @@ function buildProps(ctx: BiomeContext): void {
     setCameraFocus,
     launchToPlanet,
     leavePlanet,
+    hopOnPlanet,
   } = ctx;
 
   // ── Wave field ───────────────────────────────────────────────────
@@ -742,6 +745,19 @@ function buildProps(ctx: BiomeContext): void {
     // Timed for the top of the arc, where the stars come out.
     wooTimer = 2.2;
   }
+
+  // Plasma vents. The sun owns the timing and the show; the biome
+  // owns the sound and the throw, because it is the one that knows
+  // about audio and about the engine.
+  sunWorld.onGeyserCharge = (volume) => playGeyserCharge(volume);
+  sunWorld.onGeyserBlow = (volume, launched) => {
+    playGeyserBlow(volume);
+    if (!launched) return;
+    // Far enough to clear the horizon and land somewhere new, high
+    // enough that the star drops away underneath on the way up.
+    hopOnPlanet({ arc: 0.62 + Math.random() * 0.3, peak: 13, duration: 2.5 });
+    wooTimer = 0.4;
+  };
 
   // Driving into a portal. The pool swallows the boat, and a beat
   // later it is falling out of the sky over the sea. The pause is the

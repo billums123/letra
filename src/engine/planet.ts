@@ -43,6 +43,7 @@ const tmpAxis = new THREE.Vector3();
 const tmpDelta = new THREE.Vector3();
 const tmpQuat = new THREE.Quaternion();
 const tmpMat = new THREE.Matrix4();
+const tmpHeading = new THREE.Vector3();
 
 // Any tangent direction at `dir`, biased toward `prefer` when that is
 // not parallel to the surface normal.
@@ -56,6 +57,18 @@ function tangentFrom(dir: THREE.Vector3, prefer: THREE.Vector3, out: THREE.Vecto
   return out.normalize();
 }
 
+export type PlanetHop = {
+  // How far around the sphere to travel, in radians of arc.
+  arc: number;
+  // How high above the surface at the top, in world units.
+  peak: number;
+  duration: number;
+  // Tangent direction to fly along. Defaults to whichever way the
+  // avatar is currently pointing.
+  heading?: THREE.Vector3;
+  onLand?: () => void;
+};
+
 export class PlanetWalker {
   readonly spec: PlanetSpec;
   readonly radius: number;
@@ -66,6 +79,40 @@ export class PlanetWalker {
   // flat +X. Right-handed: east × up = south.
   readonly south = new THREE.Vector3(0, 0, 1);
   readonly east = new THREE.Vector3(1, 0, 0);
+
+  // Airborne state. A hop is a rotation of the whole tangent frame
+  // about a fixed axis — the same operation walking does, just run
+  // from a clock instead of from the joystick — plus a parabola of
+  // height on top. Doing it that way means the avatar comes down
+  // facing sensibly and the camera never has to be told anything
+  // special: it is still reading the same frame it always was.
+  private hop: {
+    t: number;
+    duration: number;
+    arc: number;
+    peak: number;
+    axis: THREE.Vector3;
+    turned: number;
+    flips: number;
+    onLand?: () => void;
+  } | null = null;
+  private hopLift = 0;
+
+  get airborne(): boolean {
+    return this.hop !== null;
+  }
+
+  // Height above the surface right now — the engine adds this to the
+  // avatar's own bob.
+  get lift(): number {
+    return this.hopLift;
+  }
+
+  // Tumble angle, for the engine to compose onto the avatar.
+  get spin(): number {
+    const h = this.hop;
+    return h ? Math.PI * 2 * h.flips * (h.t / h.duration) : 0;
+  }
 
   constructor(spec: PlanetSpec, landDir: THREE.Vector3, faceHint?: THREE.Vector3) {
     this.spec = spec;
@@ -154,7 +201,63 @@ export class PlanetWalker {
       .addScaledVector(this.south, offset.z);
   }
 
-  tick(dt: number): void {
+  // Throw the avatar off the surface along a great circle. Ignored if
+  // one is already in the air.
+  launch(opts: PlanetHop): void {
+    if (this.hop) return;
+    const heading = tmpHeading.copy(opts.heading ?? this.south).multiplyScalar(
+      opts.heading ? 1 : -1
+    );
+    // Project onto the tangent plane in case the caller handed us
+    // something that is not quite tangent.
+    heading.addScaledVector(this.dir, -heading.dot(this.dir));
+    if (heading.lengthSq() < 1e-8) heading.copy(this.south).negate();
+    heading.normalize();
+    const axis = this.dir.clone().cross(heading);
+    if (axis.lengthSq() < 1e-10) return;
+    axis.normalize();
+    this.hop = {
+      t: 0,
+      duration: opts.duration,
+      arc: opts.arc,
+      peak: opts.peak,
+      axis,
+      turned: 0,
+      flips: Math.max(1, Math.round(opts.duration * 1.4)),
+      onLand: opts.onLand,
+    };
+  }
+
+  // One frame. `dx`/`dz` are the flat-frame displacement the avatar
+  // moved itself by; they are ignored while airborne, because you do
+  // not get to steer in mid-air.
+  advance(dt: number, dx: number, dz: number): void {
+    const h = this.hop;
+    if (h) {
+      h.t = Math.min(h.duration, h.t + dt);
+      const k = h.t / h.duration;
+      // Rotate the frame by however much of the arc is still owed,
+      // which keeps the whole thing a pure rotation no matter how the
+      // frame times land.
+      const want = h.arc * k;
+      const turn = want - h.turned;
+      h.turned = want;
+      if (Math.abs(turn) > 1e-9) {
+        tmpQuat.setFromAxisAngle(h.axis, turn);
+        this.dir.applyQuaternion(tmpQuat);
+        this.south.applyQuaternion(tmpQuat);
+        this.east.applyQuaternion(tmpQuat);
+      }
+      this.hopLift = h.peak * 4 * k * (1 - k);
+      if (k >= 1) {
+        this.hop = null;
+        this.hopLift = 0;
+        h.onLand?.();
+        this.spec.onWalk?.(this.dir, dt);
+      }
+      return;
+    }
+    this.step(dx, dz);
     this.spec.onWalk?.(this.dir, dt);
   }
 }

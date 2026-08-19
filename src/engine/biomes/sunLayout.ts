@@ -39,3 +39,28 @@ export const SPOT_DIRS: readonly THREE.Vector3[] = [
   new THREE.Vector3(0.833, 0.407, 0.375).normalize(),
   new THREE.Vector3(-0.171, -0.503, 0.847).normalize(),
 ];
+
+// ── Plasma vents ─────────────────────────────────────────────────────
+// Holes in the surface that blow every so often, and fling the avatar
+// clear over the horizon if it is standing on one when they do.
+
+// Vent radius, as an angle at the sun's centre. Small — you have to
+// actually drive onto it, which is the point.
+export const GEYSER_ANGLE = 0.075;
+
+// Where they sit. Relaxed apart from each other, from the portals and
+// from the north pole, with one deliberate exception: the first is
+// only 17 degrees from the pole and on the side the kid faces when
+// they arrive, so the very first thing they find after landing is a
+// vent going off. The layout is checked in scripts/planet-test.ts —
+// a vent overlapping a portal would launch the kid at the same moment
+// the sun tried to send them home.
+export const GEYSER_DIRS: readonly THREE.Vector3[] = [
+  new THREE.Vector3(0.05, 0.956, -0.29).normalize(),
+  new THREE.Vector3(-0.069, 0.362, 0.929).normalize(),
+  new THREE.Vector3(-0.625, -0.738, 0.254).normalize(),
+  new THREE.Vector3(0.909, -0.199, -0.366).normalize(),
+  new THREE.Vector3(-0.908, -0.177, -0.379).normalize(),
+  new THREE.Vector3(-0.121, -0.304, -0.945).normalize(),
+  new THREE.Vector3(0.643, -0.619, 0.451).normalize(),
+];

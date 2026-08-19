@@ -1,7 +1,14 @@
 import * as THREE from "three";
 import type { PlanetSpec } from "../planet";
 import { mulberry32, freshSeed } from "../world";
-import { SPOT_ANGLE, SPOT_TRIGGER, BEAM_HEIGHT, SPOT_DIRS } from "./sunLayout";
+import {
+  SPOT_ANGLE,
+  SPOT_TRIGGER,
+  BEAM_HEIGHT,
+  SPOT_DIRS,
+  GEYSER_ANGLE,
+  GEYSER_DIRS,
+} from "./sunLayout";
 
 // The sun, built as somewhere you can actually stand.
 //
@@ -38,6 +45,12 @@ export type SunWorld = {
   // into one: it vanishes, and something has to show that it went
   // somewhere rather than simply stopped existing.
   flashPortal: (dir: THREE.Vector3) => void;
+  // A vent has started building. `volume` is how loud it should be
+  // from where the avatar is standing.
+  onGeyserCharge?: (volume: number) => void;
+  // A vent has blown. `launched` is true when the avatar was standing
+  // on it, in which case the biome is expected to fling them.
+  onGeyserBlow?: (volume: number, launched: boolean) => void;
 };
 
 // Surface palette, coolest to hottest. Deliberately a narrow range:
@@ -55,6 +68,15 @@ const HOT = new THREE.Color(0xffc25c);
 const FLARE_FOOT = new THREE.Color(0xfff2c8);
 const FLARE_MID = new THREE.Color(0xff9a20);
 const FLARE_TIP = new THREE.Color(0xd93409);
+
+// Vent plumes: white-hot at the throat, deep orange by the top.
+const JET_HOT = new THREE.Color(0xfff4d2);
+const JET_COOL = new THREE.Color(0xff5a12);
+
+// And the vent itself, from the bottom of the throat outward.
+const VENT_THROAT = new THREE.Color(0xfff0bc);
+const VENT_MOLTEN = new THREE.Color(0xff7a12);
+const VENT_CRUST = new THREE.Color(0x9a3506);
 
 // The portal pool: ocean seen through a hole in a star.
 const POOL_DEEP = new THREE.Color(0x0a3a68);
@@ -301,6 +323,111 @@ export function buildSunWorld(opts: {
     portals.push({ dir, pivot, pool, shaft, spark, flash: 0 });
   }
 
+  // ── Plasma vents ─────────────────────────────────────────────────
+  // Holes in the surface that build pressure and blow. Drive onto one
+  // as it goes and it throws you clear over the horizon — which is
+  // the one thing a sphere can do that a flat world cannot, and the
+  // reason to walk around a star rather than just look at it.
+  //
+  // They also blow on their own, on a stagger, so the place is never
+  // still even when the kid is standing somewhere else.
+  //
+  // Both halves are built to disappear into the star rather than sit
+  // on top of it. The crater is real geometry — a bowl with a raised
+  // lip — whose rim fades out per-vertex into the surrounding plasma,
+  // because a hard-edged disc reads as a sticker however well it is
+  // coloured. The plume is a flared cone that goes transparent as it
+  // rises, so it has no silhouette and no top edge.
+  const ventMatBase = new THREE.MeshBasicMaterial({
+    vertexColors: true,
+    transparent: true,
+    fog: false,
+    opacity: 0,
+  });
+  const jetMat = new THREE.MeshBasicMaterial({
+    vertexColors: true,
+    transparent: true,
+    opacity: 0,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    fog: false,
+    side: THREE.DoubleSide,
+  });
+  const flashMat = new THREE.SpriteMaterial({
+    map: makeRadialTexture([
+      [0, "rgba(255,246,214,1)"],
+      [0.3, "rgba(255,168,64,0.6)"],
+      [1, "rgba(255,110,30,0)"],
+    ]),
+    transparent: true,
+    opacity: 0,
+    depthWrite: false,
+    blending: THREE.AdditiveBlending,
+    fog: false,
+  });
+  const ventR = radius * Math.sin(GEYSER_ANGLE);
+  const JET_H = 24;
+  const ventGeo = makeVentGeometry(radius, GEYSER_ANGLE);
+  const jetGeo = makeJetGeometry(ventR * 0.62, ventR * 2.3, JET_H);
+
+  type Vent = {
+    dir: THREE.Vector3;
+    pivot: THREE.Group;
+    crater: THREE.Mesh;
+    mat: THREE.MeshBasicMaterial;
+    jet: THREE.Mesh;
+    flash: THREE.Sprite;
+    // "waiting" → "charging" → "blowing" → "cooling" → "waiting"
+    phase: "waiting" | "charging" | "blowing" | "cooling";
+    timer: number;
+  };
+  const CHARGE_SECONDS = 0.9;
+  const BLOW_SECONDS = 1.15;
+  const COOL_SECONDS = 2.6;
+  const vents: Vent[] = [];
+  const ventTint = new THREE.Color();
+  GEYSER_DIRS.forEach((dir, i) => {
+    const mat = ventMatBase.clone();
+    const crater = new THREE.Mesh(ventGeo, mat);
+    const jet = new THREE.Mesh(jetGeo, jetMat);
+    jet.position.y = radius - 0.9 + JET_H / 2;
+    jet.visible = false;
+    const flash = new THREE.Sprite(flashMat);
+    flash.position.y = radius + 0.2;
+    flash.scale.setScalar(ventR * 3);
+    flash.visible = false;
+    for (const m of [crater, jet]) m.frustumCulled = false;
+    flash.frustumCulled = false;
+    const pivot = new THREE.Group();
+    pivot.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir);
+    pivot.add(crater, jet, flash);
+    group.add(pivot);
+    fading.push(mat);
+    vents.push({
+      dir,
+      pivot,
+      crater,
+      mat,
+      jet,
+      flash,
+      phase: "waiting",
+      // Staggered, so they do not all breathe together.
+      timer: 3 + i * 2.3 + rand() * 4,
+    });
+  });
+
+  // How loud something happening at `dir` is from where the avatar is,
+  // measured along the surface rather than through the star.
+  const HEARD_FULL = 12;
+  const HEARD_GONE = 62;
+  function heardAt(dir: THREE.Vector3): number {
+    const arc = avatarDir.angleTo(dir) * radius;
+    if (arc <= HEARD_FULL) return 1;
+    if (arc >= HEARD_GONE) return 0;
+    const k = (arc - HEARD_FULL) / (HEARD_GONE - HEARD_FULL);
+    return 1 - k * k * (3 - 2 * k);
+  }
+
   // ── Light ────────────────────────────────────────────────────────
   // Standing on a star, the light comes from under your feet. decay 0
   // because the avatar is a full radius from the centre and physical
@@ -311,6 +438,10 @@ export function buildSunWorld(opts: {
 
   let armed = false;
   let insidePortal = false;
+  // Where the avatar is standing, refreshed every frame it is on the
+  // ground. Vents use it to work out how loud they are and whether
+  // anyone is aboard when they blow.
+  const avatarDir = new THREE.Vector3(0, 1, 0);
   let opacity = 0;
   let colorClock = 0;
 
@@ -319,6 +450,7 @@ export function buildSunWorld(opts: {
     radius,
     hover,
     onWalk: (dir) => {
+      avatarDir.copy(dir);
       let hit = false;
       for (const p of portals) {
         if (dir.angleTo(p.dir) < SPOT_TRIGGER) {
@@ -328,6 +460,20 @@ export function buildSunWorld(opts: {
         }
       }
       insidePortal = hit;
+      // Driving onto a resting vent sets it off. It builds for a beat
+      // first, which is both the tell and the kid's chance to think
+      // better of it. Standing on one that was already building is
+      // fine too — what matters at the blow is only whether anyone is
+      // on it, not who started it.
+      for (const v of vents) {
+        if (dir.angleTo(v.dir) >= GEYSER_ANGLE) continue;
+        if (v.phase === "waiting") {
+          v.phase = "charging";
+          v.timer = CHARGE_SECONDS;
+          world.onGeyserCharge?.(heardAt(v.dir));
+        }
+        break;
+      }
     },
   };
 
@@ -343,6 +489,7 @@ export function buildSunWorld(opts: {
       rimMat.opacity = opacity;
       shaftMat.opacity = opacity * 0.85;
       sparkMat.opacity = opacity;
+      jetMat.opacity = opacity;
       glow.intensity = opacity * 2.6;
       group.visible = opacity > 0.01;
     },
@@ -422,6 +569,80 @@ export function buildSunWorld(opts: {
         // and the arc rises and settles like something alive.
         const s = 1 + Math.sin(t * f.rate + f.phase) * 0.06;
         f.mesh.scale.setScalar(s);
+      }
+
+      // Vents. One state machine each, and a plume that is only in
+      // the scene while it is actually going off.
+      for (const v of vents) {
+        v.timer -= dt;
+        if (v.phase === "waiting") {
+          v.mat.color.setRGB(1, 1, 1);
+          if (v.timer <= 0) {
+            v.phase = "charging";
+            v.timer = CHARGE_SECONDS;
+            world.onGeyserCharge?.(heardAt(v.dir));
+          }
+        } else if (v.phase === "charging") {
+          // The crater glows from within. The material colour
+          // multiplies the baked vertex colours, so pushing it past
+          // white blooms the hot throat without touching the crust,
+          // which is already dark.
+          const k = 1 - Math.max(0, v.timer) / CHARGE_SECONDS;
+          const heat = 1 + k * k * 1.5;
+          v.mat.color.setRGB(heat, heat * 0.95, heat * 0.85);
+          v.flash.visible = true;
+          v.flash.scale.setScalar(ventR * (2 + k * 1.4));
+          flashMat.opacity = opacity * k * 0.5;
+          if (v.timer <= 0) {
+            v.phase = "blowing";
+            v.timer = BLOW_SECONDS;
+            v.jet.visible = true;
+            // Whoever is standing on it right now goes up with it.
+            const aboard = avatarDir.angleTo(v.dir) < GEYSER_ANGLE * 1.35;
+            world.onGeyserBlow?.(heardAt(v.dir), aboard);
+          }
+        } else if (v.phase === "blowing") {
+          const k = 1 - Math.max(0, v.timer) / BLOW_SECONDS;
+          // Shoots up fast, holds, then sinks back. The plume material
+          // is shared across all seven vents, so the dying is done
+          // with this mesh's own scale — fading the material would
+          // fade every vent at once.
+          const up = Math.min(1, k / 0.18);
+          const die = k < 0.42 ? 1 : Math.max(0, 1 - (k - 0.42) / 0.58);
+          const h = up * (0.2 + die * 0.8);
+          // Fattens a little as it dies, like a plume losing pressure.
+          v.jet.scale.set(1 + (1 - die) * 0.35, h, 1 + (1 - die) * 0.35);
+          v.jet.position.y = radius - 0.9 + (JET_H * h) / 2;
+          v.jet.visible = h > 0.03;
+          v.flash.visible = die > 0.05;
+          v.flash.scale.setScalar(ventR * (3.4 + (1 - die) * 3));
+          flashMat.opacity = opacity * die * 0.75;
+          const heat = 1 + die * 1.2;
+          v.mat.color.setRGB(heat, heat * 0.95, heat * 0.85);
+          if (v.timer <= 0) {
+            v.phase = "cooling";
+            v.timer = COOL_SECONDS;
+            v.jet.visible = false;
+            v.flash.visible = false;
+          }
+        } else {
+          // Cooling: the throat dims back to its resting colour.
+          const k = Math.max(0, v.timer) / COOL_SECONDS;
+          const heat = 1 + k * 0.35;
+          v.mat.color.setRGB(heat, heat * 0.97, heat * 0.93);
+          if (v.timer <= 0) {
+            v.phase = "waiting";
+            v.timer = 9 + rand() * 12;
+          }
+        }
+        // Plumes face the viewer for the same reason the portal shafts
+        // do — spinning a flared cone about its own axis costs nothing
+        // and keeps the widest face toward the camera.
+        if (viewer && v.jet.visible) {
+          localViewer.copy(viewer);
+          v.pivot.worldToLocal(localViewer);
+          v.jet.rotation.y = Math.atan2(localViewer.x, localViewer.z);
+        }
       }
 
       const sparkPulse = 1 + Math.sin(t * 2.1) * 0.16;
@@ -557,6 +778,79 @@ function makeRadialTexture(stops: Array<[number, string]>): THREE.CanvasTexture 
   g.fillStyle = grd;
   g.fillRect(0, 0, 128, 128);
   return new THREE.CanvasTexture(c);
+}
+
+// A vent: a bowl sunk into the surface with a raised lip around it,
+// glowing white-hot down the throat and cooling to dark crust at the
+// edge, where it fades out per-vertex into the surrounding plasma.
+//
+// The fade is the whole trick. An earlier version was a flat disc
+// inside a flat ring, and however it was coloured it read as a decal
+// stuck to the star, because it ended at a hard circle and the sun
+// does not have hard circles on it. Fading the alpha to nothing over
+// the outer third makes it part of the surface. The dent is what makes
+// it a hole rather than a mark.
+function makeVentGeometry(r: number, capAngle: number): THREE.BufferGeometry {
+  const geo = new THREE.SphereGeometry(r, 40, 18, 0, Math.PI * 2, 0, capAngle * 1.55);
+  const pos = geo.attributes.position;
+  const cols = new Float32Array(pos.count * 4);
+  const c = new THREE.Color();
+  const v = new THREE.Vector3();
+  for (let i = 0; i < pos.count; i++) {
+    v.fromBufferAttribute(pos, i);
+    // 0 at the middle of the vent, 1 at the rim of the modelled patch.
+    const u = Math.min(1, Math.acos(Math.max(-1, Math.min(1, v.y / r))) / (capAngle * 1.55));
+    // Crater profile, in world units: a bowl, then a lip, then flat.
+    let h = 0;
+    if (u < 0.29) h = -0.85 * Math.cos((u / 0.29) * (Math.PI / 2));
+    else if (u < 0.48) h = 0.42 * Math.sin(((u - 0.29) / 0.19) * Math.PI);
+    v.multiplyScalar((r + h) / r);
+    pos.setXYZ(i, v.x, v.y, v.z);
+    // Colour: white-hot down the throat, cooling through molten orange
+    // to a dark crust at the lip.
+    if (u < 0.2) c.copy(VENT_THROAT).lerp(VENT_MOLTEN, u / 0.2);
+    else if (u < 0.42) c.copy(VENT_MOLTEN).lerp(VENT_CRUST, (u - 0.2) / 0.22);
+    else c.copy(VENT_CRUST);
+    // Opaque across the bowl and lip, then gone by the rim.
+    const a = u < 0.55 ? 1 : Math.max(0, 1 - (u - 0.55) / 0.45);
+    cols[i * 4] = c.r;
+    cols[i * 4 + 1] = c.g;
+    cols[i * 4 + 2] = c.b;
+    cols[i * 4 + 3] = a * a;
+  }
+  pos.needsUpdate = true;
+  geo.setAttribute("color", new THREE.BufferAttribute(cols, 4));
+  return geo;
+}
+
+// The plume: narrow at the throat, flaring as it climbs, and fading
+// to nothing at the top so it has no tip to give it away as geometry.
+function makeJetGeometry(baseR: number, topR: number, height: number): THREE.BufferGeometry {
+  const SEG = 24;
+  const RINGS = 14;
+  const geo = new THREE.CylinderGeometry(topR, baseR, height, SEG, RINGS, true);
+  const pos = geo.attributes.position;
+  const cols = new Float32Array(pos.count * 4);
+  const c = new THREE.Color();
+  for (let i = 0; i < pos.count; i++) {
+    const y = pos.getY(i);
+    const u = Math.min(1, Math.max(0, y / height + 0.5)); // 0 base, 1 top
+    // CylinderGeometry interpolates the radius linearly; rescale each
+    // ring so the plume stays tight at the throat and opens out.
+    const linear = baseR + (topR - baseR) * u;
+    const want = baseR + (topR - baseR) * Math.pow(u, 1.5);
+    const k = linear > 1e-6 ? want / linear : 1;
+    pos.setX(i, pos.getX(i) * k);
+    pos.setZ(i, pos.getZ(i) * k);
+    c.copy(JET_HOT).lerp(JET_COOL, Math.pow(u, 0.7));
+    cols[i * 4] = c.r;
+    cols[i * 4 + 1] = c.g;
+    cols[i * 4 + 2] = c.b;
+    cols[i * 4 + 3] = Math.pow(1 - u, 1.6) * 0.95;
+  }
+  pos.needsUpdate = true;
+  geo.setAttribute("color", new THREE.BufferAttribute(cols, 4));
+  return geo;
 }
 
 // A soft-edged shaft of light: bright at the bottom, gone at the top,

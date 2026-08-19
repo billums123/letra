@@ -859,6 +859,74 @@ const volcanoMegaBoomClips = makeClipPool(["/audio/sfx/volcano-boom-2.mp3"]);
 // Low ground-shake rumble that swells over ~0.9s. Played the moment
 // the kid drives into the crater, underneath the visual shake, so the
 // boom that follows feels earned rather than instant.
+const geyserChargeClips = makeClipPool([
+  "/audio/sfx/sun-geyser-charge-1.mp3",
+  "/audio/sfx/sun-geyser-charge-2.mp3",
+]);
+
+// A plasma vent building pressure. The tell that something is about
+// to happen, so it has to rise.
+export function playGeyserCharge(volume = 1) {
+  if (volume < AUDIBLE) return;
+  const c = getCtx();
+  if (!c) return;
+  if (geyserChargeClips.play(0.55 * volume, 0.08)) return;
+  const dest = busAt(c, volume);
+  const t0 = c.currentTime;
+  const n = startNoise(c, t0, t0 + 0.95);
+  const bp = c.createBiquadFilter();
+  bp.type = "bandpass";
+  bp.frequency.setValueAtTime(320, t0);
+  bp.frequency.exponentialRampToValueAtTime(2400, t0 + 0.9);
+  bp.Q.value = 2.4;
+  const g = c.createGain();
+  g.gain.setValueAtTime(0.0001, t0);
+  g.gain.exponentialRampToValueAtTime(0.16, t0 + 0.85);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.95);
+  n.connect(bp).connect(g).connect(dest);
+}
+
+const geyserBlowClips = makeClipPool([
+  "/audio/sfx/sun-geyser-blow-1.mp3",
+  "/audio/sfx/sun-geyser-blow-2.mp3",
+]);
+
+// The vent letting go.
+export function playGeyserBlow(volume = 1) {
+  if (volume < AUDIBLE) return;
+  const c = getCtx();
+  if (!c) return;
+  if (geyserBlowClips.play(0.85 * volume, 0.07)) return;
+  const dest = busAt(c, volume);
+  const t0 = c.currentTime;
+  {
+    const n = startNoise(c, t0, t0 + 1.1);
+    const bp = c.createBiquadFilter();
+    bp.type = "bandpass";
+    bp.frequency.setValueAtTime(1800, t0);
+    bp.frequency.exponentialRampToValueAtTime(420, t0 + 1);
+    bp.Q.value = 0.7;
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(0.4, t0 + 0.05);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 1.05);
+    n.connect(bp).connect(g).connect(dest);
+  }
+  {
+    const osc = c.createOscillator();
+    osc.type = "sine";
+    osc.frequency.setValueAtTime(90, t0);
+    osc.frequency.exponentialRampToValueAtTime(38, t0 + 0.45);
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(0.4, t0 + 0.015);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.55);
+    osc.connect(g).connect(dest);
+    osc.start(t0);
+    osc.stop(t0 + 0.6);
+  }
+}
+
 // ─── The sun ─────────────────────────────────────────────────────────
 // Two cues for the trip off-world. Both are recorded, both fall back
 // to a synth so the moment is never silent on a cold cache.

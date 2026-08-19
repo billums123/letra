@@ -77,6 +77,14 @@ export type BiomeContext = {
       onArrive?: () => void;
     }
   ) => void;
+  // Throw the avatar off the surface of the planet it is on, along a
+  // great circle — it comes down somewhere else on the same sphere.
+  hopOnPlanet: (opts: {
+    arc: number;
+    peak: number;
+    duration: number;
+    onLand?: () => void;
+  }) => void;
   leavePlanet: (
     to: { x: number; z: number },
     opts?: { duration?: number; dropFrom?: number; onLand?: () => void }

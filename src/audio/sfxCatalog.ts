@@ -308,6 +308,39 @@ export const SFX_CATALOG: SfxCue[] = [
     promptInfluence: 0.4,
     play: "playSunTouchdown",
   },
+  {
+    id: "sun-geyser-charge",
+    label: "Plasma vent building",
+    sounds:
+      "A vent on the sun winding up before it blows — a rising hiss of pressure, about a second long. Two takes rotate. Falls back to a bandpassed noise sweep climbing three octaves.",
+    usedIn: ["The sun — a vent about to erupt"],
+    kind: "recorded",
+    slots: ["sun-geyser-charge-1.mp3", "sun-geyser-charge-2.mp3"],
+    prompt:
+      "Pressure building up before an eruption. A rising hiss of hot " +
+      "gas climbing in pitch, tightening, about to blow. Anticipation, " +
+      "not menace. No music, no voice.",
+    durationSeconds: 1.0,
+    promptInfluence: 0.4,
+    play: "playGeyserCharge",
+  },
+  {
+    id: "sun-geyser-blow",
+    label: "Plasma vent erupting",
+    sounds:
+      "The vent letting go and throwing a jet of plasma — and the avatar with it, if they were standing on it. Two takes rotate. Falls back to a falling bandpassed whoosh over a sub-bass thump.",
+    usedIn: ["The sun — a vent erupting, and the launch it gives"],
+    kind: "recorded",
+    slots: ["sun-geyser-blow-1.mp3", "sun-geyser-blow-2.mp3"],
+    prompt:
+      "A geyser of fire erupting upward. A big airy WHOOSH of flame " +
+      "and gas bursting out of the ground and rushing skyward, with a " +
+      "soft thump underneath. Playful and exciting for a small child, " +
+      "not an explosion or a gunshot. No music, no voice.",
+    durationSeconds: 1.5,
+    promptInfluence: 0.4,
+    play: "playGeyserBlow",
+  },
 ];
 
 export function getCue(id: string): SfxCue | undefined {
