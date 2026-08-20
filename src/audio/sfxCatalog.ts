@@ -376,6 +376,69 @@ export const SFX_CATALOG: SfxCue[] = [
     play: "playThunder",
   },
   {
+    id: "fuel-step",
+    label: "A letter into the tank",
+    sounds:
+      "One collected letter arriving at the volcano. Pitched by how full the tank is, so three pickups in a row are a rising major figure that resolves on the third — the kid hears they are getting somewhere without being told. Synth only: the pitch has to track the count, and a sampled chime shifted three semitones sounds like a sampled chime shifted three semitones.",
+    usedIn: ["The ocean — collecting a letter, which charges the volcano and the waterspout"],
+    kind: "synth",
+    slots: [],
+    prompt:
+      "A short bright chime, one clear bell note, warm and encouraging. " +
+      "No music, no voice.",
+    durationSeconds: 1.0,
+    promptInfluence: 0.4,
+    play: "playFuelStep",
+  },
+  {
+    id: "fuel-ready",
+    label: "The volcano is charged",
+    sounds:
+      "The tank just filled: the next trip into the crater goes to the sun. A furnace coming up to heat under a bright rising sparkle. Two takes rotate. Falls back to a bandpassed noise swell over a sine climbing an octave.",
+    usedIn: ["The ocean — the third letter lands"],
+    kind: "recorded",
+    slots: ["fuel-ready-1.mp3", "fuel-ready-2.mp3"],
+    prompt:
+      "A deep warm rumble swelling up under a bright rising sparkle, " +
+      "like a furnace coming up to heat and something magical getting " +
+      "ready to launch. Triumphant and inviting for a small child. No " +
+      "music, no voice.",
+    durationSeconds: 2.2,
+    promptInfluence: 0.4,
+    play: "playFuelReady",
+  },
+  {
+    id: "shrug",
+    label: "The waterspout bops you away",
+    sounds:
+      "Turning up at the funnel with an empty tank. Deliberately not a failure noise — no buzzer, no descending trombone — because the kid has done nothing wrong, they just have not collected anything yet. A rubbery boing that lands somewhere cheerful. Two takes rotate. Falls back to a sine dipping and springing straight back up under a fast wobble.",
+    usedIn: ["The ocean — driving into the waterspout with no letters banked"],
+    kind: "recorded",
+    slots: ["shrug-1.mp3", "shrug-2.mp3"],
+    prompt:
+      "A soft comical rubbery boing, like a cartoon character bouncing " +
+      "gently off something springy. Playful and friendly, not a buzzer " +
+      "or a failure sound. No music, no voice.",
+    durationSeconds: 1.0,
+    promptInfluence: 0.4,
+    play: "playShrug",
+  },
+  {
+    id: "forge-hum",
+    label: "The volcano, filling",
+    sounds:
+      "A low bed under everything that deepens as letters go into the tank — the pitch drops and the noise beneath it opens up, so it reads as more weight rather than more volume. It is how a kid who is not looking at the volcano still knows something is building. Silent while off-world.",
+    usedIn: ["The ocean — always, scaled by how charged the volcano is"],
+    kind: "synth",
+    slots: [],
+    prompt:
+      "A very low continuous rumbling hum, like a distant furnace under " +
+      "a mountain. Steady and calm. No music, no voice.",
+    durationSeconds: 4.0,
+    promptInfluence: 0.4,
+    play: "setForgeHum",
+  },
+  {
     id: "tornado-ambience",
     label: "Waterspout, from a distance",
     sounds:

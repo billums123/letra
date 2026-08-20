@@ -416,6 +416,13 @@ export class Engine {
   // visibly dips into moon craters. Public so games can place spawn
   // props (letters, etc.) at the correct height.
   terrainHeight: ((x: number, z: number) => number) | null = null;
+  // Hands a collected letter to the biome. Games call this so that
+  // progress in the game can pay for something in the world — see
+  // BiomeContext.onLetterBanked.
+  private bankLetterInWorld: ((letter: string) => void) | null = null;
+  bankLetter(letter: string): void {
+    this.bankLetterInWorld?.(letter);
+  }
   // Optional walkable predicate from biomes whose play area is not a
   // single connected disc (sky islands etc.). Games pass this to
   // pickClearSpawn so letters land only on surfaces the avatar can
@@ -499,6 +506,7 @@ export class Engine {
     this.terrainHeight = world.terrainHeight;
     this.isWalkable = world.isWalkable;
     this.celebrationCenter = world.celebrationCenter;
+    this.bankLetterInWorld = world.bankLetter;
     this.obstacles = world.obstacles;
     this.worldRadius = world.worldRadius;
     // Per-frame world animations (drifting butterflies etc) are

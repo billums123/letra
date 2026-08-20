@@ -275,6 +275,9 @@ export function FindAlphabetGame() {
     // each cancelling the last and leaving the user in silence.
     audio.enqueue(audio.letterName(entry.letter));
     collect(entry.letter);
+    // Fuel for whatever the biome does with it — the ocean banks
+    // letters to charge the volcano and the waterspout.
+    engine.bankLetter(entry.letter);
     setFoundCount((n) => n + 1);
     currentIndex.current += 1;
     lastProgressRef.current = performance.now();

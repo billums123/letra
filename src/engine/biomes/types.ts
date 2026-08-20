@@ -102,6 +102,16 @@ export type BiomeContext = {
     to: { x: number; z: number },
     opts?: { duration?: number; dropFrom?: number; onLand?: () => void }
   ) => void;
+  // A letter was just picked up. Biomes that want to make the game's
+  // progress mean something in the world register here.
+  //
+  // This is the one channel that runs game -> biome rather than the
+  // other way about, and it exists so that collecting letters can pay
+  // for the set-pieces. The ocean banks them as fuel: the volcano
+  // launches everyone, but only a charged one throws you at the sun,
+  // and the waterspout only takes hold once there is something in the
+  // tank. A kid learns letters -> the big ride without being told.
+  onLetterBanked: (fn: (letter: string) => void) => void;
   // Park the follow camera on a fixed world point instead of the
   // avatar, for set-pieces where the avatar is out of sight and the
   // thing worth watching is elsewhere — the ocean volcano uses it so

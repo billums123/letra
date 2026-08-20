@@ -254,6 +254,9 @@ function SpellWordRound({
     // hear letter-A's phonetic sound after the player has moved on to B.
     void audio.playSequence([audio.letterName(entry.letter), audio.letterSound(entry.letter)]);
     collect(entry.letter);
+    // Fuel for whatever the biome does with it — the ocean banks
+    // letters to charge the volcano and the waterspout.
+    engine.bankLetter(entry.letter);
     setFoundCount((n) => n + 1);
     currentIndex.current += 1;
     lastProgressRef.current = performance.now();

@@ -1233,6 +1233,172 @@ export function playJupiterTouchdown(volume = 1) {
   }
 }
 
+// ─── Letters as fuel ─────────────────────────────────────────────────
+// The volcano and the waterspout run on collected letters, so banking
+// one needs to be heard as well as seen. Three cues: a step, a
+// this-tank-is-full, and the shrug you get for turning up empty.
+
+// One letter into the tank. Pitched by how full it is, so three
+// pickups in a row are a rising figure that resolves — which is the
+// whole point: a kid hears they are getting somewhere without anyone
+// saying so. Synthesised rather than recorded because the pitch has to
+// track the count, and a sampled chime pitch-shifted three semitones
+// sounds like a sampled chime pitch-shifted.
+export function playFuelStep(step: number, full: number, volume = 1) {
+  if (volume < AUDIBLE) return;
+  const c = getCtx();
+  if (!c) return;
+  const dest = busAt(c, volume);
+  const t0 = c.currentTime;
+  // Major triad up to the octave: 1 -> 5/4 -> 3/2 -> 2.
+  const ratios = [1, 1.25, 1.5, 2];
+  const k = Math.min(ratios.length - 1, Math.max(0, step - 1));
+  const root = 523.25 * ratios[Math.min(k, ratios.length - 1)];
+  const last = step >= full;
+  for (const [mult, gain, delay] of [
+    [1, 0.16, 0],
+    [2, 0.07, 0.005],
+    [3, 0.03, 0.01],
+  ] as const) {
+    const o = c.createOscillator();
+    o.type = "triangle";
+    o.frequency.setValueAtTime(root * mult, t0 + delay);
+    const g = c.createGain();
+    const tail = last ? 0.9 : 0.42;
+    g.gain.setValueAtTime(0.0001, t0 + delay);
+    g.gain.exponentialRampToValueAtTime(gain, t0 + delay + 0.012);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + delay + tail);
+    o.connect(g).connect(dest);
+    o.start(t0 + delay);
+    o.stop(t0 + delay + tail + 0.05);
+  }
+}
+
+const fuelReadyClips = makeClipPool([
+  "/audio/sfx/fuel-ready-1.mp3",
+  "/audio/sfx/fuel-ready-2.mp3",
+]);
+
+// The tank is full: the mountain is about to be worth climbing into.
+// Recorded, with a synth fallback of a rising swell over a low thump.
+export function playFuelReady(volume = 1) {
+  if (volume < AUDIBLE) return;
+  const c = getCtx();
+  if (!c) return;
+  if (fuelReadyClips.play(0.75 * volume, 0.05)) return;
+  const dest = busAt(c, volume);
+  const t0 = c.currentTime;
+  {
+    const n = startNoise(c, t0, t0 + 1.5);
+    const bp = c.createBiquadFilter();
+    bp.type = "bandpass";
+    bp.frequency.setValueAtTime(220, t0);
+    bp.frequency.exponentialRampToValueAtTime(1500, t0 + 1.1);
+    bp.Q.value = 1.2;
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(0.2, t0 + 0.9);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 1.45);
+    n.connect(bp).connect(g).connect(dest);
+  }
+  {
+    const o = c.createOscillator();
+    o.type = "sine";
+    o.frequency.setValueAtTime(48, t0);
+    o.frequency.exponentialRampToValueAtTime(96, t0 + 1.0);
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(0.22, t0 + 0.85);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 1.4);
+    o.connect(g).connect(dest);
+    o.start(t0);
+    o.stop(t0 + 1.5);
+  }
+}
+
+const shrugClips = makeClipPool([
+  "/audio/sfx/shrug-1.mp3",
+  "/audio/sfx/shrug-2.mp3",
+]);
+
+// Turning up at the waterspout with nothing in the tank. It bops you
+// away rather than taking you, so this has to be funny and not a
+// failure noise — no descending sad trombone, nothing that sounds like
+// a buzzer. A rubbery boing that lands somewhere cheerful.
+export function playShrug(volume = 1) {
+  if (volume < AUDIBLE) return;
+  const c = getCtx();
+  if (!c) return;
+  if (shrugClips.play(0.8 * volume, 0.05)) return;
+  const dest = busAt(c, volume);
+  const t0 = c.currentTime;
+  const o = c.createOscillator();
+  o.type = "sine";
+  // Down and straight back up: a boing, not a slump.
+  o.frequency.setValueAtTime(420, t0);
+  o.frequency.exponentialRampToValueAtTime(150, t0 + 0.12);
+  o.frequency.exponentialRampToValueAtTime(360, t0 + 0.3);
+  const wobble = c.createOscillator();
+  wobble.frequency.value = 17;
+  const wobbleGain = c.createGain();
+  wobbleGain.gain.value = 60;
+  wobble.connect(wobbleGain).connect(o.frequency);
+  const g = c.createGain();
+  g.gain.setValueAtTime(0.0001, t0);
+  g.gain.exponentialRampToValueAtTime(0.2, t0 + 0.02);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.44);
+  o.connect(g).connect(dest);
+  o.start(t0);
+  wobble.start(t0);
+  o.stop(t0 + 0.5);
+  wobble.stop(t0 + 0.5);
+}
+
+// The mountain's idle note, which deepens and swells as it fills. Not
+// a cue but a bed: it is how a kid who is not looking at the volcano
+// still knows something is building. 0 silences it.
+let forgeGain: GainNode | null = null;
+let forgeOsc: OscillatorNode | null = null;
+let forgeFilter: BiquadFilterNode | null = null;
+export function setForgeHum(k: number) {
+  const c = getCtx();
+  if (!c) return;
+  const level = Math.min(1, Math.max(0, k));
+  if (level < 0.01) {
+    if (forgeGain) forgeGain.gain.setTargetAtTime(0, c.currentTime, 0.4);
+    return;
+  }
+  if (!forgeOsc) {
+    // Its own looping source: startNoise is built for bursts and stops
+    // at a fixed time, and a bed has to run until the biome goes away.
+    const src = c.createBufferSource();
+    src.buffer = getNoiseBuffer(c);
+    src.loop = true;
+    src.start();
+    const lp = c.createBiquadFilter();
+    lp.type = "lowpass";
+    lp.frequency.value = 120;
+    const o = c.createOscillator();
+    o.type = "sine";
+    o.frequency.value = 34;
+    const g = c.createGain();
+    g.gain.value = 0;
+    src.connect(lp).connect(g);
+    o.connect(g);
+    g.connect(busAt(c, 1));
+    o.start();
+    forgeOsc = o;
+    forgeGain = g;
+    forgeFilter = lp;
+  }
+  const now = c.currentTime;
+  forgeGain?.gain.setTargetAtTime(0.02 + level * 0.05, now, 0.5);
+  // Deepens as it fills — the pitch drops and the noise under it opens
+  // up, which reads as more weight rather than more volume.
+  forgeOsc?.frequency.setTargetAtTime(40 - level * 12, now, 0.6);
+  forgeFilter?.frequency.setTargetAtTime(90 + level * 130, now, 0.6);
+}
+
 const thunderClips = makeClipPool([
   "/audio/sfx/thunder-1.mp3",
   "/audio/sfx/thunder-2.mp3",

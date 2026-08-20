@@ -291,6 +291,9 @@ export function SoundMatchGame() {
       playChime();
       await audio.playSequence([audio.letterName(entry.letter), audio.randomCelebrate()]);
       collect(entry.letter);
+      // Fuel for whatever the biome does with it — the ocean banks
+      // letters to charge the volcano and the waterspout.
+      engine.bankLetter(entry.letter);
       // Bump the sound-match counter; this awards a Listening Star
       // every 10 successful matches (the store handles the threshold).
       useGameStore.getState().recordSoundMatch();

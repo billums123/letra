@@ -9,6 +9,7 @@ import { SATURN_CENTER, SATURN_RADIUS } from "./saturnLayout";
 import { buildJupiterWorld } from "./jupiter";
 import { JUPITER_CENTER, JUPITER_RADIUS } from "./jupiterLayout";
 import { buildTornado, spoutDepression } from "./tornado";
+import { makeLetterFuel } from "./letterFuel";
 import { buildWhirlpool, eddyDepression, EDDY_RADIUS } from "./whirlpool";
 import { buildSeafloor, SEA_DEPTH } from "./seafloor";
 import { isDev } from "../../util/isDev";
@@ -26,6 +27,10 @@ import {
   playSaturnTouchdown,
   playJupiterTouchdown,
   playThunder,
+  playFuelStep,
+  playFuelReady,
+  playShrug,
+  setForgeHum,
   playTornado,
   setTornadoAmbience,
   playWhirlpool,
@@ -279,9 +284,12 @@ function coneSurfaceY(lx: number, lz: number): number {
 // space and it should have time to feel ominous.
 const RUMBLE_SECONDS = 1.0;
 const MEGA_RUMBLE_SECONDS = 3.2;
-// How often an eruption is a mega-launch. Deliberately the minority:
-// the surprise is the point, and it stops being one if it is the norm.
-const MEGA_CHANCE = 0.42;
+// A mega-launch used to be a dice roll at 0.42. It is now bought with
+// letters — see letterFuel.ts. The mountain still fires everyone into
+// the air; a charged one is the only one that fires you off the world.
+// That distinction matters more than it looks: a ride you can be
+// refused is a ride a four-year-old stops going to, so letters buy a
+// bigger version of the thing rather than permission to have it.
 const COOLDOWN_SECONDS = 3.5;
 
 // ── Sandy islands (scenery; palms live here) ───────────────────────
@@ -375,6 +383,7 @@ function buildProps(ctx: BiomeContext): void {
     worldRadius,
     getPlayerPosition,
     getCameraPosition,
+    onLetterBanked,
     setTerrainHeight,
     launchPlayer,
     setPlayerVisible,
@@ -785,6 +794,33 @@ function buildProps(ctx: BiomeContext): void {
     });
   }
 
+  // ── Letters as fuel ──────────────────────────────────────────────
+  // See letterFuel.ts. The tank hangs over the crater, because the
+  // volcano is the landmark every kid on this map already knows, and
+  // both rides spend from it.
+  const fuel = makeLetterFuel({
+    at: { x: ISLAND.x, y: RIM_H + 0.6, z: ISLAND.z },
+    radius: CRATER_RIM_R + 1.9,
+  });
+  group.add(fuel.group);
+  fuel.onBanked = (step, full) => playFuelStep(step, full);
+  fuel.onFull = () => playFuelReady();
+  onLetterBanked((letter) => {
+    // It flies from wherever it was picked up, which is wherever the
+    // avatar is standing on the frame it is collected.
+    const p = getPlayerPosition();
+    fuel.bank(letter, p ? p.clone() : null);
+  });
+  tick.push((dt, t) => {
+    fuel.tick(dt, t, getCameraPosition());
+    // The mountain's note, deepening as it fills. Silent while the kid
+    // is off-world: a hum from a volcano four hundred units below is
+    // not something you should be able to hear from Jupiter.
+    setForgeHum(
+      away ? 0 : fuel.amount() * (0.35 + 0.65 * earshot(ISLAND.x, ISLAND.z, RIM_H))
+    );
+  });
+
   // ── Other worlds ─────────────────────────────────────────────────
   // Three places the ocean can throw you, reached two different ways.
   //
@@ -1046,8 +1082,26 @@ function buildProps(ctx: BiomeContext): void {
   // Two states, not three: there is no reeling-in phase any more, so
   // it either has hold of you or it doesn't.
   let spoutState: "idle" | "lifting" = "idle";
+  // Being bopped away by an unfuelled funnel. Held for a moment so the
+  // boat visibly travels rather than teleporting a boat-length.
+  const SHOVE_SECONDS = 0.55;
+  const SHOVE_SPEED = 15;
+  let shoveFrom: { x: number; z: number; t: number } | null = null;
   tick.push((dt) => {
     const p = getPlayerPosition();
+    if (shoveFrom && p) {
+      // Pushed straight out from the funnel, easing off as it goes.
+      shoveFrom.t -= dt;
+      const k = Math.max(0, shoveFrom.t / SHOVE_SECONDS);
+      let dx = p.x - shoveFrom.x;
+      let dz = p.z - shoveFrom.z;
+      const len = Math.hypot(dx, dz) || 1;
+      dx /= len;
+      dz /= len;
+      p.x += dx * SHOVE_SPEED * k * dt;
+      p.z += dz * SHOVE_SPEED * k * dt;
+      if (shoveFrom.t <= 0) shoveFrom = null;
+    }
     // It stops dead once it has hold of someone — a tornado that keeps
     // wandering off while it is reeling the boat in drags them across
     // the map sideways.
@@ -1086,9 +1140,29 @@ function buildProps(ctx: BiomeContext): void {
     if (spoutState === "idle") {
       // Winds up as you approach, so the thing is visibly reacting to
       // the boat before it ever grabs it.
-      spout.setFury(away ? 0 : Math.max(0, 1 - d / SPOUT_NOTICE_R) * 0.55);
+      spout.setFury(
+        away ? 0
+        : shoveFrom ? 1
+        : Math.max(0, 1 - d / SPOUT_NOTICE_R) * 0.55
+      );
+      // Mid-bop: it has already decided about you this visit, and
+      // neither branch below may fire again until you are clear. Left
+      // out, the shrug ran on the frame of contact and the grab ran on
+      // the very next one, so an empty tank got the ride anyway.
+      if (shoveFrom) return;
+      if (!away && d < SPOUT_TRIGGER_R && !fuel.charged()) {
+        // Empty-handed. It bops the boat away rather than taking it —
+        // funny, not a failure. Nothing here says why; the letters
+        // turning over the volcano across the water are the why, and
+        // a kid who has seen one fly there once already knows.
+        shoveFrom = { x: SPOUT.x, z: SPOUT.z, t: SHOVE_SECONDS };
+        spout.setFury(1);
+        playShrug(earshot(SPOUT.x, SPOUT.z));
+        playSmallSplash(earshot(SPOUT.x, SPOUT.z));
+        return;
+      }
       if (!away && d < SPOUT_TRIGGER_R) {
-        // Caught. The spin starts on this frame.
+        // Caught, and paid for. The spin starts on this frame.
         //
         // There used to be a separate reeling-in phase first: a
         // second and a half of the boat sliding flat into the middle
@@ -1100,6 +1174,7 @@ function buildProps(ctx: BiomeContext): void {
         // with the boat turning from the moment it is grabbed.
         spoutState = "lifting";
         spout.setFury(1);
+        fuel.spend();
         playTornado(earshot(SPOUT.x, SPOUT.z));
         whirlPlayer({
           center: SPOUT,
@@ -2503,8 +2578,13 @@ function buildProps(ctx: BiomeContext): void {
     const player = getPlayerPosition();
 
     const pulse = 0.9 + Math.sin(t * 2.1) * 0.2 + Math.sin(t * 5.7) * 0.1;
-    lavaMat.emissiveIntensity = pulse * (state === "rumbling" ? 1.8 : 1.1);
-    lavaLight.intensity = pulse * (state === "rumbling" ? 2.6 : 1.4) + (fountainT > 0 ? 1.2 : 0);
+    // Hotter with every letter in the tank. This is the tell that
+    // costs nothing to read from across the water: a mountain you can
+    // see is charged before you have decided to go to it.
+    const stoked = 1 + fuel.amount() * 0.85;
+    lavaMat.emissiveIntensity = pulse * stoked * (state === "rumbling" ? 1.8 : 1.1);
+    lavaLight.intensity =
+      pulse * stoked * (state === "rumbling" ? 2.6 : 1.4) + (fountainT > 0 ? 1.2 : 0);
     // Flank flows swell as the mountain winds up and while it is
     // throwing lava, then ease back to their idle glow.
     const surgeTarget = state === "rumbling" || fountainT > 0 ? 1 : 0;
@@ -2557,9 +2637,11 @@ function buildProps(ctx: BiomeContext): void {
         if (d < MOUTH_TRIGGER_R) {
           state = "rumbling";
           stateT = 0;
-          // Rolled here rather than at the boom: the wind-up length
-          // depends on it.
-          pendingMega = Math.random() < MEGA_CHANCE;
+          // Decided here rather than at the boom: the wind-up is
+          // longer for a mega, and a charged mountain should be heard
+          // taking its time before it throws you at a star.
+          pendingMega = fuel.charged();
+          if (pendingMega) fuel.spend();
           playVolcanoRumble();
         }
       }
@@ -3068,6 +3150,29 @@ function buildProps(ctx: BiomeContext): void {
     volcanoGroup.visible = submerged;
   });
 
+  // The ring of banked letters belongs to the mountain, not to the
+  // spot the mountain used to be on. Once the whirlpool has taken it,
+  // the ring turns over the crater on the sea bed instead — otherwise
+  // the one tell that says "this is charged" stays on the surface,
+  // hanging over open water, while the thing it is charging is
+  // somewhere else entirely.
+  //
+  // Runs after the swallow tick and before the world swap, and writes
+  // visibility every frame for the same reason the mountain does:
+  // applyWorld hides everything on the surface list, and this is on it.
+  tick.push(() => {
+    if (islandState === "sunk") {
+      fuel.group.position.set(SUNK.x, seafloor.heightAt(SUNK.x, SUNK.z) + 9, SUNK.z);
+      fuel.group.visible = submerged;
+      return;
+    }
+    if (islandState === "sinking") {
+      fuel.group.position.copy(volcanoGroup.position).setY(volcanoGroup.position.y + RIM_H + 0.6);
+      return;
+    }
+    fuel.group.position.set(ISLAND.x, RIM_H + 0.6, ISLAND.z);
+  });
+
   // ── The sea floor ────────────────────────────────────────────────
   // Everything above belongs to the surface. Snapshot it before the
   // floor is built, so going under is a matter of turning one list
@@ -3216,8 +3321,12 @@ function buildProps(ctx: BiomeContext): void {
         ventT = 0;
         ventIsSunkVolcano = onSunk;
         // Only the island volcano ever throws anyone at the sun, and
-        // only sometimes — same roll it always used.
-        ventMega = onSunk && Math.random() < MEGA_CHANCE;
+        // it runs on the same tank down here as it did up there. It is
+        // the same mountain; it should not change the rules because it
+        // got wet. The sea-floor vent is the way home and never asks
+        // for anything.
+        ventMega = onSunk && fuel.charged();
+        if (ventMega) fuel.spend();
         playVolcanoRumble();
       }
       return;

@@ -517,6 +517,9 @@ export type WorldBuildResult = WorldHandles & {
   // When set, games should teleport the player there and arrange
   // letters around it instead of around the player's last position.
   celebrationCenter: { x: number; z: number; ringRadius?: number } | null;
+  // Call when the game collects a letter; the biome hears about it if
+  // it registered an interest.
+  bankLetter: (letter: string) => void;
 };
 
 export function buildWorld(
@@ -539,6 +542,7 @@ export function buildWorld(
   let terrainHeight: ((x: number, z: number) => number) | null = null;
   let isWalkable: ((x: number, z: number) => boolean) | null = null;
   let celebrationCenter: { x: number; z: number; ringRadius?: number } | null = null;
+  const letterBanked: Array<(letter: string) => void> = [];
   const ctx: BiomeContext = {
     group,
     obstacles,
@@ -556,6 +560,9 @@ export function buildWorld(
     setCelebrationCenter: (c) => {
       celebrationCenter = c;
     },
+    onLetterBanked: (fn) => {
+      letterBanked.push(fn);
+    },
     launchPlayer,
     setPlayerVisible,
     setPlayerAblaze,
@@ -566,7 +573,19 @@ export function buildWorld(
     whirlPlayer,
   };
   biome.buildProps(ctx);
-  return { group, worldRadius: WORLD_RADIUS, obstacles, tick, terrainHeight, isWalkable, celebrationCenter };
+  const bankLetter = (letter: string) => {
+    for (const fn of letterBanked) fn(letter);
+  };
+  return {
+    group,
+    worldRadius: WORLD_RADIUS,
+    obstacles,
+    tick,
+    terrainHeight,
+    isWalkable,
+    celebrationCenter,
+    bankLetter,
+  };
 }
 
 // The original meadow content is now the body of `buildMeadow` so it
