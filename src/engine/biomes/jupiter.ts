@@ -2,6 +2,7 @@ import * as THREE from "three";
 import type { PlanetSpec } from "../planet";
 import { mulberry32, freshSeed } from "../world";
 import { buildPortals, makeRadialTexture } from "./planetPortals";
+import { makeLimbShader } from "./limbDarkening";
 import {
   JUPITER_AXIS,
   JUPITER_BEAM_HEIGHT,
@@ -619,16 +620,23 @@ export function buildJupiterWorld(opts: {
   const glow = new THREE.PointLight(0xf0dcc0, 0, radius * 2.4, 0);
   group.add(glow);
 
+  const limb = makeLimbShader({
+    geo: bodyGeo,
+    center,
+    radius,
+    base: baseTint,
+    floor: 0.72,
+    gain: 0.28,
+  });
+
   let armed = false;
   let insidePortal = false;
   let opacity = 0;
-  let colorClock = 0;
   let clock = 0;
   const driftQuat = new THREE.Quaternion();
   const spinQuat = new THREE.Quaternion();
   const strikeAt = new THREE.Vector3();
   const avatarDir = new THREE.Vector3(0, 1, 0);
-  const vertColor = new THREE.Color();
 
   const spec: PlanetSpec = {
     center,
@@ -782,37 +790,11 @@ export function buildJupiterWorld(opts: {
           .addScaledVector(JUPITER_AXIS, Math.sin(a + m.phase) * r * m.incline);
       }
 
-      // Limb darkening against the viewer, at ~12Hz. Without it a
-      // self-lit sphere reads as flat paper; with it the ground under
-      // your feet is the brightest thing in shot and falls away toward
-      // the horizon. The bands themselves are baked, so this is the
-      // only per-vertex work that happens per frame.
-      colorClock += dt;
-      if (colorClock > 0.08) {
-        colorClock = 0;
-        const vx = viewer ? viewer.x - center.x : 0;
-        const vy = viewer ? viewer.y - center.y : radius * 12;
-        const vz = viewer ? viewer.z - center.z : 0;
-        for (let i = 0; i < vertCount; i++) {
-          const cx = bodyPos.getX(i);
-          const cy = bodyPos.getY(i);
-          const cz = bodyPos.getZ(i);
-          let dx = vx - cx;
-          let dy = vy - cy;
-          let dz = vz - cz;
-          const dl = Math.hypot(dx, dy, dz) || 1;
-          dx /= dl;
-          dy /= dl;
-          dz /= dl;
-          const facing = (cx * dx + cy * dy + cz * dz) / radius;
-          const lit = 0.72 + 0.28 * Math.sqrt(Math.max(0, facing));
-          vertColor.setRGB(baseTint[i * 3], baseTint[i * 3 + 1], baseTint[i * 3 + 2]);
-          colors[i * 3] = vertColor.r * lit;
-          colors[i * 3 + 1] = vertColor.g * lit;
-          colors[i * 3 + 2] = vertColor.b * lit;
-        }
-        bodyGeo.attributes.color.needsUpdate = true;
-      }
+      // The bands are baked into the vertices, so shading them
+      // against the viewer is the only per-vertex work here — and,
+      // measured, the most expensive thing this world does. See
+      // limbDarkening.ts for what it costs and how it is paid.
+      limb.tick(viewer, dt, t);
 
       portals.tick(dt, t, viewer);
     },

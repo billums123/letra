@@ -2,6 +2,7 @@ import * as THREE from "three";
 import type { PlanetSpec } from "../planet";
 import { mulberry32, freshSeed } from "../world";
 import { buildPortals, makeRadialTexture } from "./planetPortals";
+import { makeLimbShader } from "./limbDarkening";
 import { SPOT_ANGLE, SPOT_TRIGGER, BEAM_HEIGHT, SPOT_DIRS } from "./sunLayout";
 
 // The sun, built as somewhere you can actually stand.
@@ -131,7 +132,6 @@ export function buildSunWorld(opts: {
   body.frustumCulled = false;
   group.add(body);
   fading.push(bodyMat);
-  const vertColor = new THREE.Color();
 
   // ── Corona ───────────────────────────────────────────────────────
   // A gradient sprite; a sphere cannot fade out at its own edge, and
@@ -212,10 +212,41 @@ export function buildSunWorld(opts: {
   const glow = new THREE.PointLight(0xffc27a, 0, radius * 2.4, 0);
   group.add(glow);
 
+  // The unlit colour of the surface, which the shader multiplies the
+  // darkening into. It is rewritten a slice at a time as the star
+  // boils, rather than being fixed the way the gas giants' bands are.
+  const heatTint = new Float32Array(vertCount * 3);
+  const heatColor = new THREE.Color();
+  const limb = makeLimbShader({
+    geo: bodyGeo,
+    center,
+    radius,
+    base: heatTint,
+    // The floor is deliberately high: with the avatar standing barely
+    // a third of a unit off the surface, the view direction goes
+    // tangential within a couple of units, and any stronger falloff
+    // turns the ground under its feet into mud a step away.
+    floor: 0.74,
+    gain: 0.26,
+    maxIdle: 0.34,
+    refresh: (from, to, t) => {
+      for (let v = from; v < to; v++) {
+        const heat = Math.min(
+          1,
+          Math.max(0, vertBase[v] + 0.16 * Math.sin(t * 0.4 + vertPhase[v]))
+        );
+        if (heat < 0.5) heatColor.copy(COOL).lerp(MID, heat * 2);
+        else heatColor.copy(MID).lerp(HOT, (heat - 0.5) * 2);
+        heatTint[v * 3] = heatColor.r;
+        heatTint[v * 3 + 1] = heatColor.g;
+        heatTint[v * 3 + 2] = heatColor.b;
+      }
+    },
+  });
+
   let armed = false;
   let insidePortal = false;
   let opacity = 0;
-  let colorClock = 0;
 
   const spec: PlanetSpec = {
     center,
@@ -260,48 +291,12 @@ export function buildSunWorld(opts: {
       halo.visible = near > 0.01;
       halo.scale.setScalar(radius * (3.2 + Math.sin(t * 0.7) * 0.1));
 
-      // Granulation, plus limb darkening against the viewer. Rewriting
-      // 26k vertex colours every frame is wasted work on a surface
-      // that boils this slowly, so it runs at ~12Hz and the eye cannot
-      // tell. The darkening is what stops a self-lit sphere reading as
-      // flat paper: the ground under your feet is the brightest thing
-      // in shot and it falls off toward the horizon.
-      colorClock += dt;
-      if (colorClock > 0.08) {
-        colorClock = 0;
-        const vx = viewer ? viewer.x - center.x : 0;
-        const vy = viewer ? viewer.y - center.y : radius * 12;
-        const vz = viewer ? viewer.z - center.z : 0;
-        for (let v = 0; v < vertCount; v++) {
-          const heat = Math.min(
-            1,
-            Math.max(0, vertBase[v] + 0.16 * Math.sin(t * 0.4 + vertPhase[v]))
-          );
-          if (heat < 0.5) vertColor.copy(COOL).lerp(MID, heat * 2);
-          else vertColor.copy(MID).lerp(HOT, (heat - 0.5) * 2);
-          const cx = bodyPos.getX(v);
-          const cy = bodyPos.getY(v);
-          const cz = bodyPos.getZ(v);
-          let dx = vx - cx;
-          let dy = vy - cy;
-          let dz = vz - cz;
-          const dl = Math.hypot(dx, dy, dz) || 1;
-          dx /= dl;
-          dy /= dl;
-          dz /= dl;
-          // Limb darkening. The floor is deliberately high: with the
-          // avatar standing barely a third of a unit off the surface,
-          // the view direction goes tangential within a couple of
-          // units, and any stronger falloff turns the ground under
-          // its feet into mud a step away.
-          const facing = (cx * dx + cy * dy + cz * dz) / radius;
-          const lit = 0.74 + 0.26 * Math.sqrt(Math.max(0, facing));
-          colors[v * 3] = vertColor.r * lit;
-          colors[v * 3 + 1] = vertColor.g * lit;
-          colors[v * 3 + 2] = vertColor.b * lit;
-        }
-        bodyGeo.attributes.color.needsUpdate = true;
-      }
+      // Granulation and limb darkening. Unlike the gas giants this
+      // surface moves whether or not anyone does, so it also gets a
+      // ceiling on how long it may sit still — but it boils slowly
+      // enough that a third of a second between passes is invisible.
+      // See limbDarkening.ts.
+      limb.tick(viewer, dt, t);
 
       for (const f of flares) {
         // Breathe along the surface normal only, so the feet stay put

@@ -571,7 +571,17 @@ function buildProps(ctx: BiomeContext): void {
       return n;
     })();
     tick.push((dt) => {
+      // The phase keeps running even when the surface isn't redrawn,
+      // so the sea is where it should be whenever we look again.
       waveT += dt;
+      // Off-world there is nothing to redraw for. From a planet the
+      // flat sea is hidden inside the shell that stands in for it (see
+      // oceanGlobe.ts) and four hundred units away besides, so this
+      // loop was several thousand vertices a frame of sines nobody
+      // could see. It resumes at the top of the fall home, from a
+      // hundred and fifty units up, where a single frame of catch-up
+      // is invisible.
+      if (away) return;
       for (let i = 0; i < animCount; i++) {
         const x = pos.getX(i);
         const z = pos.getZ(i);

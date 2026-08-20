@@ -2,6 +2,7 @@ import * as THREE from "three";
 import type { PlanetSpec } from "../planet";
 import { mulberry32, freshSeed } from "../world";
 import { buildPortals, makeRadialTexture } from "./planetPortals";
+import { makeLimbShader } from "./limbDarkening";
 import {
   SATURN_AXIS,
   SATURN_BEAM_HEIGHT,
@@ -221,12 +222,19 @@ export function buildSaturnWorld(opts: {
   const glow = new THREE.PointLight(0xe8e0cc, 0, radius * 2.4, 0);
   group.add(glow);
 
+  const limb = makeLimbShader({
+    geo: bodyGeo,
+    center,
+    radius,
+    base: baseTint,
+    floor: 0.74,
+    gain: 0.26,
+  });
+
   let armed = false;
   let insidePortal = false;
   let opacity = 0;
-  let colorClock = 0;
   const avatarDir = new THREE.Vector3(0, 1, 0);
-  const vertColor = new THREE.Color();
 
   const spec: PlanetSpec = {
     center,
@@ -267,37 +275,10 @@ export function buildSaturnWorld(opts: {
       hazeMat.opacity = opacity * 0.8 * near;
       haze.visible = near > 0.01;
 
-      // Limb darkening against the viewer, at ~12Hz. Without it a
-      // self-lit sphere reads as flat paper; with it the ground under
-      // your feet is the brightest thing in shot and falls off toward
-      // the horizon. The bands themselves are baked, so this is the
-      // only per-frame colour work.
-      colorClock += dt;
-      if (colorClock > 0.08) {
-        colorClock = 0;
-        const vx = viewer ? viewer.x - center.x : 0;
-        const vy = viewer ? viewer.y - center.y : radius * 12;
-        const vz = viewer ? viewer.z - center.z : 0;
-        for (let v = 0; v < vertCount; v++) {
-          const cx = bodyPos.getX(v);
-          const cy = bodyPos.getY(v);
-          const cz = bodyPos.getZ(v);
-          let dx = vx - cx;
-          let dy = vy - cy;
-          let dz = vz - cz;
-          const dl = Math.hypot(dx, dy, dz) || 1;
-          dx /= dl;
-          dy /= dl;
-          dz /= dl;
-          const facing = (cx * dx + cy * dy + cz * dz) / radius;
-          const lit = 0.74 + 0.26 * Math.sqrt(Math.max(0, facing));
-          vertColor.setRGB(baseTint[v * 3], baseTint[v * 3 + 1], baseTint[v * 3 + 2]);
-          colors[v * 3] = vertColor.r * lit;
-          colors[v * 3 + 1] = vertColor.g * lit;
-          colors[v * 3 + 2] = vertColor.b * lit;
-        }
-        bodyGeo.attributes.color.needsUpdate = true;
-      }
+      // The belts are baked into the vertices, so shading them
+      // against the viewer is the only per-vertex work here. See
+      // limbDarkening.ts for what it costs and how it is paid.
+      limb.tick(viewer, dt, t);
 
       portals.tick(dt, t, viewer);
     },
