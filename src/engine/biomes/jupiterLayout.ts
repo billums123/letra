@@ -80,6 +80,18 @@ export const GRS_DIR = new THREE.Vector3(0, 0.9511, -0.309).normalize();
 export const GRS_HALF_WIDTH = 0.28;
 export const GRS_HALF_HEIGHT = 0.2;
 
+// How fast it rides its belt, in radians per second about Jupiter's
+// axis. Storms on a gas giant do not sit still — they are carried
+// along the band they are in, and the bands either side of them run
+// the other way.
+//
+// This works out at about 1.2 units a second, against the boat's
+// seven. Slow enough that it is a landmark you drive to rather than
+// something you chase, and quick enough that a kid who sits still
+// long enough will watch it come round to them. A full lap of the
+// belt takes about four and a half minutes.
+export const GRS_DRIFT = 0.0235;
+
 // The camera, as the layout test needs to know it: the planet walker
 // puts the eye this far above and behind the avatar, and the avatar
 // itself hovers a little clear of the surface. Everything about what
@@ -94,11 +106,41 @@ export const WHITE_OVALS: ReadonlyArray<{
   dir: THREE.Vector3;
   halfWidth: number;
   halfHeight: number;
+  drift: number;
 }> = [
-  { dir: new THREE.Vector3(0.11, 0.62, -0.78).normalize(), halfWidth: 0.1, halfHeight: 0.06 },
-  { dir: new THREE.Vector3(-0.36, 0.2, -0.91).normalize(), halfWidth: 0.075, halfHeight: 0.05 },
-  { dir: new THREE.Vector3(0.72, 0.06, 0.69).normalize(), halfWidth: 0.09, halfHeight: 0.055 },
+  { dir: new THREE.Vector3(0.11, 0.62, -0.78).normalize(), halfWidth: 0.1, halfHeight: 0.06, drift: -0.031 },
+  { dir: new THREE.Vector3(-0.36, 0.2, -0.91).normalize(), halfWidth: 0.075, halfHeight: 0.05, drift: 0.044 },
+  { dir: new THREE.Vector3(0.72, 0.06, 0.69).normalize(), halfWidth: 0.09, halfHeight: 0.055, drift: -0.019 },
 ];
+
+// Lightning. Jupiter has it, in the storms, and it is the one thing
+// that makes a planet with no night side feel like it has weather
+// rather than a paint job. Seconds between strikes per storm, picked
+// uniformly in this range; the big one gets the short end of it.
+//
+// Tuned down from a first pass at a third of these gaps, which
+// measured 27 strikes in 30 seconds — near enough one a second, and
+// since a roll of thunder runs two and a half seconds they simply
+// piled on top of each other into continuous rumble.
+export const STRIKE_GAP = { min: 8, max: 22 };
+// How long a strike lasts, and how far the sound carries. Gone by 95
+// matters more than it looks: the whole planet is only 104 units
+// across, so a range much wider than this makes every storm audible
+// from everywhere and there is no such thing as a distant one.
+export const STRIKE_SECONDS = 0.42;
+export const THUNDER_FULL = 20;
+export const THUNDER_GONE = 95;
+// Sound is slow. Two hundred units a second is nothing like physical,
+// but it puts a beat of a second or so between a distant flash and
+// its rumble, which is the bit worth having.
+export const THUNDER_SPEED = 200;
+// The shortest gap between two rumbles you actually hear. A roll runs
+// two and a half seconds, so without this they stack into one
+// continuous noise however far apart the strikes themselves are —
+// which is what the first two passes at the strike rate kept
+// rediscovering. Strikes you don't hear still flash; you just don't
+// get a clap for every one, which is also true of a real sky.
+export const THUNDER_MIN_GAP = 2.8;
 
 // The four big moons, as orbits around Jupiter's own axis. Radii are
 // multiples of the planet's; periods are seconds for a full lap.

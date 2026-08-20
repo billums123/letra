@@ -21,6 +21,7 @@ import {
   GRS_DIR,
   GRS_HALF_WIDTH,
   GRS_HALF_HEIGHT,
+  GRS_DRIFT,
   CAM_UP,
   CAM_BACK,
   HOVER as J_HOVER,
@@ -292,24 +293,54 @@ const check = (name: string, ok: boolean, detail = "") => {
   // Arrivals face -Z, so the camera trails toward +Z.
   const camSub = new THREE.Vector3(0, Math.cos(camTilt), Math.sin(camTilt));
   const horizon = Math.acos(R / camR);
-  const grsFromCam = camSub.angleTo(GRS_DIR);
+
+  // The storm rides its belt, so where it is depends on when you
+  // arrive. What can be guaranteed is the belt: it has to pass close
+  // enough to the landing spot that a kid who stands still, or drives
+  // a little way, meets it. Walk the ring it travels and find its
+  // closest approach to the arrival camera.
+  const beltAngle = Math.acos(Math.min(1, Math.abs(GRS_DIR.dot(JUPITER_AXIS))));
+  let closest = Infinity;
+  let closestBearing = 0;
+  {
+    const q = new THREE.Quaternion();
+    const probe = new THREE.Vector3();
+    for (let i = 0; i < 720; i++) {
+      q.setFromAxisAngle(JUPITER_AXIS, (i / 720) * Math.PI * 2);
+      probe.copy(GRS_DIR).applyQuaternion(q);
+      const a = camSub.angleTo(probe);
+      if (a < closest) {
+        closest = a;
+        closestBearing = Math.atan2(probe.x, -probe.z);
+      }
+    }
+  }
   // The short axis is the one that might be pointing at the viewer,
   // so it is the honest bound on how much of the storm is in view.
-  const nearEdge = grsFromCam - GRS_HALF_HEIGHT;
-  check("the Great Red Spot is in shot from the arrival camera",
+  const nearEdge = closest - GRS_HALF_HEIGHT;
+  check("the Great Red Spot's belt comes into the arrival view",
     nearEdge < horizon * 0.6,
-    `centre ${deg(grsFromCam)}° from the camera, near edge ${deg(nearEdge)}°, horizon ${deg(horizon)}°`);
-  // In front of the camera, not off to the side of it.
+    `closest approach ${deg(closest)}° from the camera, near edge ${deg(nearEdge)}°, horizon ${deg(horizon)}°`);
+  // And when it does, it is in front of the camera rather than off to
+  // the side of it.
   const HALF_FOV = 43 * Math.PI / 180;
-  const bearing = Math.atan2(GRS_DIR.x, -GRS_DIR.z);
-  check("the Great Red Spot is ahead of you, not off your shoulder",
-    Math.abs(bearing) < HALF_FOV,
-    `${deg(Math.abs(bearing))}° off the arrival bearing`);
-  let nearestPortal = Infinity;
-  for (const d of JUPITER_SPOT_DIRS) nearestPortal = Math.min(nearestPortal, GRS_DIR.angleTo(d));
-  check("the Great Red Spot doesn't swallow a portal",
-    nearestPortal > GRS_HALF_WIDTH + JUPITER_SPOT_ANGLE,
-    `${deg(nearestPortal)}° to the nearest, needs ${deg(GRS_HALF_WIDTH + JUPITER_SPOT_ANGLE)}°`);
+  check("and passes in front of you, not off your shoulder",
+    Math.abs(closestBearing) < HALF_FOV,
+    `${deg(Math.abs(closestBearing))}° off the arrival bearing at its closest`);
+  // A belt that runs too near a pole would smear the storm over it and
+  // wrap it round itself.
+  check("the Great Red Spot's belt stays clear of both poles",
+    beltAngle - GRS_HALF_WIDTH > 0.35 && beltAngle + GRS_HALF_WIDTH < Math.PI - 0.35,
+    `belt sits ${deg(beltAngle)}° off the axis, storm reaches ${deg(GRS_HALF_WIDTH)}°`);
+  // Catchable. A landmark that outruns the boat is not a landmark, it
+  // is a tease — and the boat does 7.
+  const beltSpeed = Math.abs(GRS_DRIFT) * R * Math.sin(beltAngle);
+  check("the Great Red Spot drifts slower than you drive",
+    beltSpeed < 7 * 0.4,
+    `${beltSpeed.toFixed(2)} units/s against the boat's 7, a lap every ${(2 * Math.PI / Math.abs(GRS_DRIFT) / 60).toFixed(1)} min`);
+  // Note: the storm now drifts over portals, which is fine and left
+  // untested here — the pool sits above it and writes depth first, so
+  // the way home is drawn on top of the weather rather than under it.
   // Moons have to clear the cloud tops they orbit, or one spends half
   // its lap buried in the planet.
   check("every moon clears the planet it goes round",

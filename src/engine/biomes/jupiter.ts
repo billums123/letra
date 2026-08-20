@@ -13,6 +13,13 @@ import {
   GRS_HALF_HEIGHT,
   WHITE_OVALS,
   MOONS,
+  GRS_DRIFT,
+  STRIKE_GAP,
+  STRIKE_SECONDS,
+  THUNDER_FULL,
+  THUNDER_GONE,
+  THUNDER_SPEED,
+  THUNDER_MIN_GAP,
 } from "./jupiterLayout";
 
 // Jupiter: the third place the ocean can throw you, and the big one.
@@ -36,6 +43,10 @@ export type JupiterWorld = {
   setOpacity: (k: number) => void;
   tick: (dt: number, t: number, viewer?: THREE.Vector3) => void;
   onEnterSpot?: (dir: THREE.Vector3) => void;
+  // A storm just cracked, and the sound has finished crossing to the
+  // listener. Volume is already distance-weighted; 0 means don't
+  // bother. The biome owns the audio, this world only says when.
+  onThunder?: (volume: number) => void;
   armExits: (armed: boolean) => void;
   flashPortal: (dir: THREE.Vector3) => void;
 };
@@ -65,6 +76,44 @@ function cellNoise(x: number, y: number, z: number, k: number): number {
   );
 }
 
+// The tangent frame a storm's oval is laid out in: u along its long
+// axis, v across it. Shared, because a strike has to be placed inside
+// the same oval the mesh was built from.
+function stormFrame(dir: THREE.Vector3, along: THREE.Vector3) {
+  const u = along.clone().addScaledVector(dir, -along.dot(dir));
+  if (u.lengthSq() < 1e-6) u.set(1, 0, 0).addScaledVector(dir, -dir.x);
+  u.normalize();
+  const v = new THREE.Vector3().crossVectors(dir, u).normalize();
+  return { u, v };
+}
+
+// A point on the oval, in the storm's own un-drifted frame. `s` is 0
+// at the eye and 1 at the rim, `phi` goes round it.
+function stormPoint(
+  dir: THREE.Vector3,
+  u: THREE.Vector3,
+  v: THREE.Vector3,
+  halfWidth: number,
+  halfHeight: number,
+  s: number,
+  phi: number,
+  out: THREE.Vector3
+): THREE.Vector3 {
+  // Polar form of the ellipse: how far out the rim is on this bearing,
+  // as an angle at the planet's centre.
+  const rim = 1 / Math.hypot(Math.cos(phi) / halfWidth, Math.sin(phi) / halfHeight);
+  const th = s * rim;
+  const st = Math.sin(th);
+  const ct = Math.cos(th);
+  const cp = Math.cos(phi);
+  const sp = Math.sin(phi);
+  return out.set(
+    dir.x * ct + (u.x * cp + v.x * sp) * st,
+    dir.y * ct + (u.y * cp + v.y * sp) * st,
+    dir.z * ct + (u.z * cp + v.z * sp) * st
+  );
+}
+
 // An oval patch of a sphere, as a cap around `dir` whose extent is an
 // ellipse in the tangent plane — wide along `along`, squat across it.
 //
@@ -88,27 +137,17 @@ function buildStorm(opts: {
   const rings = opts.rings ?? 18;
   const segs = opts.segs ?? 64;
 
-  // Tangent frame: u along the storm's long axis, v across it.
-  const u = opts.along.clone().addScaledVector(dir, -opts.along.dot(dir));
-  if (u.lengthSq() < 1e-6) u.set(1, 0, 0).addScaledVector(dir, -dir.x);
-  u.normalize();
-  const v = new THREE.Vector3().crossVectors(dir, u).normalize();
+  const { u, v } = stormFrame(dir, opts.along);
 
   const verts: number[] = [];
   const cols: number[] = [];
   const idx: number[] = [];
   const c = new THREE.Color();
 
+  const p = new THREE.Vector3();
   const push = (s: number, phi: number) => {
-    // Polar form of the ellipse: how far out the rim is on this
-    // bearing, as an angle at the planet's centre.
-    const rim = 1 / Math.hypot(Math.cos(phi) / halfWidth, Math.sin(phi) / halfHeight);
-    const th = s * rim;
-    const st = Math.sin(th);
-    const x = dir.x * Math.cos(th) + (u.x * Math.cos(phi) + v.x * Math.sin(phi)) * st;
-    const y = dir.y * Math.cos(th) + (u.y * Math.cos(phi) + v.y * Math.sin(phi)) * st;
-    const z = dir.z * Math.cos(th) + (u.z * Math.cos(phi) + v.z * Math.sin(phi)) * st;
-    verts.push(x * radius, y * radius, z * radius);
+    stormPoint(dir, u, v, halfWidth, halfHeight, s, phi, p);
+    verts.push(p.x * radius, p.y * radius, p.z * radius);
     const a = shade(s, phi, c);
     cols.push(c.r, c.g, c.b, a);
   };
@@ -257,12 +296,37 @@ export function buildJupiterWorld(opts: {
   group.add(body);
   fading.push(bodyMat);
 
-  // ── The Great Red Spot ───────────────────────────────────────────
-  // A storm three quarters the width of the whole ocean world, laid
-  // into the cloud tops just above the surface, spinning slowly about
-  // its own eye. The spiral is baked into the vertex colours, so
-  // turning it is one quaternion a frame rather than any per-vertex
-  // work — which is the only reason it can afford to move at all.
+  // ── Storms ───────────────────────────────────────────────────────
+  // The Great Red Spot, three quarters the width of the whole ocean
+  // world, and the little white ovals that run along the belts either
+  // side of it.
+  //
+  // None of them sit still. Each rides the band it is in, drifting
+  // round Jupiter's axis, and neighbouring bands run opposite ways —
+  // which is both what the real planet does and what turns the
+  // surface from a painted ball into weather. Each also turns about
+  // its own eye as it goes.
+  //
+  // All of that is two quaternions a frame: the spiral and the swirl
+  // are baked into the vertex colours, so nothing here touches a
+  // vertex once it is built. That is the only reason a storm this
+  // size can afford to move at all.
+  type Storm = {
+    mesh: THREE.Mesh;
+    dir: THREE.Vector3;
+    u: THREE.Vector3;
+    v: THREE.Vector3;
+    halfWidth: number;
+    halfHeight: number;
+    drift: number;
+    spin: number;
+    // Seconds until it next cracks.
+    nextStrike: number;
+    gap: { min: number; max: number };
+    // How bright a strike from this one is, and how far it carries.
+    power: number;
+  };
+  const storms: Storm[] = [];
   const stormMat = new THREE.MeshBasicMaterial({
     vertexColors: true,
     transparent: true,
@@ -305,13 +369,32 @@ export function buildJupiterWorld(opts: {
       return s < 0.84 ? 1 : Math.max(0, 1 - (s - 0.84) / 0.16);
     },
   });
-  const grs = new THREE.Mesh(grsGeo, stormMat);
-  grs.frustumCulled = false;
-  grs.renderOrder = 1;
-  group.add(grs);
+  {
+    const mesh = new THREE.Mesh(grsGeo, stormMat);
+    mesh.frustumCulled = false;
+    mesh.renderOrder = 1;
+    group.add(mesh);
+    const { u, v } = stormFrame(GRS_DIR, grsAlong);
+    storms.push({
+      mesh,
+      dir: GRS_DIR.clone(),
+      u,
+      v,
+      halfWidth: GRS_HALF_WIDTH,
+      halfHeight: GRS_HALF_HEIGHT,
+      drift: GRS_DRIFT,
+      spin: 0.055,
+      nextStrike: 1.2,
+      // The big one gets the short end of the gap and the loudest
+      // strikes: it is the storm you go and stand in.
+      gap: { min: STRIKE_GAP.min, max: STRIKE_GAP.min + (STRIKE_GAP.max - STRIKE_GAP.min) * 0.45 },
+      power: 1,
+    });
+  }
 
-  // The little white ovals that trail along the belts. Same geometry,
-  // a tenth of the size, and they hold still.
+  // The little white ovals that run along the belts. Same geometry, a
+  // tenth of the size, drifting at their own rates — two of them
+  // against the Spot, one with it.
   for (const oval of WHITE_OVALS) {
     const along = new THREE.Vector3().crossVectors(JUPITER_AXIS, oval.dir).normalize();
     const geo = buildStorm({
@@ -332,7 +415,80 @@ export function buildJupiterWorld(opts: {
     mesh.frustumCulled = false;
     mesh.renderOrder = 1;
     group.add(mesh);
+    const { u, v } = stormFrame(oval.dir, along);
+    storms.push({
+      mesh,
+      dir: oval.dir.clone(),
+      u,
+      v,
+      halfWidth: oval.halfWidth,
+      halfHeight: oval.halfHeight,
+      drift: oval.drift,
+      // Small storms turn faster, the way small things do.
+      spin: 0.11,
+      nextStrike: 0.6 + rand() * 8,
+      gap: STRIKE_GAP,
+      // Quiet enough that one on the far side of the planet falls
+      // under the audible floor entirely — they are scenery, and the
+      // Spot is the one you are meant to hear.
+      power: 0.34,
+    });
   }
+
+  // ── Lightning ────────────────────────────────────────────────────
+  // A strike is two sprites in the same place: a small hard core and a
+  // wide soft bloom, both additive, both flickering on the same
+  // envelope. Sprites rather than a drawn bolt because a storm in the
+  // cloud tops is only ever seen from above or nearly edge-on, and
+  // from either angle what you see is the cloud lighting up, not the
+  // bolt inside it.
+  //
+  // Four sets, reused. Two storms cracking at once is common; five is
+  // not, and the fifth would be lost in the other four anyway.
+  const FLASHES = 4;
+  const flashes = Array.from({ length: FLASHES }, () => {
+    const core = new THREE.Sprite(
+      new THREE.SpriteMaterial({
+        map: makeRadialTexture([
+          [0, "rgba(255,255,255,1)"],
+          [0.3, "rgba(214,234,255,0.85)"],
+          [1, "rgba(150,190,255,0)"],
+        ]),
+        transparent: true,
+        opacity: 0,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+        fog: false,
+      })
+    );
+    const bloom = new THREE.Sprite(
+      new THREE.SpriteMaterial({
+        map: makeRadialTexture([
+          [0, "rgba(226,240,255,0.55)"],
+          [0.45, "rgba(180,214,255,0.2)"],
+          [1, "rgba(140,180,255,0)"],
+        ]),
+        transparent: true,
+        opacity: 0,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+        fog: false,
+      })
+    );
+    core.scale.setScalar(3.4);
+    bloom.scale.setScalar(15);
+    core.visible = false;
+    bloom.visible = false;
+    core.renderOrder = 3;
+    bloom.renderOrder = 3;
+    group.add(core);
+    group.add(bloom);
+    return { core, bloom, t: -1, power: 1 };
+  });
+  // Rumbles crossing the sky, waiting to arrive, and when the last
+  // one landed.
+  const rumbles: Array<{ at: number; volume: number }> = [];
+  let lastRumble = -99;
 
   // ── Moons ────────────────────────────────────────────────────────
   // Four of them, going round at four different speeds. They are the
@@ -422,6 +578,9 @@ export function buildJupiterWorld(opts: {
   let opacity = 0;
   let colorClock = 0;
   let clock = 0;
+  const driftQuat = new THREE.Quaternion();
+  const spinQuat = new THREE.Quaternion();
+  const strikeAt = new THREE.Vector3();
   const avatarDir = new THREE.Vector3(0, 1, 0);
   const vertColor = new THREE.Color();
 
@@ -447,7 +606,20 @@ export function buildJupiterWorld(opts: {
       for (const m of fading) m.opacity = opacity;
       portals.setOpacity(opacity);
       glow.intensity = opacity * 1.5;
+      const wasVisible = group.visible;
       group.visible = opacity > 0.01;
+      // Leaving. Put the weather away rather than letting it wait:
+      // a half-finished flash would be sitting there on the next
+      // visit, and a rumble still crossing the sky would arrive as a
+      // clap of thunder some minutes later on a different planet.
+      if (wasVisible && !group.visible) {
+        for (const f of flashes) {
+          f.t = -1;
+          f.core.visible = false;
+          f.bloom.visible = false;
+        }
+        rumbles.length = 0;
+      }
     },
     armExits(next) {
       armed = next;
@@ -464,9 +636,92 @@ export function buildJupiterWorld(opts: {
       hazeMat.opacity = opacity * 0.8 * near;
       haze.visible = near > 0.01;
 
-      // The storm turns. Slow enough that it is weather rather than a
-      // spinning logo — one lap every couple of minutes.
-      grs.quaternion.setFromAxisAngle(GRS_DIR, clock * 0.055);
+      // Storms: drift along the belt, turn about the eye, and every so
+      // often crack.
+      //
+      // `clock` only runs while the world is visible — the tick bails
+      // above otherwise — so the weather is paused whenever nobody is
+      // there to see it. That is what keeps the first arrival framed
+      // the way it was designed, with the Spot dead ahead, while
+      // still letting it be somewhere different every visit after.
+      //
+      // Order matters. The self-spin is expressed in the storm's own
+      // starting frame, so it has to be applied first and the drift
+      // laid over the top; the other way round would spin each storm
+      // about an axis it has already left behind.
+      for (const st of storms) {
+        driftQuat.setFromAxisAngle(JUPITER_AXIS, st.drift * clock);
+        spinQuat.setFromAxisAngle(st.dir, st.spin * clock);
+        st.mesh.quaternion.copy(driftQuat).multiply(spinQuat);
+
+        st.nextStrike -= dt;
+        if (st.nextStrike > 0) continue;
+        st.nextStrike = st.gap.min + rand() * (st.gap.max - st.gap.min);
+        const flash = flashes.find((f) => f.t < 0);
+        // All four already lit: skip this one rather than cutting
+        // another storm's strike short.
+        if (!flash) continue;
+        // Somewhere inside the oval, biased off the eye — the middle
+        // of a storm is the calm bit.
+        stormPoint(
+          st.dir,
+          st.u,
+          st.v,
+          st.halfWidth,
+          st.halfHeight,
+          0.25 + rand() * 0.55,
+          rand() * Math.PI * 2,
+          strikeAt
+        );
+        // Into the drifted frame, and a little clear of the cloud so
+        // the bloom is not half-buried in the surface.
+        strikeAt.applyQuaternion(driftQuat).multiplyScalar(radius + 1.2);
+        flash.core.position.copy(strikeAt);
+        flash.bloom.position.copy(strikeAt);
+        flash.t = 0;
+        flash.power = st.power;
+        // Thunder, once the sound has crossed to wherever the kid is.
+        if (viewer) {
+          strikeAt.add(center);
+          const d = viewer.distanceTo(strikeAt);
+          const vol =
+            st.power *
+            Math.min(1, Math.max(0, 1 - (d - THUNDER_FULL) / (THUNDER_GONE - THUNDER_FULL)));
+          if (vol > 0.02) rumbles.push({ at: clock + d / THUNDER_SPEED, volume: vol });
+        }
+      }
+
+      // Flashes, on a flicker rather than a fade: real lightning
+      // stutters, and a single smooth ramp reads as a lamp coming on.
+      for (const f of flashes) {
+        if (f.t < 0) continue;
+        f.t += dt;
+        const k = f.t / STRIKE_SECONDS;
+        if (k >= 1) {
+          f.t = -1;
+          f.core.visible = false;
+          f.bloom.visible = false;
+          continue;
+        }
+        const stutter = Math.max(0, Math.sin(k * Math.PI * 5.5)) * (1 - k) * (1 - k);
+        const lit = opacity * f.power * stutter;
+        f.core.material.opacity = Math.min(1, lit * 2.4);
+        f.bloom.material.opacity = lit;
+        f.core.visible = lit > 0.01;
+        f.bloom.visible = lit > 0.01;
+      }
+
+      // Rumbles arriving. Walked backwards so a splice can't skip one.
+      // One that lands on top of the last is dropped rather than
+      // queued: late thunder is worse than no thunder.
+      for (let i = rumbles.length - 1; i >= 0; i--) {
+        if (rumbles[i].at > clock) continue;
+        if (clock - lastRumble >= THUNDER_MIN_GAP) {
+          lastRumble = clock;
+          world.onThunder?.(rumbles[i].volume);
+        }
+        rumbles.splice(i, 1);
+      }
 
       // Moons, each on its own tilted circle about Jupiter's axis.
       for (const { mesh, spec: m } of moons) {

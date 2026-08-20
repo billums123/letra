@@ -23,6 +23,7 @@ import {
   playSunTouchdown,
   playSaturnTouchdown,
   playJupiterTouchdown,
+  playThunder,
   playTornado,
   setTornadoAmbience,
 } from "../../audio/sfx";
@@ -1045,6 +1046,10 @@ function buildProps(ctx: BiomeContext): void {
   sunWorld.onEnterSpot = (dir) => enterPortal(sunWorld, dir);
   saturnWorld.onEnterSpot = (dir) => enterPortal(saturnWorld, dir);
   jupiterWorld.onEnterSpot = (dir) => enterPortal(jupiterWorld, dir);
+  // Jupiter's storms crack, and the sound takes its time getting to
+  // you. The world works out when and how loud; playing it is the
+  // biome's job, the same way every other sound here is.
+  jupiterWorld.onThunder = (volume) => playThunder(volume);
 
   // Runs from the space tick, which ticks whether or not the avatar is
   // on the flat world.

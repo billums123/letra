@@ -1123,6 +1123,58 @@ export function playJupiterTouchdown(volume = 1) {
   }
 }
 
+const thunderClips = makeClipPool([
+  "/audio/sfx/thunder-1.mp3",
+  "/audio/sfx/thunder-2.mp3",
+  "/audio/sfx/thunder-3.mp3",
+]);
+
+// A storm on Jupiter cracking, heard from wherever the kid is. The
+// caller has already worked out how loud it should be and waited for
+// the sound to cross the sky, so this only has to make the noise.
+//
+// Three takes rather than the usual two: thunder repeats often enough
+// on a planet covered in storms that a pair starts to sound like a
+// loop.
+export function playThunder(volume = 1) {
+  if (volume < AUDIBLE) return;
+  const c = getCtx();
+  if (!c) return;
+  if (thunderClips.play(0.7 * volume, 0.08)) return;
+  const dest = busAt(c, volume);
+  const t0 = c.currentTime;
+  // The crack: a short bright burst, gone almost at once. Close
+  // strikes have one, far ones are all rumble — so it rides the
+  // volume the caller passed in, squared.
+  {
+    const n = startNoise(c, t0, t0 + 0.5);
+    const hp = c.createBiquadFilter();
+    hp.type = "highpass";
+    hp.frequency.value = 900;
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(0.2 * volume + 0.001, t0 + 0.012);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 0.42);
+    n.connect(hp).connect(g).connect(dest);
+  }
+  // The roll: low noise through a filter closing slowly, with the
+  // level stumbling on the way down the way a real one does.
+  {
+    const n = startNoise(c, t0, t0 + 2.6);
+    const lp = c.createBiquadFilter();
+    lp.type = "lowpass";
+    lp.frequency.setValueAtTime(420, t0);
+    lp.frequency.exponentialRampToValueAtTime(110, t0 + 2.4);
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(0.26, t0 + 0.09);
+    g.gain.exponentialRampToValueAtTime(0.1, t0 + 0.5);
+    g.gain.exponentialRampToValueAtTime(0.19, t0 + 0.85);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 2.55);
+    n.connect(lp).connect(g).connect(dest);
+  }
+}
+
 // ─── The sun ─────────────────────────────────────────────────────────
 // Two cues for the trip off-world. Both are recorded, both fall back
 // to a synth so the moment is never silent on a cold cache.

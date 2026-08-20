@@ -359,6 +359,23 @@ export const SFX_CATALOG: SfxCue[] = [
     play: "playJupiterTouchdown",
   },
   {
+    id: "thunder",
+    label: "Thunder on Jupiter",
+    sounds:
+      "A storm in the cloud tops cracking. Proximity-based and delayed: the flash comes first and the sound crosses the sky at 200 units a second, so a distant strike rumbles a beat later and quieter. Three takes rotate, because thunder repeats often enough that a pair starts to sound like a loop. Falls back to a bright highpassed crack over a low roll that stumbles on its way down.",
+    usedIn: ["Jupiter — lightning in the Great Red Spot and the white ovals"],
+    kind: "recorded",
+    slots: ["thunder-1.mp3", "thunder-2.mp3", "thunder-3.mp3"],
+    prompt:
+      "A single deep roll of thunder heard from a distance across a " +
+      "vast open sky. A soft crack then a long low rumble fading " +
+      "away. Big and rolling, not sharp or frightening. No rain, no " +
+      "music, no voice.",
+    durationSeconds: 3.0,
+    promptInfluence: 0.4,
+    play: "playThunder",
+  },
+  {
     id: "tornado-ambience",
     label: "Waterspout, from a distance",
     sounds:
