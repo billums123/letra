@@ -975,6 +975,14 @@ function buildProps(ctx: BiomeContext): void {
     spoutObstacle.x = SPOUT.x;
     spoutObstacle.z = SPOUT.z;
     spout.tick(dt, 0);
+    // The ride up ends with the eye inside the storm cloud, so the
+    // cloud has to know where the eye is in order to get out of its
+    // way. The camera, not the avatar: it trails seven units higher,
+    // and it is the camera that ends up in there.
+    {
+      const eye = getCameraPosition();
+      spout.setViewer(eye.x, eye.y, eye.z);
+    }
     if (!p) return;
     const d = Math.hypot(p.x - SPOUT.x, p.z - SPOUT.z);
     // The howl, tracking how close the boat is. Squared so it stays
@@ -1233,9 +1241,33 @@ function buildProps(ctx: BiomeContext): void {
       const mesh = new THREE.Mesh(geo, mat);
       mesh.position.copy(dir).multiplyScalar(340);
       mesh.frustumCulled = false;
-      mesh.renderOrder = -4;
+      mesh.renderOrder = -5;
       sky.add(mesh);
       if (p.ring) {
+        // A ring has to go behind its planet on one side and in front
+        // on the other, or it reads as a hoop leaning against a ball
+        // rather than something orbiting it. Normally the planet's own
+        // depth does that for free — but nothing out here writes
+        // depth, because scenery at infinity must never cut a hole in
+        // a world you can actually stand on.
+        //
+        // So it is done by draw order instead, which works because
+        // these things never move relative to the eye: the sky rides
+        // with the camera, so the ring's far half is always the same
+        // half. Split it there once, at build time, and paint back
+        // half, planet, front half.
+        const tilt = new THREE.Euler(-1.15, 0.4, 0.3);
+        const basis = new THREE.Matrix4().makeRotationFromEuler(tilt);
+        const rx = new THREE.Vector3(1, 0, 0).applyMatrix4(basis);
+        const ry = new THREE.Vector3(0, 1, 0).applyMatrix4(basis);
+        // Depth of a ring point at angle t is rx·dir·cos t + ry·dir·sin t,
+        // which is zero at right angles to this bearing.
+        const phase = Math.atan2(ry.dot(dir), rx.dot(dir));
+        const half: Array<[number, number]> = [
+          // Away from the eye first, then toward it.
+          [phase + Math.PI / 2, -6],
+          [phase - Math.PI / 2, -4],
+        ];
         const ringMat = new THREE.MeshBasicMaterial({
           color: p.ring,
           transparent: true,
@@ -1245,12 +1277,17 @@ function buildProps(ctx: BiomeContext): void {
           fog: false,
         });
         planetMats.push(ringMat);
-        const ring = new THREE.Mesh(new THREE.RingGeometry(p.r * 1.5, p.r * 2.3, 48), ringMat);
-        ring.position.copy(mesh.position);
-        ring.rotation.set(-1.15, 0.4, 0.3);
-        ring.frustumCulled = false;
-        ring.renderOrder = -4;
-        sky.add(ring);
+        for (const [start, order] of half) {
+          const ring = new THREE.Mesh(
+            new THREE.RingGeometry(p.r * 1.42, p.r * 2.1, 48, 1, start, Math.PI),
+            ringMat
+          );
+          ring.position.copy(mesh.position);
+          ring.rotation.copy(tilt);
+          ring.frustumCulled = false;
+          ring.renderOrder = order;
+          sky.add(ring);
+        }
       }
     }
 

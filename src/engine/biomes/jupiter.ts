@@ -69,6 +69,22 @@ const GRS_MID = new THREE.Color(0xb83c1e);
 const GRS_EDGE = new THREE.Color(0xd9713f);
 const GRS_COLLAR = new THREE.Color(0xf3d9b8);
 
+// Curdled cloud in a storm's own polar coordinates.
+//
+// Every coefficient here is chosen so the pattern closes on itself.
+// The caller passes r = 2*phi + something(s), so a term sin(k*r) only
+// comes back round after a full turn when 2k is a whole number — and
+// a term in phi only when its own coefficient is. Get one of them
+// wrong and the storm has a hard radial notch where the last ring
+// meets the first, which is exactly what 2.7 and 5.3 gave it.
+function curl(r: number, phi: number): number {
+  return (
+    0.55 * Math.sin(r + 2.6 * Math.sin(phi * 2 + r * 0.5)) +
+    0.28 * Math.sin(r * 2.5 - phi * 3 + 1.9) +
+    0.17 * Math.sin(r * 5.5 + phi * 7 + 0.6)
+  );
+}
+
 function cellNoise(x: number, y: number, z: number, k: number): number {
   return (
     Math.sin(x * k) * Math.sin(y * k * 1.31 + 1.7) * Math.sin(z * k * 0.87 + 4.1) +
@@ -343,18 +359,24 @@ export function buildJupiterWorld(opts: {
     along: grsAlong,
     halfWidth: GRS_HALF_WIDTH,
     halfHeight: GRS_HALF_HEIGHT,
-    rings: 22,
-    segs: 80,
+    // Its own mesh, so its resolution has nothing to do with the
+    // planet's. The cloud tops are stuck with faces 2.5 units across;
+    // this is eight thousand vertices over thirty units, and it is
+    // where all the fine detail on Jupiter can afford to live.
+    rings: 46,
+    segs: 176,
     shade: (s, phi, out) => {
-      // Two arms wound into a spiral: the angle they sit at shifts
-      // with distance from the eye, which is what makes the thing read
-      // as turning rather than as a painted target. Two rather than
-      // three, and sharpened toward bright ridges with wide dark
-      // troughs between, because from anywhere on the surface the
-      // storm is seen nearly edge-on and only bold shapes survive the
-      // foreshortening.
-      const wound = Math.sin(phi * 2 - s * 9 + Math.sin(phi * 2) * 0.5);
-      const swirl = 0.5 + 0.5 * Math.sign(wound) * Math.pow(Math.abs(wound), 0.65);
+      // A log spiral: the arms tighten as they wind toward the eye,
+      // which is the difference between a storm and a pinwheel. An
+      // earlier version ran them straight out from the middle and
+      // looked like a painted target.
+      const wound = phi * 2 + Math.log(Math.max(0.06, s)) * 3.4;
+      // Broken into filaments at three scales, and sheared harder
+      // toward the rim, where the storm is tearing against the belts
+      // running past it on either side.
+      const shear = 0.35 + 1.6 * s;
+      const t = curl(wound, phi) + 0.42 * shear * curl(wound * 2 + 4, phi * 2);
+      const arms = 0.5 + 0.5 * Math.tanh(t * 1.5);
       // A dark eye, a long deep body, and only a thin pale collar at
       // the very rim where it stirs up the cloud around it.
       if (s < 0.12) out.copy(GRS_MID).lerp(GRS_CORE, 1 - s / 0.12);
@@ -362,11 +384,23 @@ export function buildJupiterWorld(opts: {
       else if (s < 0.9) out.copy(GRS_MID).lerp(GRS_EDGE, (s - 0.7) / 0.2);
       else out.copy(GRS_EDGE).lerp(GRS_COLLAR, (s - 0.9) / 0.1);
       // The arms brighten and darken the body but leave the eye alone,
-      // so the middle stays a solid, readable disc.
-      const strength = Math.min(1, s / 0.18) * 0.42;
-      out.multiplyScalar(1 - strength + strength * 2 * swirl);
-      // Solid through the middle, gone by the rim — no hard edge.
-      return s < 0.84 ? 1 : Math.max(0, 1 - (s - 0.84) / 0.16);
+      // so the middle stays a solid, readable disc. Squared, because
+      // every one of the 176 segments meets at the centre vertex — any
+      // colour that still varies with phi down there turns the eye
+      // into a tiny cog.
+      const near = Math.min(1, s / 0.2);
+      const strength = near * near * 0.46;
+      out.multiplyScalar(1 - strength + strength * 2 * arms);
+      // The eyewall: a thin bright ring right around the middle. It is
+      // the one hard edge in the whole thing, and it is what makes the
+      // eye read as a hole rather than a dark patch.
+      const eyewall = Math.exp(-Math.pow((s - 0.155) / 0.04, 2));
+      if (eyewall > 0.01) out.lerp(GRS_EDGE, eyewall * 0.62);
+      // Ragged at the rim rather than cut on a clean ellipse — a storm
+      // shredding into the belt it sits in has no outline.
+      const ragged = 0.5 + 0.5 * Math.sin(phi * 17 + t * 2.2);
+      const fadeFrom = 0.78 + 0.12 * ragged;
+      return s < fadeFrom ? 1 : Math.max(0, 1 - (s - fadeFrom) / (1 - fadeFrom));
     },
   });
   {
@@ -403,12 +437,24 @@ export function buildJupiterWorld(opts: {
       along,
       halfWidth: oval.halfWidth,
       halfHeight: oval.halfHeight,
-      rings: 8,
-      segs: 40,
+      rings: 16,
+      segs: 72,
       shade: (s, phi, out) => {
-        const swirl = 0.5 + 0.5 * Math.sin(phi * 2 - s * 7);
-        out.copy(ZONE_BRIGHT).lerp(ZONE, s * 0.55 * (0.5 + 0.5 * swirl));
-        return s < 0.66 ? 0.92 : Math.max(0, 0.92 * (1 - (s - 0.66) / 0.34));
+        // The same machinery, wound the other way and kept pale: these
+        // are the cold high cloud between the belts, not holes in it.
+        const wound = phi * 2 - Math.log(Math.max(0.06, s)) * 2.8;
+        const t = curl(wound, phi) * 0.8;
+        const arms = 0.5 + 0.5 * Math.tanh(t * 1.3);
+        const near = Math.min(1, s / 0.25);
+        out.copy(ZONE_BRIGHT).lerp(
+          ZONE,
+          s * 0.6 * (0.35 + 0.65 * (1 - arms) * near * near)
+        );
+        const eyewall = Math.exp(-Math.pow((s - 0.22) / 0.07, 2));
+        if (eyewall > 0.01) out.lerp(ZONE_BRIGHT, eyewall * 0.5);
+        const ragged = 0.5 + 0.5 * Math.sin(phi * 13 + t * 2);
+        const fadeFrom = 0.6 + 0.14 * ragged;
+        return s < fadeFrom ? 0.92 : Math.max(0, 0.92 * (1 - (s - fadeFrom) / (1 - fadeFrom)));
       },
     });
     const mesh = new THREE.Mesh(geo, stormMat);

@@ -22,6 +22,9 @@ export type Tornado = {
   // lean is most of what says "this thing is moving" from a distance.
   setDrift: (vx: number, vz: number) => void;
   tick: (dt: number, t: number) => void;
+  // Melt the storm cloud away when the eye is about to end up inside
+  // it. Pass the camera position; the funnel works out the rest.
+  setViewer: (x: number, y: number, z: number) => void;
   // Where the mouth of it is, for the spiral to be centred on.
   readonly height: number;
 };
@@ -78,10 +81,18 @@ export function buildTornado(opts: { height?: number }): Tornado {
   // The storm it hangs from. A lumpy mass of overlapping spheres, not
   // one squashed one — a single ellipsoid up there reads as a lid on
   // a lamp, and the funnel underneath it as the stem.
+  // Transparent so it can get out of the way. The ride up ends with
+  // the eye inside this thing — a stack of opaque spheres seen from
+  // within is a set of hard-edged slabs cutting across the funnel,
+  // which reads as the tornado being clipped off by something. Being
+  // swallowed by cloud should look like cloud closing over you, so it
+  // fades as the camera arrives instead.
   const capMat = new THREE.MeshStandardMaterial({
     color: 0x5b6572,
     roughness: 1,
     flatShading: true,
+    transparent: true,
+    depthWrite: false,
   });
   const cap = new THREE.Group();
   cap.position.y = height + 1;
@@ -157,12 +168,27 @@ export function buildTornado(opts: { height?: number }): Tornado {
   let clock = 0;
   let leanX = 0;
   let leanZ = 0;
+  let capFade = 1;
+  // Measured against the cloud's own spread: the lumps reach about
+  // this far from its middle, so inside 15 the eye is among them.
+  const CAP_GONE = 15;
+  const CAP_CLEAR = 30;
+  const capAt = new THREE.Vector3();
 
   return {
     group,
     height,
     setFury(next) {
       fury = Math.min(1, Math.max(0, next));
+    },
+    setViewer(x, y, z) {
+      cap.getWorldPosition(capAt);
+      const d = Math.hypot(x - capAt.x, y - capAt.y, z - capAt.z);
+      const want = Math.min(1, Math.max(0, (d - CAP_GONE) / (CAP_CLEAR - CAP_GONE)));
+      // Eased rather than snapped, so a fast climb doesn't blink it.
+      capFade += (want - capFade) * 0.12;
+      capMat.opacity = capFade;
+      cap.visible = capFade > 0.02;
     },
     setDrift(vx, vz) {
       const len = Math.hypot(vx, vz);
