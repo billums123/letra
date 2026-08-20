@@ -8,7 +8,7 @@ import { buildSaturnWorld } from "./saturn";
 import { SATURN_CENTER, SATURN_RADIUS } from "./saturnLayout";
 import { buildJupiterWorld } from "./jupiter";
 import { JUPITER_CENTER, JUPITER_RADIUS } from "./jupiterLayout";
-import { buildTornado } from "./tornado";
+import { buildTornado, spoutDepression } from "./tornado";
 import { isDev } from "../../util/isDev";
 import { rollTimeOfDay, type TimeOfDay } from "./timeOfDay";
 import {
@@ -395,11 +395,21 @@ function buildProps(ctx: BiomeContext): void {
       Math.sin((x + z) * 0.3 + waveT * 0.8 + 4.0) * WAVE_AMPS[2]
     );
   };
+  // Where the waterspout is standing. Declared up here, well above
+  // the section that owns it, because the ground sampler below needs
+  // it and some props sample the ground while the biome is still
+  // being built — a const declared further down would be in its own
+  // temporal dead zone by then.
+  const SPOUT = { x: 26, z: 22 };
+  // The dent the funnel pulls in the sea beneath it, at this point.
+  const spoutDip = (x: number, z: number): number =>
+    spoutDepression(Math.hypot(x - SPOUT.x, z - SPOUT.z));
+
   // Waves flatten as ground rises out of the sea (beaches, volcano).
   const sampleGround = (x: number, z: number): number => {
     const solid = islandHeight(x, z) + sandHeight(x, z);
     const damp = Math.max(0, 1 - solid * 3);
-    return solid + waveHeight(x, z) * damp;
+    return solid + (waveHeight(x, z) + spoutDip(x, z)) * damp;
   };
   setTerrainHeight(sampleGround);
 
@@ -563,7 +573,9 @@ function buildProps(ctx: BiomeContext): void {
     tick.push((dt) => {
       waveT += dt;
       for (let i = 0; i < animCount; i++) {
-        pos.setY(i, waveHeight(pos.getX(i), pos.getZ(i)));
+        const x = pos.getX(i);
+        const z = pos.getZ(i);
+        pos.setY(i, waveHeight(x, z) + spoutDip(x, z));
       }
       pos.needsUpdate = true;
     });
@@ -684,7 +696,7 @@ function buildProps(ctx: BiomeContext): void {
           const off = OFFS[c] * width;
           const x = s.x + s.px * off;
           const z = s.z + s.pz * off;
-          const y = waveHeight(x, z) + LIFT[c] * intensity + 0.05;
+          const y = waveHeight(x, z) + spoutDip(x, z) + LIFT[c] * intensity + 0.05;
           const vi = i * CROSS + c;
           wakePos[vi * 3 + 0] = x;
           wakePos[vi * 3 + 1] = y;
@@ -827,11 +839,13 @@ function buildProps(ctx: BiomeContext): void {
   // wind-up is the funnel getting hold of you and reeling you in, and
   // the throw is a spiral up the inside of it.
   // Live position: it roams. Everything that cares where it is reads
-  // this object rather than a constant.
-  const SPOUT = { x: 26, z: 22 };
+  // the SPOUT object declared near the top of the biome, because the
+  // ground sampler needs it long before this section runs.
   const SPOUT_TRIGGER_R = 3.4;
   // How close the boat has to be before the funnel starts to notice.
   const SPOUT_NOTICE_R = 16;
+  // The ride, in two halves that are now one move: the first is spent
+  // spiralling in at water level, the second climbing out of it.
   const PULL_SECONDS = 1.5;
   const CLIMB_SECONDS = 2.7;
   // Slower than the boat, which does 7. Fast enough that chasing it
@@ -958,8 +972,9 @@ function buildProps(ctx: BiomeContext): void {
     if (Math.hypot(spoutTarget.x - SPOUT.x, spoutTarget.z - SPOUT.z) < 7) retargetSpout();
   }
 
-  let spoutState: "idle" | "pulling" | "lifting" = "idle";
-  let spoutT = 0;
+  // Two states, not three: there is no reeling-in phase any more, so
+  // it either has hold of you or it doesn't.
+  let spoutState: "idle" | "lifting" = "idle";
   tick.push((dt) => {
     const p = getPlayerPosition();
     // It stops dead once it has hold of someone — a tornado that keeps
@@ -1002,31 +1017,30 @@ function buildProps(ctx: BiomeContext): void {
       // the boat before it ever grabs it.
       spout.setFury(away ? 0 : Math.max(0, 1 - d / SPOUT_NOTICE_R) * 0.55);
       if (!away && d < SPOUT_TRIGGER_R) {
-        spoutState = "pulling";
-        spoutT = 0;
+        // Caught. The spin starts on this frame.
+        //
+        // There used to be a separate reeling-in phase first: a
+        // second and a half of the boat sliding flat into the middle
+        // before anything turned. It read as being dragged by a rope.
+        // The spiral already tightens as it climbs and it already
+        // holds low for the first third of its run, so handing over
+        // to it immediately gives the same journey — in from wherever
+        // you touched it, down at water level for a beat, then up —
+        // with the boat turning from the moment it is grabbed.
+        spoutState = "lifting";
+        spout.setFury(1);
         playTornado(earshot(SPOUT.x, SPOUT.z));
+        whirlPlayer({
+          center: SPOUT,
+          topY: spout.height * 0.86,
+          turns: 5.2,
+          duration: PULL_SECONDS + CLIMB_SECONDS,
+          onDone: () => {
+            spoutState = "idle";
+            goToNextGiant();
+          },
+        });
       }
-      return;
-    }
-    // Reeling in — the same slurp the volcano uses to swallow the
-    // boat, so the kid has already seen this happen once.
-    spoutT += dt;
-    spout.setFury(1);
-    const k = Math.min(1, dt * 2.6);
-    p.x += (SPOUT.x - p.x) * k;
-    p.z += (SPOUT.z - p.z) * k;
-    if (spoutT >= PULL_SECONDS) {
-      spoutState = "lifting";
-      whirlPlayer({
-        center: SPOUT,
-        topY: spout.height * 0.86,
-        turns: 3.6,
-        duration: CLIMB_SECONDS,
-        onDone: () => {
-          spoutState = "idle";
-          goToNextGiant();
-        },
-      });
     }
   });
 
@@ -2559,7 +2573,7 @@ function buildProps(ctx: BiomeContext): void {
           spawnFoam(x, z, 1.6);
         }
       }
-      nessie.group.position.set(x, waveHeight(x, z) - sink, z);
+      nessie.group.position.set(x, waveHeight(x, z) + spoutDip(x, z) - sink, z);
       // Face along the direction of travel (tangent of the circle).
       nessie.group.rotation.y = Math.atan2(-Math.sin(ang), Math.cos(ang)) + Math.PI / 2;
       nessie.tick(dt, t);
@@ -2612,7 +2626,7 @@ function buildProps(ctx: BiomeContext): void {
     group.add(buoy);
     obstacles.push({ x: spot.x, z: spot.z, radius: 0.5 });
     tick.push((_dt, t) => {
-      buoy.position.set(spot.x, waveHeight(spot.x, spot.z), spot.z);
+      buoy.position.set(spot.x, waveHeight(spot.x, spot.z) + spoutDip(spot.x, spot.z), spot.z);
       buoy.rotation.z = Math.sin(t * 1.3 + spot.x) * 0.12;
       buoy.rotation.x = Math.cos(t * 1.1 + spot.z) * 0.12;
     });

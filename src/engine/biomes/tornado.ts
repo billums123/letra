@@ -45,6 +45,28 @@ function funnelRadius(u: number): number {
   return 0.85 + 9.6 * Math.pow(u, 1.4) + 1.7 * Math.pow(1 - u, 9);
 }
 
+// The dent it pulls in the sea under it.
+//
+// Shared, because the ocean has to bend its own height field by
+// exactly this much — a funnel drawn standing in a dip on flat water
+// is a funnel standing on flat water with a picture of a dip on it.
+// The boat rides the same field, so it tips down the slope as it gets
+// close, which is most of what says the thing is pulling.
+export const SPOUT_DIP_RADIUS = 8;
+export const SPOUT_DIP_DEPTH = 1.35;
+export function spoutDepression(d: number): number {
+  if (d >= SPOUT_DIP_RADIUS) return 0;
+  const u = d / SPOUT_DIP_RADIUS;
+  const k = 1 - u;
+  const bowl = -SPOUT_DIP_DEPTH * k * k * (3 - 2 * k);
+  // Water piling up in a ring outside the throat. Suction reads as
+  // much from what heaps up around the outside as from the hole in
+  // the middle; the k factor takes it back to nothing at the rim so
+  // the dent joins the open sea without a step.
+  const lip = SPOUT_DIP_DEPTH * 0.9 * k * Math.exp(-Math.pow((u - 0.7) / 0.18, 2));
+  return bowl + lip;
+}
+
 export function buildTornado(opts: { height?: number }): Tornado {
   const height = opts.height ?? 46;
   const group = new THREE.Group();
@@ -123,9 +145,20 @@ export function buildTornado(opts: { height?: number }): Tornado {
     side: THREE.DoubleSide,
     fog: false,
   });
-  const spray = new THREE.Mesh(new THREE.RingGeometry(0.9, 3.1, 32), sprayMat);
+  const sprayGeo = new THREE.RingGeometry(0.9, 3.1, 32, 3);
+  {
+    // Laid into the dip, not across the top of it. RingGeometry is in
+    // the XY plane and the mesh is tipped flat afterwards, so the
+    // height it wants goes in Z.
+    const pos = sprayGeo.attributes.position;
+    for (let i = 0; i < pos.count; i++) {
+      const r = Math.hypot(pos.getX(i), pos.getY(i));
+      pos.setZ(i, -(spoutDepression(r) + 0.14));
+    }
+    sprayGeo.computeVertexNormals();
+  }
+  const spray = new THREE.Mesh(sprayGeo, sprayMat);
   spray.rotation.x = -Math.PI / 2;
-  spray.position.y = 0.14;
   group.add(spray);
 
   const RIPPLE_COUNT = 4;
@@ -211,6 +244,10 @@ export function buildTornado(opts: { height?: number }): Tornado {
         const k = (clock / RIPPLE_PERIOD + r.phase) % 1;
         const spread = 2.2 + k * (11 + fury * 5);
         r.mesh.scale.set(spread, spread, 1);
+        // A ring is thin enough to take a single height, so it can
+        // just ride the dip's profile at the radius it has reached and
+        // climb out of it as it goes.
+        r.mesh.position.y = spoutDepression(spread) + 0.1;
         // Thins as it widens, so it stays a wave and not a hoop.
         (r.mesh.material as THREE.MeshBasicMaterial).opacity =
           (0.34 + fury * 0.3) * Math.min(1, k / 0.12) * Math.pow(1 - k, 1.5);
