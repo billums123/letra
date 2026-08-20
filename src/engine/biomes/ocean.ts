@@ -6,6 +6,8 @@ import { buildSunWorld } from "./sun";
 import { buildOceanGlobe } from "./oceanGlobe";
 import { buildSaturnWorld } from "./saturn";
 import { SATURN_CENTER, SATURN_RADIUS } from "./saturnLayout";
+import { buildJupiterWorld } from "./jupiter";
+import { JUPITER_CENTER, JUPITER_RADIUS } from "./jupiterLayout";
 import { buildTornado } from "./tornado";
 import { isDev } from "../../util/isDev";
 import { rollTimeOfDay, type TimeOfDay } from "./timeOfDay";
@@ -20,6 +22,7 @@ import {
   playPortalDive,
   playSunTouchdown,
   playSaturnTouchdown,
+  playJupiterTouchdown,
   playTornado,
   setTornadoAmbience,
 } from "../../audio/sfx";
@@ -699,24 +702,31 @@ function buildProps(ctx: BiomeContext): void {
   }
 
   // ── Other worlds ─────────────────────────────────────────────────
-  // Two places the ocean can throw you, reached two different ways.
+  // Three places the ocean can throw you, reached two different ways.
   //
   // The sun is what a mega eruption does with you: the star that has
   // always risen over the horizon on a big launch turns out to be a
-  // real destination. Saturn is what the waterspout does: drive into
-  // it and it hauls you off the water and slings you across the sky.
+  // real destination. The waterspout does the other two — drive into
+  // it and it hauls you off the water and slings you across the sky,
+  // alternating between Saturn and Jupiter so that two rides in a row
+  // are never the same trip.
   //
-  // Both work the same once you are there — a sphere you walk with the
-  // tangent frame in planet.ts, portals home, and one altitude fade
-  // that drains the sky, holds the music underwater and hushes the sea
-  // behind you. Only one can be in play at a time, which is what makes
-  // the single set of state below enough.
+  // All three work the same once you are there — a sphere you walk
+  // with the tangent frame in planet.ts, portals home, and one
+  // altitude fade that drains the sky, holds the music underwater and
+  // hushes the sea behind you. Only one can be in play at a time,
+  // which is what makes the single set of state below enough.
   const SUN_CENTER = new THREE.Vector3(30, 55, -300);
   const SUN_RADIUS = 28;
   const sunWorld = buildSunWorld({ center: SUN_CENTER, radius: SUN_RADIUS });
   group.add(sunWorld.group);
   const saturnWorld = buildSaturnWorld({ center: SATURN_CENTER, radius: SATURN_RADIUS });
   group.add(saturnWorld.group);
+  const jupiterWorld = buildJupiterWorld({
+    center: JUPITER_CENTER,
+    radius: JUPITER_RADIUS,
+  });
+  group.add(jupiterWorld.group);
   // The flat world's own far view. Radius just contains the water
   // disc, so from outside the shell hides everything the ocean is made
   // of and shows a planet instead.
@@ -728,7 +738,7 @@ function buildProps(ctx: BiomeContext): void {
   let spaceLockRate = 1.2;
   let armExitsIn = -1;
 
-  type Away = typeof sunWorld | typeof saturnWorld;
+  type Away = typeof sunWorld | typeof saturnWorld | typeof jupiterWorld;
   // Which world the avatar is on (or on the way to), and null at home.
   let away: Away | null = null;
 
@@ -782,6 +792,30 @@ function buildProps(ctx: BiomeContext): void {
     if (away) return;
     leaveTheOcean(saturnWorld, { arriving: () => playSaturnTouchdown() });
     wooTimer = 2.2;
+  }
+
+  function goToJupiter(): void {
+    if (away) return;
+    leaveTheOcean(jupiterWorld, { arriving: () => playJupiterTouchdown() });
+    wooTimer = 2.2;
+  }
+
+  // Where the waterspout throws you, which is not always the same
+  // place: it alternates, Saturn then Jupiter then Saturn again. Two
+  // rides in a row are never the same trip, and a kid who wants the
+  // big one knows it is exactly one ride away rather than a dice roll.
+  //
+  // The turn only advances on a departure that actually happens —
+  // both routes bail early if the avatar is already off-world — so
+  // the alternation can't be knocked out of step by a trigger firing
+  // at a moment it can't be honoured.
+  let giantTurn = 0;
+  function goToNextGiant(): void {
+    if (away) return;
+    const jupiter = giantTurn % 2 === 1;
+    giantTurn++;
+    if (jupiter) goToJupiter();
+    else goToSaturn();
   }
 
   // ── The waterspout ───────────────────────────────────────────────
@@ -981,7 +1015,7 @@ function buildProps(ctx: BiomeContext): void {
         duration: CLIMB_SECONDS,
         onDone: () => {
           spoutState = "idle";
-          goToSaturn();
+          goToNextGiant();
         },
       });
     }
@@ -1010,6 +1044,7 @@ function buildProps(ctx: BiomeContext): void {
   }
   sunWorld.onEnterSpot = (dir) => enterPortal(sunWorld, dir);
   saturnWorld.onEnterSpot = (dir) => enterPortal(saturnWorld, dir);
+  jupiterWorld.onEnterSpot = (dir) => enterPortal(jupiterWorld, dir);
 
   // Runs from the space tick, which ticks whether or not the avatar is
   // on the flat world.
@@ -1043,11 +1078,16 @@ function buildProps(ctx: BiomeContext): void {
 
   if (isDev()) {
     // Testing a trip shouldn't mean waiting on an eruption roll or
-    // driving across the map. U for the sun, I for Saturn.
+    // driving across the map. U for the sun, I for Saturn, O for
+    // Jupiter — and P for whichever the waterspout would pick next,
+    // which is the only way to check the alternation without going
+    // and finding the funnel twice.
     type WorldDev = {
       __letraSunTrip?: () => void;
       __letraSunLand?: () => void;
       __letraSaturnTrip?: () => void;
+      __letraJupiterTrip?: () => void;
+      __letraNextGiant?: () => void;
       __letraWorldKey?: (e: KeyboardEvent) => void;
     };
     const w = window as unknown as WorldDev;
@@ -1055,10 +1095,14 @@ function buildProps(ctx: BiomeContext): void {
     const onKey = (e: KeyboardEvent) => {
       if (e.code === "KeyU") goToSun();
       if (e.code === "KeyI") goToSaturn();
+      if (e.code === "KeyO") goToJupiter();
+      if (e.code === "KeyP") goToNextGiant();
     };
     w.__letraWorldKey = onKey;
     w.__letraSunTrip = () => goToSun();
     w.__letraSaturnTrip = () => goToSaturn();
+    w.__letraJupiterTrip = () => goToJupiter();
+    w.__letraNextGiant = () => goToNextGiant();
     // Skips the ride, for looking at a surface without waiting.
     w.__letraSunLand = () => {
       if (away) return;
@@ -1137,9 +1181,16 @@ function buildProps(ctx: BiomeContext): void {
     // Distant planets, hung in the same viewer-locked sky as the
     // stars. That means they never move relative to the avatar, which
     // is both what genuinely distant things do and the only way to
-    // keep them inside the camera's 500-unit far plane from anywhere
-    // in the scene. Kept clear of the sun's own direction so nothing
-    // sits on top of it.
+    // keep them inside the camera's far plane from anywhere in the
+    // scene. Kept clear of the sun's own direction so nothing sits on
+    // top of it.
+    //
+    // They are painted at 340 units, which used to be further out
+    // than anything real. Jupiter is 429 away and its moons swing
+    // wider still, so scenery that wrote depth would cut holes in a
+    // world you can actually stand on. Nothing at infinity may
+    // occlude anything: no depth written, and drawn before every real
+    // world so the real ones paint over them.
     const PLANETS: Array<{ dir: [number, number, number]; r: number; a: number; b: number; ring?: number }> = [
       { dir: [0.82, 0.32, 0.47], r: 17, a: 0xc46a4a, b: 0x8a3f2a },
       { dir: [-0.66, 0.16, 0.73], r: 24, a: 0x6f7fc4, b: 0x3b4a86, ring: 0xd9c79a },
@@ -1170,18 +1221,21 @@ function buildProps(ctx: BiomeContext): void {
         vertexColors: true,
         transparent: true,
         opacity: 0,
+        depthWrite: false,
         fog: false,
       });
       planetMats.push(mat);
       const mesh = new THREE.Mesh(geo, mat);
       mesh.position.copy(dir).multiplyScalar(340);
       mesh.frustumCulled = false;
+      mesh.renderOrder = -4;
       sky.add(mesh);
       if (p.ring) {
         const ringMat = new THREE.MeshBasicMaterial({
           color: p.ring,
           transparent: true,
           opacity: 0,
+          depthWrite: false,
           side: THREE.DoubleSide,
           fog: false,
         });
@@ -1190,6 +1244,7 @@ function buildProps(ctx: BiomeContext): void {
         ring.position.copy(mesh.position);
         ring.rotation.set(-1.15, 0.4, 0.3);
         ring.frustumCulled = false;
+        ring.renderOrder = -4;
         sky.add(ring);
       }
     }
@@ -1269,6 +1324,8 @@ function buildProps(ctx: BiomeContext): void {
       sunWorld.tick(dt, t, p);
       saturnWorld.setOpacity(worldFade);
       saturnWorld.tick(dt, t, p);
+      jupiterWorld.setOpacity(worldFade);
+      jupiterWorld.tick(dt, t, p);
     });
   }
 

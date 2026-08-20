@@ -10,6 +10,22 @@ import {
   SATURN_AXIS,
   SATURN_CENTER,
 } from "../src/engine/biomes/saturnLayout";
+import {
+  JUPITER_SPOT_DIRS,
+  JUPITER_SPOT_ANGLE,
+  JUPITER_SPOT_TRIGGER,
+  JUPITER_BEAM_HEIGHT,
+  JUPITER_RADIUS,
+  JUPITER_AXIS,
+  JUPITER_CENTER,
+  GRS_DIR,
+  GRS_HALF_WIDTH,
+  GRS_HALF_HEIGHT,
+  CAM_UP,
+  CAM_BACK,
+  HOVER as J_HOVER,
+  MOONS,
+} from "../src/engine/biomes/jupiterLayout";
 
 const R = 28;
 const HOVER = 0.35;
@@ -214,19 +230,144 @@ const check = (name: string, ok: boolean, detail = "") => {
   const offAxis = pole.angleTo(SATURN_AXIS);
   check("you land well off Saturn's pole, so the rings cross the sky",
     offAxis > 0.6 && offAxis < 1.2, `${deg(offAxis)}° off the ring axis`);
-  // Everything has to be inside the camera's far plane from
-  // everywhere else, or a world vanishes when you look back at it.
+}
+
+// 10. Jupiter. Same coverage rules as the other two, on a planet half
+//     again as wide — which is exactly why it gets six portals rather
+//     than five. Six points on a sphere can be spaced so nothing is
+//     more than 54.7 degrees from one; five cannot do better than 63,
+//     and 63 degrees of arc on a 52-unit ball is a very long time to
+//     be driving with nothing on the horizon.
+{
+  const R = JUPITER_RADIUS;
+  const reach =
+    Math.acos(R / (R + 7)) + Math.acos(R / (R + JUPITER_BEAM_HEIGHT - 0.6));
+  let worst = 0;
+  const N = 4000;
+  const probe = new THREE.Vector3();
+  for (let i = 0; i < N; i++) {
+    const y = 1 - (2 * i + 1) / N;
+    const r = Math.sqrt(Math.max(0, 1 - y * y));
+    const th = i * Math.PI * (3 - Math.sqrt(5));
+    probe.set(Math.cos(th) * r, y, Math.sin(th) * r);
+    let nearest = Infinity;
+    for (const d of JUPITER_SPOT_DIRS) nearest = Math.min(nearest, probe.angleTo(d));
+    worst = Math.max(worst, nearest);
+  }
+  check("a beacon is in sight from everywhere on Jupiter", worst < reach * 0.85,
+    `worst gap ${deg(worst)}°, beacons reach ${deg(reach)}°`);
+  const pole = new THREE.Vector3(0, 1, 0);
+  const arrival = pole.angleTo(JUPITER_SPOT_DIRS[0]);
+  check("Jupiter's arrival view has a beacon in it", arrival < reach * 0.85,
+    `${deg(arrival)}° from the landing pole`);
+  check("Jupiter's arrival beacon is a real drive away",
+    (arrival - JUPITER_SPOT_TRIGGER) * R > 20,
+    `${((arrival - JUPITER_SPOT_TRIGGER) * R).toFixed(1)} units of arc to its rim`);
+  check("no two Jupiter portals overlap",
+    JUPITER_SPOT_DIRS.every((a, i) =>
+      JUPITER_SPOT_DIRS.every((b, j) => i === j || a.angleTo(b) > JUPITER_SPOT_ANGLE * 2)));
+  // Jupiter is bigger than Saturn, which is the entire pitch. If that
+  // ever stops being true the world has lost its reason to exist.
+  check("Jupiter is the biggest thing you can stand on",
+    JUPITER_RADIUS > SATURN_RADIUS && JUPITER_RADIUS > 28,
+    `Jupiter ${JUPITER_RADIUS}, Saturn ${SATURN_RADIUS}, sun 28`);
+  // Bands are only a view if the landing spot is well off the axis
+  // they are drawn around — on the pole they ring the horizon evenly
+  // and the planet reads as a plain ball.
+  const offAxis = pole.angleTo(JUPITER_AXIS);
+  check("you land well off Jupiter's pole, so the bands cross the sky",
+    offAxis > 0.6 && offAxis < 1.2, `${deg(offAxis)}° off the band axis`);
+  // The Great Red Spot has to be in shot when the kid touches down —
+  // it is the thing that says which planet this is — without sitting
+  // on top of the way home.
+  // Measured from the camera, not from the avatar's feet. The eye
+  // trails CAM_BACK behind and CAM_UP above, which tips its own
+  // sub-point back the way you came — so the horizon in front of you
+  // is nearer than a measurement taken at the avatar says it is. A
+  // storm that passes the naive test can still be entirely behind the
+  // limb of the planet in the actual picture, which is precisely what
+  // the first placement turned out to be.
+  const camR = Math.hypot(R + J_HOVER + CAM_UP, CAM_BACK);
+  const camTilt = Math.atan2(CAM_BACK, R + J_HOVER + CAM_UP);
+  // Arrivals face -Z, so the camera trails toward +Z.
+  const camSub = new THREE.Vector3(0, Math.cos(camTilt), Math.sin(camTilt));
+  const horizon = Math.acos(R / camR);
+  const grsFromCam = camSub.angleTo(GRS_DIR);
+  // The short axis is the one that might be pointing at the viewer,
+  // so it is the honest bound on how much of the storm is in view.
+  const nearEdge = grsFromCam - GRS_HALF_HEIGHT;
+  check("the Great Red Spot is in shot from the arrival camera",
+    nearEdge < horizon * 0.6,
+    `centre ${deg(grsFromCam)}° from the camera, near edge ${deg(nearEdge)}°, horizon ${deg(horizon)}°`);
+  // In front of the camera, not off to the side of it.
+  const HALF_FOV = 43 * Math.PI / 180;
+  const bearing = Math.atan2(GRS_DIR.x, -GRS_DIR.z);
+  check("the Great Red Spot is ahead of you, not off your shoulder",
+    Math.abs(bearing) < HALF_FOV,
+    `${deg(Math.abs(bearing))}° off the arrival bearing`);
+  let nearestPortal = Infinity;
+  for (const d of JUPITER_SPOT_DIRS) nearestPortal = Math.min(nearestPortal, GRS_DIR.angleTo(d));
+  check("the Great Red Spot doesn't swallow a portal",
+    nearestPortal > GRS_HALF_WIDTH + JUPITER_SPOT_ANGLE,
+    `${deg(nearestPortal)}° to the nearest, needs ${deg(GRS_HALF_WIDTH + JUPITER_SPOT_ANGLE)}°`);
+  // Moons have to clear the cloud tops they orbit, or one spends half
+  // its lap buried in the planet.
+  check("every moon clears the planet it goes round",
+    MOONS.every((m) => (m.orbit - 1) * R > m.radius + 6),
+    MOONS.map((m) => `${m.name} ${((m.orbit - 1) * R - m.radius).toFixed(0)}`).join(", "));
+}
+
+// 11. Everything has to be inside the camera's far plane from
+//     everywhere else, or a world vanishes when you look back at it.
+{
   const FAR = 900;
   const ocean = new THREE.Vector3(0, 0, 0);
   const sun = new THREE.Vector3(30, 55, -300);
-  const legs: Array<[string, number]> = [
-    ["ocean → Saturn", ocean.distanceTo(SATURN_CENTER) + R],
-    ["sun → Saturn", sun.distanceTo(SATURN_CENTER) + R],
-    ["Saturn → ocean", SATURN_CENTER.distanceTo(ocean) + 92],
+  // The ocean is a flat disc seen as a globe from off-world; 92 is
+  // the radius of the shell that stands in for it.
+  const OCEAN_R = 92;
+  const OUTER_ORBIT = MOONS.reduce((a, m) => Math.max(a, m.orbit), 0);
+  const worlds: Array<[string, THREE.Vector3, number]> = [
+    ["ocean", ocean, OCEAN_R],
+    ["sun", sun, 28],
+    ["Saturn", SATURN_CENTER, SATURN_RADIUS],
+    // Reach out to the widest moon, not just the cloud tops: an orbit
+    // that pokes through the far plane drops a moon out of the sky
+    // for half its lap.
+    ["Jupiter", JUPITER_CENTER, JUPITER_RADIUS * OUTER_ORBIT + 3],
   ];
+  const legs: Array<[string, number]> = [];
+  for (const [an, ap] of worlds) {
+    for (const [bn, bp, br] of worlds) {
+      if (an === bn) continue;
+      legs.push([`${an} → ${bn}`, ap.distanceTo(bp) + br]);
+    }
+  }
+  const worstLeg = legs.reduce((a, b) => (a[1] > b[1] ? a : b));
   check("every world is inside the camera's far plane from every other",
     legs.every(([, d]) => d < FAR),
-    legs.map(([n, d]) => `${n} ${d.toFixed(0)}`).join(", ") + ` (far ${FAR})`);
+    `worst is ${worstLeg[0]} at ${worstLeg[1].toFixed(0)} (far ${FAR})`);
+  // Each world is meant to be its own destination in its own quarter
+  // of the sky. Two of them on the same bearing from home would read
+  // as one thing with a moon, and the second would be a surprise
+  // nobody ever went looking for.
+  const bearings: Array<[string, THREE.Vector3]> = [
+    ["sun", sun.clone().normalize()],
+    ["Saturn", SATURN_CENTER.clone().normalize()],
+    ["Jupiter", JUPITER_CENTER.clone().normalize()],
+  ];
+  const pairs: Array<[string, number]> = [];
+  for (let i = 0; i < bearings.length; i++) {
+    for (let j = i + 1; j < bearings.length; j++) {
+      pairs.push([
+        `${bearings[i][0]}/${bearings[j][0]}`,
+        bearings[i][1].angleTo(bearings[j][1]),
+      ]);
+    }
+  }
+  check("no two worlds share a bearing from home",
+    pairs.every(([, a]) => a > 0.7),
+    pairs.map(([n, a]) => `${n} ${deg(a)}°`).join(", "));
 }
 
 function deg(rad: number) {

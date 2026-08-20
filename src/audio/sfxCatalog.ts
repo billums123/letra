@@ -313,7 +313,7 @@ export const SFX_CATALOG: SfxCue[] = [
     label: "Waterspout",
     sounds:
       "The tornado on the ocean getting hold of the boat and hauling it up — a rising roar of moving air over a climbing low howl. Two takes rotate. Falls back to a swelling bandpassed noise bed with a filtered saw underneath.",
-    usedIn: ["The ocean — driving into the waterspout, and the climb to Saturn"],
+    usedIn: ["The ocean — driving into the waterspout, and the climb to Saturn or Jupiter"],
     kind: "recorded",
     slots: ["tornado-suck-1.mp3", "tornado-suck-2.mp3"],
     prompt:
@@ -340,6 +340,23 @@ export const SFX_CATALOG: SfxCue[] = [
     durationSeconds: 2.2,
     promptInfluence: 0.4,
     play: "playSaturnTouchdown",
+  },
+  {
+    id: "jupiter-touchdown",
+    label: "Landing on Jupiter",
+    sounds:
+      "The same cloud tops as Saturn with a planet's worth of mass under them: a wider, longer wind swell with a sub-bass settle beneath it. Two takes rotate. Falls back to a noise swell through a closing lowpass over a sine sliding from 76Hz to 31Hz.",
+    usedIn: ["Jupiter — arriving after a trip up the waterspout"],
+    kind: "recorded",
+    slots: ["jupiter-touchdown-1.mp3", "jupiter-touchdown-2.mp3"],
+    prompt:
+      "Landing on the cloud tops of an enormous gas giant. A huge " +
+      "soft billowing whoomph with a deep bass rumble underneath, " +
+      "settling into vast slow high-altitude wind. Immense, calm and " +
+      "full of wonder. No music, no voice.",
+    durationSeconds: 2.8,
+    promptInfluence: 0.4,
+    play: "playJupiterTouchdown",
   },
   {
     id: "tornado-ambience",

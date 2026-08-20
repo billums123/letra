@@ -1074,6 +1074,55 @@ export function playSaturnTouchdown(volume = 1) {
   n.connect(lp).connect(g).connect(dest);
 }
 
+const jupiterTouchdownClips = makeClipPool([
+  "/audio/sfx/jupiter-touchdown-1.mp3",
+  "/audio/sfx/jupiter-touchdown-2.mp3",
+]);
+
+// Setting down on the big one. Saturn's arrival is a soft billow;
+// this is the same weather with a planet's worth of mass under it —
+// the wind swell runs longer and wider, and there is a sub-bass
+// settle beneath it that Saturn deliberately does not have. The two
+// worlds are reached by the same waterspout on alternating rides, so
+// the ear is the first thing that tells a kid which one they got.
+export function playJupiterTouchdown(volume = 1) {
+  if (volume < AUDIBLE) return;
+  const c = getCtx();
+  if (!c) return;
+  if (jupiterTouchdownClips.play(0.8 * volume, 0.05)) return;
+  const dest = busAt(c, volume);
+  const t0 = c.currentTime;
+  // The wind: wider and slower to die away than Saturn's.
+  {
+    const n = startNoise(c, t0, t0 + 2.9);
+    const lp = c.createBiquadFilter();
+    lp.type = "lowpass";
+    lp.frequency.setValueAtTime(1100, t0);
+    lp.frequency.exponentialRampToValueAtTime(220, t0 + 2.6);
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(0.24, t0 + 0.36);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 2.85);
+    n.connect(lp).connect(g).connect(dest);
+  }
+  // The mass: a sub sliding down under everything. Felt more than
+  // heard on a laptop, which is exactly the intent — it is the
+  // difference between landing on a big planet and a bigger one.
+  {
+    const o = c.createOscillator();
+    o.type = "sine";
+    o.frequency.setValueAtTime(76, t0);
+    o.frequency.exponentialRampToValueAtTime(31, t0 + 1.5);
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(0.2, t0 + 0.14);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 1.9);
+    o.connect(g).connect(dest);
+    o.start(t0);
+    o.stop(t0 + 2);
+  }
+}
+
 // ─── The sun ─────────────────────────────────────────────────────────
 // Two cues for the trip off-world. Both are recorded, both fall back
 // to a synth so the moment is never silent on a cold cache.
