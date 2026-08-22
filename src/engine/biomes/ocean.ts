@@ -1151,8 +1151,34 @@ function buildProps(ctx: BiomeContext): void {
   let eddyHuntingIsland = false;
   let eddyHeading = 0;
   const eddyTarget = { x: EDDY.x, z: EDDY.z };
+
+  // ── When it is allowed to go for the mountain ────────────────────
+  // Hunting was on from the moment the world was built, and a hunt
+  // crosses the map at 7.5 against a start 37 units out. Measured on a
+  // fresh session: the island was gone four seconds in, every time,
+  // before the kid had touched a control. That is not a set-piece, it
+  // is a theft — the volcano is the middle of this world, it has the
+  // cave, and it is the way to the sun.
+  //
+  // So it waits. Long enough that a session is well under way and the
+  // mountain has been somewhere the kid went back to, and then only
+  // while they are near enough to watch it happen: a landmark that
+  // vanishes while you are on the far side of the map is not a
+  // spectacle, it is just a thing that is no longer there. Drive away
+  // mid-hunt and it loses interest and goes back to wandering.
+  const HUNT_AFTER = 210;
+  const HUNT_WATCH_R = 85;
+  let oceanAge = 0;
+  function huntAllowed(): boolean {
+    if (islandState !== "here") return false;
+    if (oceanAge < HUNT_AFTER) return false;
+    const p = getPlayerPosition();
+    if (!p) return false;
+    return Math.hypot(p.x - ISLAND.x, p.z - ISLAND.z) < HUNT_WATCH_R;
+  }
+
   function retargetEddy(): void {
-    eddyHuntingIsland = islandState === "here";
+    eddyHuntingIsland = huntAllowed();
     if (eddyHuntingIsland) {
       eddyTarget.x = ISLAND.x;
       eddyTarget.z = ISLAND.z;
@@ -1184,7 +1210,7 @@ function buildProps(ctx: BiomeContext): void {
     // heading for — so after a swallow it wandered off on a full
     // crossing of the map before it even considered going back, and
     // the whole set-piece came round about once a minute.
-    const canHunt = islandState === "here";
+    const canHunt = huntAllowed();
     if (canHunt && !eddyHuntingIsland) {
       eddyHuntingIsland = true;
       eddyTarget.x = ISLAND.x;
@@ -1258,6 +1284,7 @@ function buildProps(ctx: BiomeContext): void {
   let eddyState: "idle" | "pulling" | "diving" = "idle";
   let eddyT = 0;
   tick.push((dt) => {
+    if (!away) oceanAge += dt;
     const p = getPlayerPosition();
     if (submerged) {
       eddy.group.visible = false;
@@ -3130,11 +3157,16 @@ function buildProps(ctx: BiomeContext): void {
     applyWorld();
     const p = getPlayerPosition();
     if (!p) return;
-    // And never surface inside the whirlpool: it roams, and coming up
-    // in it sends you straight back down. Sliding out of it looked
-    // like being flung, so pick open water instead — pickWaterLanding
-    // already keeps clear of both the spout and the whirlpool.
-    if (Math.hypot(p.x - EDDY.x, p.z - EDDY.z) < EDDY_RADIUS + 5) {
+    // And never surface inside either of the rides. Both roam, the
+    // vent puts you up wherever you went down, and coming up inside
+    // one hands you straight to it — back down the whirlpool, or off
+    // to Saturn without a say in it. Measured: the spout had wandered
+    // over the vent and the ride home ended in its funnel.
+    //
+    // Sliding out of one looked like being flung, so pick open water
+    // instead; pickWaterLanding already keeps clear of both.
+    const inSpout = Math.hypot(p.x - SPOUT.x, p.z - SPOUT.z) < SPOUT_TRIGGER_R + 9;
+    if (inSpout || Math.hypot(p.x - EDDY.x, p.z - EDDY.z) < EDDY_RADIUS + 5) {
       const spot = pickWaterLanding();
       p.x = spot.x;
       p.z = spot.z;
@@ -3147,7 +3179,16 @@ function buildProps(ctx: BiomeContext): void {
   // down: drive into the crater, it winds up, and it throws you all
   // the way up through the sea to break the surface.
   const VENT_RUMBLE = 1.5;
-  let ventState: "idle" | "rumbling" = "idle";
+  // "flying" is the ride itself, and it is not decoration: without a
+  // state for it the vent went on testing its own trigger while the
+  // whirl it had just started was still carrying the avatar up through
+  // the water — sitting, by definition, right on top of the crater it
+  // triggers on. So it re-armed every time. The second whirl call was
+  // a no-op (the engine refuses one while another is running), but
+  // `rumbling` stuck, and the next dive walked straight into a tick
+  // that thought it was already winding up: down the whirlpool, and
+  // back out of the vent before the sea floor had finished drawing.
+  let ventState: "idle" | "rumbling" | "flying" = "idle";
   let ventT = 0;
   // Which of the two mountains down here is going off. The sea-floor
   // vent only ever pops you back to the surface; the sunken island
@@ -3165,6 +3206,8 @@ function buildProps(ctx: BiomeContext): void {
     if (!p) return;
     const dVent = Math.hypot(p.x - seafloor.volcano.x, p.z - seafloor.volcano.z);
     const dSunk = Math.hypot(p.x - SUNK.x, p.z - SUNK.z);
+    // The whirl owns the avatar for the length of the ride home.
+    if (ventState === "flying") return;
     if (ventState === "idle") {
       if (travelGrace > 0) return;
       const onSunk = islandState === "sunk" && dSunk < 11;
@@ -3187,7 +3230,7 @@ function buildProps(ctx: BiomeContext): void {
     p.x += (centre.x - p.x) * k;
     p.z += (centre.z - p.z) * k;
     if (ventT >= VENT_RUMBLE) {
-      ventState = "idle";
+      ventState = "flying";
       playVolcanoBoom(ventMega);
       wooTimer = ventMega ? 2.4 : 1.1;
       const mega = ventMega;
@@ -3199,6 +3242,7 @@ function buildProps(ctx: BiomeContext): void {
         turns: mega ? 3 : 2.2,
         duration: mega ? 3.2 : 2.8,
         onDone: () => {
+          ventState = "idle";
           surfaceFromDeep();
           if (mega) goToSun();
         },
@@ -3210,15 +3254,30 @@ function buildProps(ctx: BiomeContext): void {
     type DeepDev = { __letraDive?: () => void; __letraSurface?: () => void };
     const w = window as unknown as DeepDev;
     w.__letraDive = () => goUnderwater();
+    // Skips the three and a half minute wait before the whirlpool is
+    // allowed to go for the island, so the set-piece can be watched
+    // without playing a whole session first.
+    (w as unknown as { __letraHunt?: () => void }).__letraHunt = () => {
+      oceanAge = HUNT_AFTER + 1;
+    };
     (w as unknown as { __letraKeepVolcanoDown?: (on: boolean) => void }).__letraKeepVolcanoDown = (
       on: boolean
     ) => {
       goneSeconds = on ? 1e9 : 14;
     };
     (w as unknown as { __letraSea?: () => unknown }).__letraSea = () => ({
+      submerged,
+      ventState,
+      ventIsSunkVolcano,
+      travelGrace: +travelGrace.toFixed(2),
+      vent: [seafloor.volcano.x, seafloor.volcano.z, seafloor.volcanoR],
+      sunk: [SUNK.x, SUNK.z],
       islandState,
       volcanoPresence: +volcanoPresence.toFixed(2),
+      eddyState,
       hunting: eddyHuntingIsland,
+      oceanAge: +oceanAge.toFixed(1),
+      huntAt: HUNT_AFTER,
       eddy: [+EDDY.x.toFixed(1), +EDDY.z.toFixed(1)],
       target: [+eddyTarget.x.toFixed(1), +eddyTarget.z.toFixed(1)],
       distToIsland: +Math.hypot(EDDY.x - ISLAND.x, EDDY.z - ISLAND.z).toFixed(1),
