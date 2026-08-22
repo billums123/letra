@@ -473,7 +473,9 @@ export type LetterCharacter = {
   // Trigger the celebration burst once it's been picked up.
   celebrate: () => void;
   // Distance check helper used by game modes for proximity collection.
-  positionXZ: () => { x: number; z: number };
+  // Y comes along so distanceXZ can tell one floor from another; the
+  // name is kept because every call site reads x and z from it.
+  positionXZ: () => { x: number; y: number; z: number };
   // Aim the letter's face at a world position (typically the camera). Only
   // affects the outer Y-axis pivot — the inner animation group keeps its
   // own bob/spin animation separate so they never fight.
@@ -845,7 +847,7 @@ export function buildLetterCharacter(font: Font, opts: LetterOptions): LetterCha
       if (celebrationT < 0) celebrationT = 0;
     },
     positionXZ() {
-      return { x: group.position.x, z: group.position.z };
+      return { x: group.position.x, y: group.position.y, z: group.position.z };
     },
     faceTowards(x, z) {
       const dx = x - group.position.x;
@@ -879,7 +881,36 @@ export function buildLetterCharacter(font: Font, opts: LetterOptions): LetterCha
 }
 
 // Used by consumers to test whether a player has reached a letter.
-export function distanceXZ(a: { x: number; z: number }, b: { x: number; z: number }) {
+// How far apart two things on the ground are, ignoring height.
+//
+// Ignoring height is deliberate: the avatar hovers, letters sit on the
+// terrain, and on any slope the two are never at the same Y. Every
+// collection check in every game mode is this distance.
+//
+// It stops being the whole story once a world has two floors. Take the
+// whirlpool down and the sea floor is forty-six units under the sea,
+// with all twenty-six letters still sitting up on the surface — and
+// measured across the ground alone, driving about down there hands
+// them to you one at a time, through the water, out of sight. So
+// height is not ignored, exactly: it is used to decide whether the two
+// are on the same floor at all, and nothing else.
+//
+// The gate is wide on purpose. It has to clear the tallest thing a
+// letter and an avatar can be standing on either end of — the volcano
+// is fifteen units from beach to rim — while being nowhere near the
+// gap between one world and the next.
+export const SAME_FLOOR = 24;
+// Not Infinity: this number is also fed to setPlayerProximity, which
+// eases with it, and one NaN in a lerp poisons a transform for good.
+const OFF_FLOOR = 1e6;
+
+export function distanceXZ(
+  a: { x: number; y?: number; z: number },
+  b: { x: number; y?: number; z: number }
+) {
+  if (a.y !== undefined && b.y !== undefined && Math.abs(a.y - b.y) > SAME_FLOOR) {
+    return OFF_FLOOR;
+  }
   const dx = a.x - b.x;
   const dz = a.z - b.z;
   return Math.hypot(dx, dz);
@@ -1146,7 +1177,7 @@ function buildFromOverride(
       if (celebrationT < 0) celebrationT = 0;
     },
     positionXZ() {
-      return { x: group.position.x, z: group.position.z };
+      return { x: group.position.x, y: group.position.y, z: group.position.z };
     },
     faceTowards(x, z) {
       const dx = x - group.position.x;

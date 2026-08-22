@@ -908,114 +908,135 @@ export function playTornado(volume = 1) {
   }
 }
 
-// The howl you can hear before you get there. A bed rather than a
-// one-shot: it starts when the funnel comes into earshot, tracks how
-// close the boat is, and stops when it leaves. Capped deliberately
-// low — it is weather in the background, and a kid still has to be
-// able to hear the letter they just picked up over it.
-const WIND_URL = "/audio/sfx/tornado-ambience-1.mp3";
-const WIND_MAX = 0.3;
-let windBuffer: AudioBuffer | null = null;
-let windBytes: ArrayBuffer | null = null;
-void fetch(WIND_URL)
-  .then((r) => (r.ok ? r.arrayBuffer() : null))
-  .then((b) => {
-    windBytes = b;
-  })
-  .catch(() => undefined);
+// Ambience beds: a loop that fades up as you get near something and
+// down again as you leave. Two of them now — the waterspout's howl
+// and the hum of being under the sea — so the machinery is a factory
+// rather than a set of module globals.
+//
+// Both are capped low on purpose. They are the weather, and a kid
+// still has to hear the letter they just picked up over them.
+type AmbienceBed = {
+  set: (level: number) => void;
+};
 
-let windGain: GainNode | null = null;
-let windStop: (() => void) | null = null;
-let windLevel = 0;
+function makeAmbienceBed(opts: {
+  url: string;
+  max: number;
+  // Everything above this is rolled off — heard across open water or
+  // through it, both of these are body and not hiss, and the hiss is
+  // what would fight the voice.
+  tone: number;
+  // Fallback synth bed, for a cold cache or a missing file.
+  synth: (c: AudioContext) => { source: AudioBufferSourceNode; out: AudioNode; stop: () => void };
+}): AmbienceBed {
+  let bytes: ArrayBuffer | null = null;
+  let buffer: AudioBuffer | null = null;
+  void fetch(opts.url)
+    .then((r) => (r.ok ? r.arrayBuffer() : null))
+    .then((b) => {
+      bytes = b;
+    })
+    .catch(() => undefined);
 
-// 0 = nowhere near it, 1 = inside it.
-export function setTornadoAmbience(level: number): void {
-  const next = Math.max(0, Math.min(1, level));
-  if (Math.abs(next - windLevel) < 0.01 && next !== 0) return;
-  windLevel = next;
-  const c = getCtx();
-  if (!c) return;
-  if (next <= 0.005) {
-    if (windGain) {
-      const g = windGain.gain;
+  let gain: GainNode | null = null;
+  let stop: (() => void) | null = null;
+  let level = 0;
+
+  function start(c: AudioContext): void {
+    const g = c.createGain();
+    g.gain.value = 0.0001;
+    g.connect(getSfxBus(c));
+    const lp = c.createBiquadFilter();
+    lp.type = "lowpass";
+    lp.frequency.value = opts.tone;
+    lp.connect(g);
+
+    if (!buffer && bytes) {
+      try {
+        // decodeAudioData detaches its input, so hand over a copy and
+        // keep the bytes for a future context.
+        void c.decodeAudioData(bytes.slice(0)).then((b) => {
+          buffer = b;
+        });
+      } catch {
+        /* falls through to the synth bed */
+      }
+    }
+
+    if (buffer) {
+      const src = c.createBufferSource();
+      src.buffer = buffer;
+      src.loop = true;
+      // Loop inside the clip, clear of the fades ElevenLabs puts on
+      // the ends — looping the whole thing dips the level every time
+      // round, which reads as pumping rather than as weather.
+      src.loopStart = Math.min(0.4, buffer.duration * 0.15);
+      src.loopEnd = Math.max(src.loopStart + 0.5, buffer.duration - 0.35);
+      src.connect(lp);
+      src.start();
+      gain = g;
+      stop = () => {
+        try {
+          src.stop();
+        } catch {
+          /* already stopped */
+        }
+        g.disconnect();
+      };
+      return;
+    }
+
+    const made = opts.synth(c);
+    made.out.connect(lp);
+    gain = g;
+    stop = () => {
+      made.stop();
+      g.disconnect();
+    };
+  }
+
+  return {
+    set(next) {
+      const want = Math.max(0, Math.min(1, next));
+      if (Math.abs(want - level) < 0.01 && want !== 0) return;
+      level = want;
+      const c = getCtx();
+      if (!c) return;
+      if (want <= 0.005) {
+        if (gain) {
+          const g = gain.gain;
+          g.cancelScheduledValues(c.currentTime);
+          g.setValueAtTime(g.value, c.currentTime);
+          g.linearRampToValueAtTime(0.0001, c.currentTime + 0.4);
+          const s = stop;
+          gain = null;
+          stop = null;
+          setTimeout(() => s?.(), 600);
+        }
+        return;
+      }
+      if (!gain) start(c);
+      if (!gain) return;
+      const g = gain.gain;
       g.cancelScheduledValues(c.currentTime);
       g.setValueAtTime(g.value, c.currentTime);
-      g.linearRampToValueAtTime(0.0001, c.currentTime + 0.4);
-      const stop = windStop;
-      windGain = null;
-      windStop = null;
-      setTimeout(() => stop?.(), 600);
-    }
-    return;
-  }
-  if (!windGain) startWind(c);
-  if (!windGain) return;
-  const g = windGain.gain;
-  g.cancelScheduledValues(c.currentTime);
-  g.setValueAtTime(g.value, c.currentTime);
-  g.linearRampToValueAtTime(Math.max(0.0001, next * WIND_MAX), c.currentTime + 0.35);
+      g.linearRampToValueAtTime(Math.max(0.0001, want * opts.max), c.currentTime + 0.35);
+    },
+  };
 }
 
-function startWind(c: AudioContext): void {
-  const gain = c.createGain();
-  gain.gain.value = 0.0001;
-  gain.connect(getSfxBus(c));
-  // Rolled off hard: a tornado heard across open water is all low
-  // rumble and no hiss, and the hiss is what would fight the voice.
-  const lp = c.createBiquadFilter();
-  lp.type = "lowpass";
-  lp.frequency.value = 1400;
-  lp.connect(gain);
-
-  if (!windBuffer && windBytes) {
-    try {
-      // decodeAudioData detaches its input, so hand over a copy and
-      // keep the bytes for a future context.
-      void c.decodeAudioData(windBytes.slice(0)).then((b) => {
-        windBuffer = b;
-      });
-    } catch {
-      /* falls through to the synth bed below */
-    }
-  }
-
-  if (windBuffer) {
-    const src = c.createBufferSource();
-    src.buffer = windBuffer;
-    src.loop = true;
-    // Loop inside the clip, clear of the fades ElevenLabs puts on the
-    // ends — looping the whole thing dips the level every time round,
-    // which reads as pumping rather than as wind.
-    src.loopStart = Math.min(0.4, windBuffer.duration * 0.15);
-    src.loopEnd = Math.max(src.loopStart + 0.5, windBuffer.duration - 0.35);
-    src.connect(lp);
-    src.start();
-    windGain = gain;
-    windStop = () => {
-      try {
-        src.stop();
-      } catch {
-        /* already stopped */
-      }
-      gain.disconnect();
-    };
-    return;
-  }
-
-  // Synth bed. Looping noise through a resonant band that wanders,
-  // which is what wind is; it also loops perfectly, so there is no
-  // seam to hide.
-  const len = Math.floor(c.sampleRate * 4);
+// Brown-ish noise: smoother and lower than white, which is what makes
+// it a howl rather than a hiss. Crossfaded end to end so the loop
+// point vanishes.
+function makeNoiseLoop(c: AudioContext, seconds: number, roughness: number): AudioBufferSourceNode {
+  const len = Math.floor(c.sampleRate * seconds);
   const buf = c.createBuffer(1, len, c.sampleRate);
   const d = buf.getChannelData(0);
   let last = 0;
   for (let i = 0; i < len; i++) {
-    // Brown-ish noise: smoother and lower than white, which is what
-    // makes it a howl rather than a hiss.
-    last = (last + (Math.random() * 2 - 1) * 0.28) * 0.94;
+    last = (last + (Math.random() * 2 - 1) * roughness) * 0.94;
     d[i] = last;
   }
-  // Crossfade the tail into the head so the loop point vanishes.
   const fade = Math.floor(c.sampleRate * 0.25);
   for (let i = 0; i < fade; i++) {
     const k = i / fade;
@@ -1024,28 +1045,117 @@ function startWind(c: AudioContext): void {
   const src = c.createBufferSource();
   src.buffer = buf;
   src.loop = true;
-  const bp = c.createBiquadFilter();
-  bp.type = "bandpass";
-  bp.frequency.value = 340;
-  bp.Q.value = 1.6;
-  const lfo = c.createOscillator();
-  lfo.frequency.value = 0.13;
-  const lfoGain = c.createGain();
-  lfoGain.gain.value = 190;
-  lfo.connect(lfoGain).connect(bp.frequency);
-  src.connect(bp).connect(lp);
-  src.start();
-  lfo.start();
-  windGain = gain;
-  windStop = () => {
-    try {
-      src.stop();
-      lfo.stop();
-    } catch {
-      /* already stopped */
-    }
-    gain.disconnect();
-  };
+  return src;
+}
+
+const windBed = makeAmbienceBed({
+  url: "/audio/sfx/tornado-ambience-1.mp3",
+  max: 0.3,
+  tone: 1400,
+  synth: (c) => {
+    const src = makeNoiseLoop(c, 4, 0.28);
+    const bp = c.createBiquadFilter();
+    bp.type = "bandpass";
+    bp.frequency.value = 340;
+    bp.Q.value = 1.6;
+    const lfo = c.createOscillator();
+    lfo.frequency.value = 0.13;
+    const lfoGain = c.createGain();
+    lfoGain.gain.value = 190;
+    lfo.connect(lfoGain).connect(bp.frequency);
+    src.connect(bp);
+    src.start();
+    lfo.start();
+    return {
+      source: src,
+      out: bp,
+      stop: () => {
+        try {
+          src.stop();
+          lfo.stop();
+        } catch {
+          /* already stopped */
+        }
+      },
+    };
+  },
+});
+
+// 0 = nowhere near it, 1 = inside it.
+export function setTornadoAmbience(level: number): void {
+  windBed.set(level);
+}
+
+const deepBed = makeAmbienceBed({
+  url: "/audio/sfx/underwater-ambience-1.mp3",
+  max: 0.26,
+  tone: 700,
+  synth: (c) => {
+    const src = makeNoiseLoop(c, 5, 0.16);
+    const lp = c.createBiquadFilter();
+    lp.type = "lowpass";
+    lp.frequency.value = 260;
+    src.connect(lp);
+    src.start();
+    return {
+      source: src,
+      out: lp,
+      stop: () => {
+        try {
+          src.stop();
+        } catch {
+          /* already stopped */
+        }
+      },
+    };
+  },
+});
+
+// The hum of being under the sea. On or off rather than proximity —
+// down there it is everywhere.
+export function setUnderwaterAmbience(level: number): void {
+  deepBed.set(level);
+}
+
+const whirlpoolClips = makeClipPool([
+  "/audio/sfx/whirlpool-suck-1.mp3",
+  "/audio/sfx/whirlpool-suck-2.mp3",
+]);
+
+// The whirlpool taking hold and pulling the boat under.
+export function playWhirlpool(volume = 1) {
+  if (volume < AUDIBLE) return;
+  const c = getCtx();
+  if (!c) return;
+  if (whirlpoolClips.play(0.9 * volume, 0.05)) return;
+  const dest = busAt(c, volume);
+  const t0 = c.currentTime;
+  {
+    const n = startNoise(c, t0, t0 + 3);
+    const lp = c.createBiquadFilter();
+    lp.type = "lowpass";
+    lp.frequency.setValueAtTime(2200, t0);
+    lp.frequency.exponentialRampToValueAtTime(280, t0 + 2.6);
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.0001, t0);
+    g.gain.exponentialRampToValueAtTime(0.4, t0 + 1.2);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 2.95);
+    n.connect(lp).connect(g).connect(dest);
+  }
+  {
+    // A tone sliding down, which is the falling half of it.
+    const osc = c.createOscillator();
+    osc.type = "triangle";
+    osc.frequency.setValueAtTime(300, t0 + 0.3);
+    osc.frequency.exponentialRampToValueAtTime(60, t0 + 2.8);
+    const g = c.createGain();
+    g.gain.setValueAtTime(0.0001, t0 + 0.3);
+    g.gain.exponentialRampToValueAtTime(0.22, t0 + 0.9);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + 2.9);
+    osc.connect(g).connect(dest);
+    osc.start(t0 + 0.3);
+    osc.stop(t0 + 2.95);
+  }
 }
 
 const saturnTouchdownClips = makeClipPool([

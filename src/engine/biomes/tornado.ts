@@ -67,6 +67,12 @@ export function spoutDepression(d: number): number {
   return bowl + lip;
 }
 
+// How far the foam floats above whatever water is under it. The
+// swells reach 0.22 (see WAVE_CREST in ocean.ts), and foam laid any
+// closer than that gets pierced by every passing crest, which tears
+// it into hard dark patches instead of a sheet.
+export const FOAM_CLEAR = 0.28;
+
 export function buildTornado(opts: { height?: number }): Tornado {
   const height = opts.height ?? 46;
   const group = new THREE.Group();
@@ -148,12 +154,16 @@ export function buildTornado(opts: { height?: number }): Tornado {
   const sprayGeo = new THREE.RingGeometry(0.9, 3.1, 32, 3);
   {
     // Laid into the dip, not across the top of it. RingGeometry is in
-    // the XY plane and the mesh is tipped flat afterwards, so the
-    // height it wants goes in Z.
+    // the XY plane and the mesh is tipped flat afterwards; a rotation
+    // of -90 degrees about X carries local +Z onto world +Y, so the
+    // height each vertex wants goes in Z with the sign it will have
+    // when it gets there. Written the other way round at first, which
+    // turned the froth inside out: a dome standing two units proud of
+    // the water it was supposed to be lying in.
     const pos = sprayGeo.attributes.position;
     for (let i = 0; i < pos.count; i++) {
       const r = Math.hypot(pos.getX(i), pos.getY(i));
-      pos.setZ(i, -(spoutDepression(r) + 0.14));
+      pos.setZ(i, spoutDepression(r) + FOAM_CLEAR);
     }
     sprayGeo.computeVertexNormals();
   }
@@ -176,7 +186,6 @@ export function buildTornado(opts: { height?: number }): Tornado {
   const ripples = Array.from({ length: RIPPLE_COUNT }, (_, i) => {
     const mesh = new THREE.Mesh(rippleGeo, rippleMat.clone());
     mesh.rotation.x = -Math.PI / 2;
-    mesh.position.y = 0.1;
     mesh.frustumCulled = false;
     group.add(mesh);
     return { mesh, phase: i / RIPPLE_COUNT };
@@ -247,7 +256,7 @@ export function buildTornado(opts: { height?: number }): Tornado {
         // A ring is thin enough to take a single height, so it can
         // just ride the dip's profile at the radius it has reached and
         // climb out of it as it goes.
-        r.mesh.position.y = spoutDepression(spread) + 0.1;
+        r.mesh.position.y = spoutDepression(spread) + FOAM_CLEAR;
         // Thins as it widens, so it stays a wave and not a hoop.
         (r.mesh.material as THREE.MeshBasicMaterial).opacity =
           (0.34 + fury * 0.3) * Math.min(1, k / 0.12) * Math.pow(1 - k, 1.5);
