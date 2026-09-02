@@ -11,10 +11,23 @@
 // back to the legacy flat layout (/audio/<id>.mp3) for backward compat.
 
 import type { AudioManifest, VoicesRegistry, VoiceRegistryEntry } from "./types";
-import { ALPHABET, LETTER_NAME_TEXT, LETTER_SOUND_TEXT, getHintIds, getWrongNudgeIds } from "./types";
+import {
+  ALPHABET,
+  LETTER_NAME_TEXT,
+  LETTER_SOUND_TEXT,
+  buildEntries,
+  getHintIds,
+  getWrongNudgeIds,
+} from "./types";
 import { music } from "./music";
 
 type Mode = "elevenlabs" | "speech" | "muted";
+
+// Background cache-warming pace. The delay lets the 3D scene and the
+// music bed finish claiming bandwidth first; the gap keeps ~160 small
+// requests from looking like a flood to anyone's network.
+const WARM_DELAY_MS = 8000;
+const WARM_GAP_MS = 60;
 
 class AudioPlayer {
   mode: Mode = "speech";
@@ -56,6 +69,19 @@ class AudioPlayer {
   private sequenceVersion = 0;
   private speechVoice: SpeechSynthesisVoice | null = null;
   private speechReady = false;
+  // True once init() has settled, either way. Until then we genuinely
+  // don't know which backend we're on, so speak() stays quiet rather
+  // than guessing — see the note there.
+  private initSettled = false;
+  // Recovery watcher state. A boot can land on the Web Speech voice for
+  // reasons that clear up on their own (see watchForRecovery), so we
+  // re-check instead of living with it for the rest of the session.
+  private retryWatching = false;
+  private retrying = false;
+  private lastRetryAt = 0;
+  // Which voice we've already walked through warmVoiceCache for.
+  private warmedSlug: string | null = null;
+  private static readonly RETRY_COOLDOWN_MS = 5000;
 
   // Optional preferred slug applied at init time. Pages that depend on a
   // particular voice can call setPreferredVoice before init.
@@ -140,11 +166,20 @@ class AudioPlayer {
     // Memoize so repeated init() calls (e.g. from React StrictMode
     // double-invoke or HMR re-mounts) reuse the original promise.
     if (this.initPromise) return this.initPromise;
-    this.initPromise = this._init();
+    this.initPromise = this._init().finally(() => {
+      this.initSettled = true;
+      this.watchForRecovery();
+    });
     return this.initPromise;
   }
 
   private async _init(): Promise<void> {
+    // Prime the Web Speech voice no matter which backend we end up on.
+    // play() falls back to it per-clip now, so it has to be ready even
+    // when we're happily serving ElevenLabs MP3s.
+    if (typeof window !== "undefined" && "speechSynthesis" in window) {
+      this.primeSpeechVoice();
+    }
     // Try the registry first.
     try {
       const regRes = await fetch("/audio/voices.json", { cache: "no-store" });
@@ -175,8 +210,7 @@ class AudioPlayer {
         const manifest = (await res.json()) as AudioManifest;
         const probe = manifest.letters?.A?.name;
         if (probe) {
-          const probeRes = await fetch(`/audio/${probe}.mp3`, { method: "HEAD" });
-          if (probeRes.ok) {
+          if (await this.clipShipped(`/audio/${probe}.mp3`)) {
             this.manifest = manifest;
             this.mode = "elevenlabs";
             this.activeVoice = null; // legacy flat
@@ -191,11 +225,65 @@ class AudioPlayer {
 
     if (typeof window !== "undefined" && "speechSynthesis" in window) {
       this.mode = "speech";
-      this.primeSpeechVoice();
     } else {
       this.mode = "muted";
     }
     this.emit();
+  }
+
+  // Did this voice's MP3s actually ship alongside its manifest? That is
+  // the only question this probe exists to answer — the manifest is a
+  // build-time record, so it already knows which clips were generated.
+  //
+  // So it only says NO to a definite 404. A request that never reaches
+  // the server tells us nothing about the voice, and answering NO to
+  // that used to drop the whole session onto the robot Web Speech
+  // voice — which then read every menu label aloud, because speak() is
+  // a no-op in ElevenLabs mode and live in speech mode. HEAD is also
+  // the one request in this file a service worker can never serve from
+  // cache (workbox routes GETs only), so offline it is guaranteed to
+  // fail: a PWA cold-launched before the iPad finished re-associating
+  // with wifi hit this every time.
+  private async clipShipped(url: string): Promise<boolean> {
+    // Bound the wait. On flaky wifi a hanging probe holds the whole
+    // boot open, and speak() stays silent until init settles.
+    const ctl = typeof AbortController !== "undefined" ? new AbortController() : null;
+    const timer: ReturnType<typeof setTimeout> | null = ctl
+      ? setTimeout(() => ctl.abort(), 2500)
+      : null;
+    try {
+      const res = await fetch(url, { method: "HEAD", signal: ctl?.signal });
+      return res.ok;
+    } catch {
+      return true;
+    } finally {
+      if (timer !== null) clearTimeout(timer);
+    }
+  }
+
+  // Landing on the Web Speech voice is usually not a broken install —
+  // it's a launch that happened a second before the network was ready.
+  // Nothing used to re-check, so one unlucky launch meant the robot
+  // voice until the app was killed and reopened. Re-run init when the
+  // app comes back to the front or the browser reports it's online.
+  private watchForRecovery(): void {
+    if (this.retryWatching || typeof window === "undefined") return;
+    this.retryWatching = true;
+    const retry = () => {
+      if (this.mode === "elevenlabs" || this.retrying) return;
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+      const now = Date.now();
+      if (now - this.lastRetryAt < AudioPlayer.RETRY_COOLDOWN_MS) return;
+      this.lastRetryAt = now;
+      this.retrying = true;
+      void this._init().finally(() => {
+        this.retrying = false;
+      });
+    };
+    window.addEventListener("online", retry);
+    if (typeof document !== "undefined") {
+      document.addEventListener("visibilitychange", retry);
+    }
   }
 
   // Switch to a different voice from the registry. Returns true on success.
@@ -214,8 +302,7 @@ class AudioPlayer {
       const manifest = (await manifestRes.json()) as AudioManifest;
       const probe = manifest.letters?.A?.name;
       if (!probe) return false;
-      const probeRes = await fetch(`/audio/${slug}/${probe}.mp3`, { method: "HEAD" });
-      if (!probeRes.ok) return false;
+      if (!(await this.clipShipped(`/audio/${slug}/${probe}.mp3`))) return false;
       this.manifest = manifest;
       this.activeVoice = this.voices.find((v) => v.slug === slug) ?? {
         slug,
@@ -225,10 +312,84 @@ class AudioPlayer {
         generatedAt: manifest.generatedAt,
       };
       this.mode = "elevenlabs";
+      this.warmVoiceCache(slug, manifest);
       return true;
     } catch {
       return false;
     }
+  }
+
+  // Every clip id the game can ask for. buildEntries() is the source of
+  // truth rather than the manifest, because the two drift: the
+  // avatar-specific find-alphabet lines (…-drive, …-fly) have MP3s on
+  // disk and are played by FindAlphabet.tsx, but were never added to
+  // the manifest's prompts map. Warming from the manifest alone left
+  // exactly those two uncached, so a kid playing as the car or the
+  // rocket got the synth voice for their intro line offline. Ids a
+  // given voice never generated just 404 during the walk and are
+  // skipped.
+  private allClipIds(m: AudioManifest): string[] {
+    const ids = new Set<string>();
+    for (const e of buildEntries()) if (e.id) ids.add(e.id);
+    for (const l of Object.values(m.letters ?? {})) {
+      if (l?.name) ids.add(l.name);
+      if (l?.sound) ids.add(l.sound);
+    }
+    for (const id of Object.values(m.prompts ?? {})) if (id) ids.add(id);
+    for (const id of Object.values(m.menu ?? {})) if (id) ids.add(id);
+    for (const id of [...(m.celebrate ?? []), ...(m.hints ?? []), ...(m.wrongNudge ?? [])]) {
+      if (id) ids.add(id);
+    }
+    return [...ids];
+  }
+
+  // Pull the active voice into the service worker's cache in the
+  // background, so a session that starts without a network still gets
+  // the real voice rather than the synth fallback.
+  //
+  // These have to be explicit GETs. The <audio> element asks for media
+  // with a Range header, the server answers 206, and workbox won't
+  // store a partial response — which is why the runtime cache sat empty
+  // however much of the alphabet the kid played. A plain fetch() gets a
+  // cacheable 200; the route's rangeRequests option hands that stored
+  // copy back to the element later. See the runtimeCaching block in
+  // vite.config.ts, which had to start matching by URL for this to land
+  // in the same cache.
+  private warmVoiceCache(slug: string, manifest: AudioManifest): void {
+    if (this.warmedSlug === slug) return;
+    this.warmedSlug = slug;
+    if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) return;
+    if (typeof caches === "undefined") return;
+    const ids = this.allClipIds(manifest);
+    void (async () => {
+      try {
+        await navigator.serviceWorker.ready;
+        // No controller means nothing is intercepting these fetches, so
+        // they'd spend bandwidth and cache nothing. That's `vite dev`
+        // (the worker is off there) and the very first load before the
+        // worker takes over — the next launch picks it up.
+        if (!navigator.serviceWorker.controller) {
+          this.warmedSlug = null;
+          return;
+        }
+        await new Promise((r) => setTimeout(r, WARM_DELAY_MS));
+        const cache = await caches.open("letra-audio");
+        for (const id of ids) {
+          const url = `/audio/${slug}/${id}.mp3`;
+          if (await cache.match(url)) continue;
+          const res = await fetch(url);
+          // A 404 is a gap in this voice's library, not a network
+          // problem — skip it and keep going.
+          if (!res.ok && res.status !== 404) throw new Error(String(res.status));
+          await new Promise((r) => setTimeout(r, WARM_GAP_MS));
+        }
+      } catch {
+        // Offline, or the network went away mid-walk. Stop rather than
+        // grinding through the rest; clearing the guard lets the next
+        // launch resume where the cache left off.
+        this.warmedSlug = null;
+      }
+    })();
   }
 
   // Compute the URL for a clip id, accounting for whether we're in
@@ -283,7 +444,9 @@ class AudioPlayer {
     }
     // Bumping the sequence version cancels any in-flight playSequence().
     this.sequenceVersion++;
-    if (this.mode === "speech" && typeof window !== "undefined") {
+    // Cancel a spoken line whatever mode we're in — play()'s per-clip
+    // fallback can be talking while the player is on ElevenLabs.
+    if (typeof window !== "undefined" && "speechSynthesis" in window) {
       window.speechSynthesis.cancel();
     }
   }
@@ -318,6 +481,8 @@ class AudioPlayer {
       // settles — ended, error, OR a stop() that resolves it early —
       // so the music always comes back up.
       music.duck();
+      // Set by the element's error event: this clip couldn't be loaded.
+      let failed = false;
       return new Promise<void>((resolve) => {
         const a = this.getAudioEl();
         // Swap the src on the cached element rather than creating a
@@ -331,12 +496,20 @@ class AudioPlayer {
         const finish = () => {
           if (this.currentResolver === resolve) this.currentResolver = null;
           a.removeEventListener("ended", finish);
-          a.removeEventListener("error", finish);
+          a.removeEventListener("error", onError);
           resolve();
+        };
+        // A clip that won't load — offline before it was ever cached, or
+        // a gap in this voice's library — used to just go quiet. Say
+        // that one line with the synth voice instead. Per-clip, so a
+        // missing MP3 costs a line rather than flipping the session.
+        const onError = () => {
+          failed = true;
+          finish();
         };
         this.currentResolver = resolve;
         a.addEventListener("ended", finish);
-        a.addEventListener("error", finish);
+        a.addEventListener("error", onError);
         a.play()
           .then(() => {
             // First successful play() inside any user gesture path
@@ -345,7 +518,12 @@ class AudioPlayer {
             this.unlocked = true;
           })
           .catch(finish);
-      }).finally(() => music.unduck());
+      })
+        .then(() => {
+          if (!failed || this.userMuted || this.mode === "muted") return;
+          return this.speakNow(textForId(id));
+        })
+        .finally(() => music.unduck());
     }
     // Speech fallback: derive the natural-language text from the id.
     const text = textForId(id);
@@ -360,9 +538,22 @@ class AudioPlayer {
       // resolve immediately. Use play() for known clip ids instead.
       return Promise.resolve();
     }
-    if (typeof window === "undefined" || !("speechSynthesis" in window)) return Promise.resolve();
+    // Deciding which backend we're on takes a few round trips, and
+    // `mode` reads "speech" until init settles. Anything that spoke
+    // inside that window — a kid touching a menu card the instant it
+    // paints — got the robot voice even on a perfectly healthy boot.
+    // Stay quiet for the fraction of a second instead.
+    if (this.initPromise && !this.initSettled) return Promise.resolve();
     // Duck the music under the spoken line, same as the ElevenLabs path.
     music.duck();
+    return this.speakNow(text).finally(() => music.unduck());
+  }
+
+  // The bare Web Speech call: no mode check, no ducking — callers own
+  // both. play()'s per-clip fallback has to synthesise a line while the
+  // player is still in ElevenLabs mode, which speak() refuses by design.
+  private speakNow(text: string): Promise<void> {
+    if (typeof window === "undefined" || !("speechSynthesis" in window)) return Promise.resolve();
     return new Promise<void>((resolve) => {
       const utter = new SpeechSynthesisUtterance(text);
       if (this.speechVoice) utter.voice = this.speechVoice;
@@ -372,7 +563,7 @@ class AudioPlayer {
       utter.onend = () => resolve();
       utter.onerror = () => resolve();
       window.speechSynthesis.speak(utter);
-    }).finally(() => music.unduck());
+    });
   }
 
   // Queue a clip to play after the currently-queued audio finishes.
@@ -508,6 +699,20 @@ function textForId(id: string): string {
 }
 
 export const audio = new AudioPlayer();
+
+// Read-only console hook: `__letraAudio()` reports which voice backend
+// the session actually landed on. Not dev-gated on purpose — "why does
+// it sound like a screen reader?" is a question you can only answer on
+// the device it's happening on, and that device is usually a kid's
+// iPad pointed at production.
+if (typeof window !== "undefined") {
+  (window as unknown as { __letraAudio?: () => unknown }).__letraAudio = () => ({
+    mode: audio.mode,
+    voice: audio.activeVoice?.slug ?? null,
+    voices: audio.voices.map((v) => v.slug),
+    clips: audio.manifest ? Object.keys(audio.manifest.letters ?? {}).length : 0,
+  });
+}
 
 // Sanity export of the alphabet so callers don't need to import twice.
 export { ALPHABET };

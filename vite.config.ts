@@ -385,11 +385,12 @@ export default defineConfig({
       includeAssets: [
         "letra-icon.png",
         "fonts/*.json",
-        // The audio files aren't precached because a full alphabet can run
-        // 200+ MB across multiple voices — far too big for the install
-        // budget. Instead we runtime-cache them: each clip is fetched
-        // once and pinned, so a kid who plays through the alphabet ends
-        // up with everything cached for offline use.
+        // Voice clips aren't precached — that would hold up the service
+        // worker's install on a ~9 MB download before the game is even
+        // usable. They're runtime-cached instead, and the player warms
+        // the active voice in the background once the game has booted
+        // (see warmVoiceCache in src/audio/Player.ts), so the second
+        // launch has the real voice whether or not there's a network.
       ],
       manifest: {
         name: "Letra — Learn Letters in 3D",
@@ -438,12 +439,26 @@ export default defineConfig({
         maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
         runtimeCaching: [
           {
-            // Audio MP3s — cache on first hit. Voice MP3s rarely change
-            // once authored, so CacheFirst is fine.
-            urlPattern: ({ request }) => request.destination === "audio",
+            // Voice clips. Matched by URL, NOT by request.destination —
+            // that's the whole point. An <audio> element asks for media
+            // with a Range header and the server answers 206, which
+            // cacheableResponse rightly refuses to store, so the old
+            // destination-based route created this cache and then left
+            // it empty forever no matter how much of the alphabet got
+            // played. (Measured: 0 entries after a full round.) The
+            // player now warms each voice with a plain fetch() — a
+            // cacheable 200 — which only lands here if the route matches
+            // by URL rather than destination, and rangeRequests slices
+            // that stored copy back up for the element.
+            //
+            // The lookahead keeps music/ and sfx/ on their own routes
+            // below; those are fetched via fetch() + decodeAudioData
+            // already, so they were never affected.
+            urlPattern: /\/audio\/(?!music\/|sfx\/)[^/]+\/[^/?]+\.mp3$/,
             handler: "CacheFirst",
             options: {
               cacheName: "letra-audio",
+              rangeRequests: true,
               expiration: { maxEntries: 400, maxAgeSeconds: 60 * 60 * 24 * 30 },
               cacheableResponse: { statuses: [0, 200] },
             },
