@@ -1,5 +1,6 @@
 import * as THREE from "three";
 import type { CreatureGeometry, WordAssetHandles } from "./types";
+import { playCreatureVoice } from "../../audio/sfx";
 
 // Shared low-poly quadruped factory used by every word asset that's
 // some kind of animal (cat, dog today; a fish or pig later might
@@ -242,7 +243,7 @@ export function buildCreature(g: CreatureGeometry): WordAssetHandles {
     entryDurationS: ENTRY_TOTAL_S,
     triggerVoice() {
       lastVoiceFiredAt = entryT; // arms playSfx on next tick
-      playVoice(g.voice);
+      if (g.voice !== "none") playCreatureVoice(g.voice);
     },
     tick(dt) {
       entryT += dt;
@@ -314,7 +315,7 @@ export function buildCreature(g: CreatureGeometry): WordAssetHandles {
         // Fire the voice line exactly once, the moment we cross into idle.
         if (lastVoiceFiredAt < 0) {
           lastVoiceFiredAt = entryT;
-          playVoice(g.voice);
+          if (g.voice !== "none") playCreatureVoice(g.voice);
         }
       }
     },
@@ -332,57 +333,3 @@ export function buildCreature(g: CreatureGeometry): WordAssetHandles {
   return handles;
 }
 
-// ── Voice / SFX ────────────────────────────────────────────────────
-// Tiny synthetic SFX so we don't depend on new ElevenLabs clips just
-// for a meow / bark. WebAudio only — uses the existing audio player's
-// context indirectly (via a fresh OscillatorNode sequence).
-function playVoice(kind: "meow" | "bark" | "none"): void {
-  if (kind === "none") return;
-  if (typeof window === "undefined") return;
-  let ctx: AudioContext | null = null;
-  try {
-    const Ctor: typeof AudioContext | undefined =
-      window.AudioContext ?? (window as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-    if (!Ctor) return;
-    ctx = new Ctor();
-  } catch {
-    return;
-  }
-  if (!ctx) return;
-  const now = ctx.currentTime;
-  if (kind === "meow") {
-    // Two-note slide: low-up-down, soft envelope.
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.type = "triangle";
-    osc.frequency.setValueAtTime(420, now);
-    osc.frequency.linearRampToValueAtTime(640, now + 0.18);
-    osc.frequency.linearRampToValueAtTime(380, now + 0.55);
-    gain.gain.setValueAtTime(0.0001, now);
-    gain.gain.linearRampToValueAtTime(0.32, now + 0.05);
-    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.62);
-    osc.connect(gain).connect(ctx.destination);
-    osc.start(now);
-    osc.stop(now + 0.66);
-  } else if (kind === "bark") {
-    // Short woof-woof burst: two ~80ms notes.
-    for (let i = 0; i < 2; i++) {
-      const t = now + i * 0.16;
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = "sawtooth";
-      osc.frequency.setValueAtTime(220, t);
-      osc.frequency.exponentialRampToValueAtTime(110, t + 0.08);
-      gain.gain.setValueAtTime(0.0001, t);
-      gain.gain.linearRampToValueAtTime(0.28, t + 0.015);
-      gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.1);
-      osc.connect(gain).connect(ctx.destination);
-      osc.start(t);
-      osc.stop(t + 0.12);
-    }
-  }
-  // Let the context finish before closing.
-  setTimeout(() => {
-    void ctx?.close();
-  }, 1200);
-}

@@ -34,7 +34,14 @@ export function getMusicCtx(): AudioContext | null {
     // src/audio/iosKeepalive.ts for the why and the references.
     installIOSKeepalive();
   }
-  if (ctx.state === "suspended") void ctx.resume().catch(() => undefined);
+  // Nudge it awake on the way past. "interrupted" is the iOS-only
+  // state and the one that matters here: every procedural sound effect
+  // reaches the graph through this function, so a kid tapping anything
+  // that makes a noise is also an attempt to get the context back.
+  const state = ctx.state as string;
+  if (state === "suspended" || state === "interrupted") {
+    void ctx.resume().catch(() => undefined);
+  }
   return ctx;
 }
 
@@ -72,6 +79,14 @@ function installResumeHandler(c: AudioContext) {
       }
     }
   });
+}
+
+// The context's current state, or null if nothing has needed one yet.
+// Deliberately does NOT create one — this is for diagnostics, and a
+// diagnostic that starts the audio graph is a diagnostic that changes
+// what it is measuring.
+export function audioContextState(): string | null {
+  return ctx ? (ctx.state as string) : null;
 }
 
 // Subscribe to AudioContext state changes. Returns an unsubscribe.

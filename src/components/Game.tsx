@@ -7,7 +7,7 @@ import { audio } from "../audio/Player";
 import { music } from "../audio/music";
 import { setSfxGain, primeSfxClips } from "../audio/sfx";
 import { onAudioContextStateChange } from "../audio/audioCtx";
-import { MENU_TRACK, pickGameTrack } from "../audio/songs";
+import { MENU_TRACK, CELEBRATION_TRACK, GAME_TRACKS, pickGameTrack } from "../audio/songs";
 import { SpellWordGame } from "../games/SpellWord";
 import { FindAlphabetGame } from "../games/FindAlphabet";
 import { SoundMatchGame } from "../games/SoundMatch";
@@ -174,6 +174,12 @@ export function Game() {
       music.stop();
       return;
     }
+    // Once, in the background: pull the whole soundtrack into the
+    // service-worker cache. Each activity rolls a random track, so
+    // whichever ones the kid hasn't happened to hear yet are the ones
+    // that come up silent on a bad connection. Gated on music being
+    // switched on so a parent who turned it off never pays the 4 MB.
+    music.warm([MENU_TRACK, CELEBRATION_TRACK, ...GAME_TRACKS]);
     if (screen === "menu") {
       void music.play(MENU_TRACK, 0.18);
     } else if (

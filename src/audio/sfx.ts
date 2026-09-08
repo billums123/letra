@@ -1691,3 +1691,56 @@ export function playSplash(volume = 1) {
     osc.stop(at + 0.12);
   }
 }
+
+// ─── Word-payoff creature voice ─────────────────────────────────────────
+// The meow and the woof the cat and dog let out when they finish walking
+// into a spelled word.
+//
+// These used to live in wordAssets/creature.ts, where each one built its
+// own private AudioContext and closed it a second later. On iOS that is
+// not a local decision: a second context takes over the page's audio
+// session, and tearing it down leaves the shared one interrupted. The
+// symptom was the whole WebAudio layer — music AND every procedural cue
+// — going silent for the rest of the session after a kid spelled CAT or
+// DOG, while the voice clips carried on because those are <audio>
+// elements and never touch the context at all.
+//
+// Same synthesis, on the shared graph, through the SFX bus — so the
+// parent's SFX volume reaches it now too, which it never did before.
+export function playCreatureVoice(kind: "meow" | "bark"): void {
+  const c = getCtx();
+  if (!c) return;
+  const dest = getSfxBus(c);
+  const now = c.currentTime;
+  if (kind === "meow") {
+    // Two-note slide: low-up-down, soft envelope.
+    const osc = c.createOscillator();
+    const gain = c.createGain();
+    osc.type = "triangle";
+    osc.frequency.setValueAtTime(420, now);
+    osc.frequency.linearRampToValueAtTime(640, now + 0.18);
+    osc.frequency.linearRampToValueAtTime(380, now + 0.55);
+    gain.gain.setValueAtTime(0.0001, now);
+    gain.gain.linearRampToValueAtTime(0.32, now + 0.05);
+    gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.62);
+    osc.connect(gain).connect(dest);
+    osc.start(now);
+    osc.stop(now + 0.66);
+    return;
+  }
+  // Short woof-woof burst: two ~80ms notes.
+  for (let i = 0; i < 2; i++) {
+    const t = now + i * 0.16;
+    const osc = c.createOscillator();
+    const gain = c.createGain();
+    osc.type = "sawtooth";
+    osc.frequency.setValueAtTime(220, t);
+    osc.frequency.exponentialRampToValueAtTime(110, t + 0.08);
+    gain.gain.setValueAtTime(0.0001, t);
+    gain.gain.linearRampToValueAtTime(0.28, t + 0.015);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.1);
+    osc.connect(gain).connect(dest);
+    osc.start(t);
+    osc.stop(t + 0.12);
+  }
+}

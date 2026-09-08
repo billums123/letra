@@ -24,6 +24,9 @@ type ActiveTrack = {
   track: Track;
   source: AudioBufferSourceNode;
   masterGain: GainNode;
+  // Set when we stop this track ourselves, so the source's ended
+  // handler can tell an ordinary swap from iOS killing the node.
+  stopping?: boolean;
 };
 
 // The "we are in space now" effects bus. Every track plays through it,
@@ -43,11 +46,24 @@ type SpaceBus = {
   feedback: GainNode;
 };
 
-class MusicPlayer {
+// Background cache-warming pace for the soundtrack. The delay leaves
+// the network to the scene, the track that's actually playing, and the
+// voice warm-up in Player.ts; the gap keeps eight 480 KB downloads
+// from crowding whatever the kid is doing.
+const WARM_DELAY_MS = 20000;
+const WARM_GAP_MS = 400;
+// Must match the runtimeCaching route for /audio/music/ in vite.config.ts.
+const MUSIC_CACHE = "letra-music";
+
+export class MusicPlayer {
   private active: ActiveTrack | null = null;
-  // Track most-recent play() request so a slow decode can't override
-  // a newer call when it finally resolves.
+  // URL of the decode currently in flight, if any — the watchdog uses
+  // it to keep out of an attempt that is already under way. Cleared
+  // when the load settles, whether or not it worked.
   private loadingUrl: string | null = null;
+  // Monotonic play token. A slow decode that resolves after a newer
+  // request has come in must not schedule its source over the top.
+  private playSeq = 0;
   // AudioBuffers are loop-trimmed once and re-used for the rest of the
   // session — decoding + scanning is expensive enough that we cache.
   private bufferCache = new Map<string, Promise<AudioBuffer | null>>();
@@ -83,6 +99,16 @@ class MusicPlayer {
   private watchdog: number | null = null;
   // Wired once on first play().
   private resumeWired = false;
+  // Retry pacing for the two ways the music goes quiet on its own: a
+  // download that failed, and a source the system killed. Both clear
+  // the moment a source is scheduled, so a healthy session never
+  // carries a backoff.
+  private retryAt = 0;
+  private retryDelayMs = 0;
+  private static readonly RETRY_MIN_MS = 2000;
+  private static readonly RETRY_MAX_MS = 30000;
+  // Set once the soundtrack has been asked to warm its cache.
+  private warmed = false;
   // Effects bus, built on first use and then reused for the life of
   // the page — a ConvolverNode's impulse response is not free to make.
   private bus: SpaceBus | null = null;
@@ -94,6 +120,14 @@ class MusicPlayer {
   private spaceWritten = -1;
 
   async play(track: Track, volume = 0.18): Promise<void> {
+    // An explicit request — a new screen, a new map — always gets a
+    // clean slate on the retry backoff.
+    this.retryAt = 0;
+    this.retryDelayMs = 0;
+    return this.start(track, volume);
+  }
+
+  private async start(track: Track, volume: number): Promise<void> {
     this.wireResumeHandlers();
     // A different track means a different place, and nowhere else is
     // in space. Without this, leaving the sun via the Home button —
@@ -108,10 +142,18 @@ class MusicPlayer {
     }
     const c = getMusicCtx();
     if (!c) return;
+    const seq = ++this.playSeq;
     this.loadingUrl = track.url;
-    const buffer = await this.loadBuffer(c, track.url);
+    let buffer: AudioBuffer | null;
+    try {
+      buffer = await this.loadBuffer(c, track.url);
+    } finally {
+      // Only the newest attempt owns the flag.
+      if (this.playSeq === seq) this.loadingUrl = null;
+    }
+    // A newer play() overtook us while the decode was running.
+    if (this.playSeq !== seq) return;
     if (!buffer) return;
-    if (this.loadingUrl !== track.url) return;
     // The decode may have settled while a resume was in-flight; clear
     // the interrupted flag once we're actually about to schedule a new
     // source so the watchdog doesn't immediately re-trigger.
@@ -143,8 +185,72 @@ class MusicPlayer {
     source.buffer = buffer;
     source.loop = true;
     source.connect(master);
+    const active: ActiveTrack = { track, source, masterGain: master };
+    // A looping source cannot reach its end. If it ends, something
+    // outside this class ended it: either we did — a track swap, a
+    // stop — or iOS tore the node down during an audio-session
+    // interruption without ever moving the context off "running".
+    // That second case is the one that leaves a kid on a silent map
+    // while the sound effects and the voice carry on, because both of
+    // those build a fresh node every time they make a sound.
+    source.onended = () => {
+      if (active.stopping || this.active !== active) return;
+      this.active = null;
+      try {
+        master.disconnect();
+      } catch {
+        /* already torn down */
+      }
+      this.retryNow();
+    };
+    this.active = active;
     source.start(startAt);
-    this.active = { track, source, masterGain: master };
+    // Playing again — forget any backoff we'd built up getting here.
+    this.retryAt = 0;
+    this.retryDelayMs = 0;
+  }
+
+  // Pull the whole soundtrack into the service-worker cache in the
+  // background. Music is fetched on demand, so a track that has never
+  // been played doesn't exist offline — and the game rolls a random
+  // one each time a map starts, so sooner or later the kid draws an
+  // uncached track on a bad connection and gets silence. Eight files,
+  // 4 MB the lot: one session on wifi covers every map from then on.
+  warm(tracks: Track[]): void {
+    if (this.warmed) return;
+    this.warmed = true;
+    if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) return;
+    if (typeof caches === "undefined") return;
+    void (async () => {
+      try {
+        await navigator.serviceWorker.ready;
+        // No controller means this page load isn't going through the
+        // service worker, so fetching here would cache nothing.
+        if (!navigator.serviceWorker.controller) {
+          this.warmed = false;
+          return;
+        }
+        await new Promise((r) => setTimeout(r, WARM_DELAY_MS));
+        const cache = await caches.open(MUSIC_CACHE);
+        for (const t of tracks) {
+          if (await cache.match(t.url)) continue;
+          const res = await fetch(t.url);
+          if (!res.ok) throw new Error(String(res.status));
+          await new Promise((r) => setTimeout(r, WARM_GAP_MS));
+        }
+      } catch {
+        // Half-warmed is fine: match() skips whatever already landed,
+        // so the next launch picks up where this one left off.
+        this.warmed = false;
+      }
+    })();
+  }
+
+  // What the console hook in Player.ts reports. The interesting case is
+  // `track` set with `playing` false: something asked for music and the
+  // player has not managed to get a source running.
+  get status(): { track: string | null; playing: boolean } {
+    return { track: this.intendedTrack?.id ?? null, playing: this.active !== null };
   }
 
   stop(): void {
@@ -153,11 +259,14 @@ class MusicPlayer {
       this.fadeOutAndStop(this.active, 0.06);
       this.active = null;
     }
+    // Invalidate any decode still in flight, and drop the intended
+    // track: an explicit stop means "we're done", so neither the resume
+    // handler nor the watchdog may bring it back.
+    this.playSeq++;
     this.loadingUrl = null;
-    // Drop the intended track too — explicit stop means "we're done";
-    // the iOS resume handler must not re-trigger a track the user
-    // navigated away from.
     this.intendedTrack = null;
+    this.retryAt = 0;
+    this.retryDelayMs = 0;
   }
 
   // Wire context resume handlers + start a watchdog the first time
@@ -169,18 +278,26 @@ class MusicPlayer {
   private wireResumeHandlers(): void {
     if (this.resumeWired) return;
     this.resumeWired = true;
-    onAudioContextStateChange(() => this.handleStateChange());
+    onAudioContextStateChange(() => this.tick());
     // Watchdog — covers the rare case where neither state change
     // events nor user gestures fire (for example, scroll-induced
     // suspension on some iOS versions). Every 1.5s we sanity-check
     // that the context is running and the active track is alive;
     // if we have an intended track and don't, restart.
     if (typeof window !== "undefined") {
-      this.watchdog = window.setInterval(() => this.handleStateChange(), 1500);
+      this.watchdog = window.setInterval(() => this.tick(), 1500);
+      // Coming back from a dropped connection is the one moment a
+      // failed download is worth retrying straight away rather than
+      // waiting out the backoff.
+      window.addEventListener("online", () => {
+        this.retryAt = 0;
+        this.retryDelayMs = 0;
+        this.tick();
+      });
     }
   }
 
-  private handleStateChange(): void {
+  private tick(): void {
     const c = getMusicCtx();
     if (!c) return;
     const state = c.state as string;
@@ -192,24 +309,38 @@ class MusicPlayer {
       void c.resume().catch(() => undefined);
       return;
     }
-    // Running. Only re-trigger if we KNOW we were interrupted —
-    // don't restart on every routine state-change tick from the
-    // watchdog timer.
-    if (!this.intendedTrack || !this.interrupted) return;
-    // If a play is already loading the right track (decode in
-    // flight), don't double-trigger; the in-flight play() will
-    // schedule the new source on its own.
-    if (this.loadingUrl === this.intendedTrack.url) {
-      this.interrupted = false;
-      return;
-    }
-    this.interrupted = false;
+    if (!this.intendedTrack) return;
+    // There are exactly two reasons to be here in silence: the context
+    // was interrupted and the source may not have survived it, or the
+    // track never loaded in the first place. Anything else is a
+    // routine tick on healthy music — leave it alone.
+    if (!this.interrupted && this.active) return;
+    this.retryNow();
+  }
+
+  // Get the intended track playing again. Paced, because one good
+  // reason for the silence is that the network is down, and an iPad on
+  // bad wifi must not re-request a 480 KB MP3 every 1.5 seconds for
+  // the rest of the afternoon. The first attempt after healthy
+  // playback is immediate; only repeats back off.
+  private retryNow(): void {
     const track = this.intendedTrack;
-    const volume = this.intendedVolume;
-    // Drop active so play() takes the swap path (it bails early if
-    // active.track.id matches the requested track).
-    this.active = null;
-    void this.play(track, volume);
+    if (!track) return;
+    // An attempt is already in flight; it will schedule the source and
+    // clear `interrupted` itself.
+    if (this.loadingUrl === track.url) return;
+    const now = Date.now();
+    if (now < this.retryAt) return;
+    this.retryDelayMs = Math.min(
+      Math.max(this.retryDelayMs * 2, MusicPlayer.RETRY_MIN_MS),
+      MusicPlayer.RETRY_MAX_MS,
+    );
+    this.retryAt = now + this.retryDelayMs;
+    // Leave `active` alone: start() takes the swap path while
+    // `interrupted` is set, so a source that turns out to be alive
+    // gets stopped properly instead of orphaned into a second track
+    // nothing can duck or mute.
+    void this.start(track, this.intendedVolume);
   }
 
   // Ramp the active track to its current target gain — the per-track
@@ -338,6 +469,9 @@ class MusicPlayer {
   }
 
   private fadeOutAndStop(active: ActiveTrack, fadeSec: number): void {
+    // We're ending this one on purpose; the ended handler must not
+    // read it as the source dying under us.
+    active.stopping = true;
     const c = getMusicCtx();
     if (!c) return;
     const now = c.currentTime;
@@ -352,21 +486,27 @@ class MusicPlayer {
   }
 
   private async loadBuffer(c: AudioContext, url: string): Promise<AudioBuffer | null> {
-    let promise = this.bufferCache.get(url);
-    if (!promise) {
-      promise = (async () => {
-        try {
-          const res = await fetch(url);
-          if (!res.ok) return null;
-          const arr = await res.arrayBuffer();
-          const decoded = await c.decodeAudioData(arr);
-          return trimToZeroCrossings(c, decoded);
-        } catch {
-          return null;
-        }
-      })();
-      this.bufferCache.set(url, promise);
-    }
+    const existing = this.bufferCache.get(url);
+    if (existing) return existing;
+    const promise = (async () => {
+      try {
+        const res = await fetch(url);
+        if (!res.ok) return null;
+        const arr = await res.arrayBuffer();
+        const decoded = await c.decodeAudioData(arr);
+        return trimToZeroCrossings(c, decoded);
+      } catch {
+        return null;
+      }
+    })();
+    this.bufferCache.set(url, promise);
+    // Cache the buffer, not the failure. One dropped fetch on a weak
+    // connection used to write that track off for the whole session —
+    // the kid got silence every time the map rolled it, however good
+    // the wifi got afterwards.
+    void promise.then((b) => {
+      if (!b && this.bufferCache.get(url) === promise) this.bufferCache.delete(url);
+    });
     return promise;
   }
 }

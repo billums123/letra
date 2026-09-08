@@ -20,6 +20,7 @@ import {
   getWrongNudgeIds,
 } from "./types";
 import { music } from "./music";
+import { audioContextState } from "./audioCtx";
 
 type Mode = "elevenlabs" | "speech" | "muted";
 
@@ -701,16 +702,21 @@ function textForId(id: string): string {
 export const audio = new AudioPlayer();
 
 // Read-only console hook: `__letraAudio()` reports which voice backend
-// the session actually landed on. Not dev-gated on purpose — "why does
-// it sound like a screen reader?" is a question you can only answer on
-// the device it's happening on, and that device is usually a kid's
-// iPad pointed at production.
+// the session actually landed on, plus the state of the WebAudio
+// context that music and every sound effect share — when those two go
+// quiet together and only the voice survives, the context is the thing
+// to look at. Not dev-gated on purpose — "why does it sound like a
+// screen reader?" and "why did the music stop?" are questions you can
+// only answer on the device they're happening on, and that device is
+// usually a kid's iPad pointed at production.
 if (typeof window !== "undefined") {
   (window as unknown as { __letraAudio?: () => unknown }).__letraAudio = () => ({
     mode: audio.mode,
     voice: audio.activeVoice?.slug ?? null,
     voices: audio.voices.map((v) => v.slug),
     clips: audio.manifest ? Object.keys(audio.manifest.letters ?? {}).length : 0,
+    ctx: audioContextState(),
+    music: music.status,
   });
 }
 
