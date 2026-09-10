@@ -17,12 +17,17 @@ import {
 type HUDProps = {
   title?: string;
   prompt?: string;
+  // Shown above the prompt when the world has just opened up — the
+  // volcano waking, the pools lighting. Deliberately louder than the
+  // prompt: it is the payoff for finishing, and the one line that
+  // tells a kid to go somewhere rather than look for something.
+  banner?: string;
   // Letters the kid is hunting for, in order. Already-found letters render
   // brighter; the next letter pulses to draw the eye.
   targets?: { letter: string; found: boolean }[];
 };
 
-export function HUD({ title, prompt, targets }: HUDProps) {
+export function HUD({ title, prompt, banner, targets }: HUDProps) {
   const goToMenu = useGameStore((s) => s.goToMenu);
   const compact = useIsCompact();
 
@@ -144,6 +149,25 @@ export function HUD({ title, prompt, targets }: HUDProps) {
             })}
           </div>
         )}
+        {banner && (
+          <div
+            style={{
+              padding: compact ? "10px 16px" : "14px 24px",
+              background: "#ffd23f",
+              color: "#3a2a14",
+              border: compact ? "4px solid white" : "6px solid white",
+              borderRadius: compact ? 18 : 24,
+              fontSize: compact ? 16 : 24,
+              fontWeight: 900,
+              maxWidth: compact ? "calc(100vw - 24px)" : "80%",
+              textAlign: "center",
+              boxShadow: "0 8px 0 rgba(0,0,0,0.18)",
+              animation: "letra-bob 1.1s ease-in-out infinite",
+            }}
+          >
+            {banner}
+          </div>
+        )}
         {prompt && (
           <div
             style={{
@@ -168,6 +192,10 @@ export function HUD({ title, prompt, targets }: HUDProps) {
         @keyframes letra-pulse {
           0%, 100% { transform: scale(1); }
           50% { transform: scale(1.18); }
+        }
+        @keyframes letra-bob {
+          0%, 100% { transform: translateY(0) rotate(-1deg); }
+          50% { transform: translateY(-7px) rotate(1deg); }
         }
       `}</style>
     </div>

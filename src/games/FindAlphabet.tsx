@@ -7,24 +7,54 @@ import { music } from "../audio/music";
 import { CELEBRATION_TRACK, CELEBRATION_BPM, pickGameTrack } from "../audio/songs";
 import { playChime, playWoo } from "../audio/sfx";
 import { Engine } from "../engine/Engine";
-import { buildLetterCharacter, distanceXZ, loadFont, makeSharedLetterAssets } from "../engine/letters";
+import { loadFont, makeSharedLetterAssets } from "../engine/letters";
+import {
+  orientToSurface,
+  pickSpot,
+  plantLetter,
+  type FieldLetter,
+  type KeepOut,
+  type Spot,
+} from "../engine/letterField";
+import { FLAT_SURFACE, type Surface } from "../engine/surface";
 import { makeBurst, makeFirework } from "../engine/particles";
-import { pickClearSpawn } from "../engine/world";
 import { ALPHABET } from "../audio/types";
 import { useGameStore, type AvatarKind } from "../state/store";
 import { isDev } from "../util/isDev";
+import { openCue, openWay, openWayClip, shutWay } from "./travelGate";
+import { legSlice } from "./alphabetLegs";
 
-// Find the alphabet from A to Z. Letters scattered in a wide ring; the kid
-// walks to each in order. The current target pulses on the HUD and the world.
+// Find the alphabet from A to Z — spread across the worlds.
 //
-// Once all 26 are collected the game shifts into a dance-party finale:
-// every letter teleports into a ring around the player, the celebration
-// music kicks in, and each letter dances on the beat. Bumping a letter
-// during the party launches a firework instead of speaking the name.
+// It used to be all twenty-six at once, in one ring, on one map. That is
+// a long way for a four-year-old to walk without anything happening, and
+// once the ocean grew a sun and two gas giants to stand on, it was also
+// twenty-six letters' worth of reason never to visit any of them.
+//
+// So the alphabet is dealt out a handful at a time. Clear the letters on
+// the world you are on and the way onward opens — the volcano wakes, or
+// the pools home light up — and wherever you land next is handed the next
+// run of letters. The travel is the pacing: six letters, then a ride into
+// space, then five more.
+//
+// Five legs, deliberately odd. The only way off a planet is home, so legs
+// strictly alternate sea, planet, sea, planet, sea — which means the last
+// one always falls in the ocean, and the dance-party finale always has a
+// whole sea to spread twenty-six letters across.
+//
+// Once all 26 are collected the game shifts into that finale: every letter
+// teleports into a ring around the player, the celebration music kicks in,
+// and each letter dances on the beat. Bumping a letter during the party
+// launches a firework instead of speaking the name.
 
 const COLLECT_DIST = 1.6;
 const RING_INNER = 6;
 const RING_OUTER = 30;
+// How far letters scatter on a sphere, measured along the surface from
+// wherever the kid touched down. The far side of a star is a very long
+// drive for a letter you cannot see.
+const PLANET_INNER = 7;
+const PLANET_OUTER = 24;
 const HINT_AFTER_SECONDS = 40;
 
 // Dance-party tuning. Letters arrange in a ring around the player at
@@ -33,19 +63,20 @@ const DANCE_RING_RADIUS = 5.8;
 const DANCE_STYLES = ["bounce", "sway", "spin", "pulse", "hop"] as const;
 type DanceStyle = (typeof DANCE_STYLES)[number];
 
+type Font = Awaited<ReturnType<typeof loadFont>>;
+
 type LetterEntry = {
   letter: string;
   index: number;
-  character: ReturnType<typeof buildLetterCharacter>;
-  // Filled in once the dance party starts.
+  field: FieldLetter;
+  // Filled in once the dance party starts. Coordinates are in the
+  // letter's own frame — world space on the sea, tangent-plane metres
+  // on a sphere — so one set of choreography drives both.
   dance?: {
     style: DanceStyle;
     phaseOffset: number; // 0..1 in beats, so different letters peak at different moments
     homeX: number;
     homeZ: number;
-    // Base Y at the dance position — sampled from the biome's terrain
-    // (e.g. island height in the sky biome). The per-frame dance tick
-    // reads this so letters dance ON the island instead of at y=0.
     homeY: number;
   };
 };
@@ -70,9 +101,9 @@ export function FindAlphabetGame() {
   const letterCase = useGameStore((s) => s.letterCase);
   const biomeId = useGameStore((s) => s.biomeId);
   // Decide each letter's display case once at mount so the HUD can
-  // render the right glyphs on the very first frame (before bootstrap
-  // has finished building characters). The bootstrap reads the same
-  // array so on-screen letters and HUD always agree.
+  // render the right glyphs on the very first frame (before the first
+  // leg has been dealt). The dealer reads the same array so on-screen
+  // letters and HUD always agree.
   const displayLetters = useMemo<string[]>(() => {
     return ALPHABET.map((L) => {
       if (letterCase === "lowercase") return L.toLowerCase();
@@ -85,9 +116,22 @@ export function FindAlphabetGame() {
   }, []);
   const [foundCount, setFoundCount] = useState(0);
   const [completed, setCompleted] = useState(false);
+  const [banner, setBanner] = useState<string | null>(null);
   const engineRef = useRef<Engine | null>(null);
+  const fontRef = useRef<Font | null>(null);
+  // Only the letters on the world the kid is standing on. Earlier legs
+  // have been collected; later ones have not been dealt.
   const lettersRef = useRef<LetterEntry[]>([]);
+  const surfaceRef = useRef<Surface>(FLAT_SURFACE);
+  // Which leg we are on, and how far through the alphabet the dealer
+  // has got. currentIndex is the global A-to-Z position of the target.
+  const legRef = useRef(0);
+  const dealtRef = useRef(0);
   const currentIndex = useRef(0);
+  // True once this world's letters are all collected and the way out
+  // is open — which is also when there is nothing left here to find,
+  // so the stall hint has to say something different.
+  const legDoneRef = useRef(false);
   const hintScheduledRef = useRef(false);
   const lastProgressRef = useRef(performance.now());
   // Letters the kid was already overlapping last frame — used to fire
@@ -95,9 +139,7 @@ export function FindAlphabetGame() {
   // every frame they sit on top of an already-bumped letter.
   const prevWrongOverlapRef = useRef<Set<string>>(new Set());
   // Per-letter cooldown so re-driving onto a recently-bumped wrong
-  // letter doesn't re-trigger the audio. Stored as a wall-clock
-  // timestamp keyed by glyph; a fresh nudge requires the cooldown
-  // window to have elapsed since the last nudge for that letter.
+  // letter doesn't re-trigger the audio.
   const wrongLetterCooldownRef = useRef<Map<string, number>>(new Map());
   // Suppress overlapping nudges — if one is mid-flight we don't want
   // a second one stomping on it.
@@ -107,7 +149,6 @@ export function FindAlphabetGame() {
   // change.
   const danceModeRef = useRef(false);
   const danceStartRef = useRef(0);
-  const fontRef = useRef<Awaited<ReturnType<typeof loadFont>> | null>(null);
   // Pending trophy award — held in a timer so it fires *after* the
   // dance-party finale has had time to land. If the kid navigates away
   // before the timer fires, we award the trophy synchronously on
@@ -117,83 +158,118 @@ export function FindAlphabetGame() {
     "alphabet-upper" | "alphabet-lower" | "alphabet-mixed" | null
   >(null);
 
-  // We can't pre-compute spawn positions without the engine's obstacle list,
-  // so they're chosen during bootstrap. The spiral is then used as a *seed*
-  // for retry attempts that respect the obstacle layout.
+  // ── Dealing a leg ─────────────────────────────────────────────────
+  // Hand this world its share of the alphabet and scatter it about.
+  const dealLeg = (engine: Engine, font: Font) => {
+    for (const e of lettersRef.current) e.field.remove();
+    lettersRef.current = [];
+
+    const { from, to } = legSlice(legRef.current, dealtRef.current, ALPHABET.length);
+    if (from >= to) return;
+    dealtRef.current = to;
+    legDoneRef.current = false;
+    lastProgressRef.current = performance.now();
+    hintScheduledRef.current = false;
+    prevWrongOverlapRef.current = new Set();
+
+    const surface = engine.surface;
+    surfaceRef.current = surface;
+    const rng = makeRng(from * 7919 + legRef.current);
+    // One shared bag of fixed-look letter materials/geometries reused
+    // across every letter on this leg.
+    const shared = makeSharedLetterAssets();
+    const taken: { x: number; z: number; radius: number }[] = [];
+    const planetTaken: KeepOut[] = [];
+    const keepOut = surface.kind === "planet" ? (surface.spec.noBuild ?? []) : [];
+    const around = engine.player.position().clone();
+    const inner = surface.kind === "flat" ? RING_INNER : PLANET_INNER;
+    const outer = surface.kind === "flat" ? RING_OUTER : PLANET_OUTER;
+
+    for (let i = from; i < to; i++) {
+      const L = ALPHABET[i];
+      // Spiral outward through the leg, so the first letter of a leg is
+      // near where the kid is standing and the last is a proper hunt.
+      const t = (i - from) / Math.max(1, to - from - 1);
+      const minRange = inner + t * (outer - inner) * 0.5;
+      const maxRange = Math.min(outer, minRange + (outer - inner) * 0.45 + 6);
+      const spot = pickSpot(engine, surface, {
+        taken,
+        planetTaken,
+        keepOut,
+        around,
+        minRange,
+        maxRange,
+        rng,
+      });
+      const field = plantLetter(engine, font, surface, spot, {
+        letter: L,
+        lowercase: displayLetters[i] !== L,
+        shared,
+      });
+      field.faceCamera(engine.camera.position);
+      lettersRef.current.push({ letter: L, index: i, field });
+    }
+  };
+
   const onEngineReady = (engine: Engine) => {
     engineRef.current = engine;
-    bootstrap(engine);
+    void bootstrap(engine);
   };
 
   const bootstrap = async (engine: Engine) => {
     const font = await loadFont();
     fontRef.current = font;
-    const taken: { x: number; z: number; radius: number }[] = [];
-    let spiralI = 0;
-    const rng = (() => {
-      // Fresh seed each time the game mounts so the alphabet lands in
-      // a different layout every session — pickClearSpawn still keeps
-      // every letter clear of obstacles and other letters, so nothing
-      // ends up morphed into a tree or another glyph.
-      let s = (Math.random() * 0xffffffff) | 0;
-      return () => {
-        s = (s + 0x9e3779b9) | 0;
-        let t = s;
-        t = Math.imul(t ^ (t >>> 15), t | 1);
-        t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-      };
-    })();
-    // One shared bag of fixed-look letter materials/geometries reused
-    // across all 26 letter characters in this round.
-    const sharedLetterAssets = makeSharedLetterAssets();
+    // Shut from the first frame: the sea is a world like any other and
+    // its letters have to be found before it lets anyone leave.
+    shutWay(engine);
+    dealLeg(engine, font);
 
-    const letters: LetterEntry[] = ALPHABET.map((L, i) => {
-      // displayLetters was decided at mount time so the HUD and the
-      // characters rendered into the world stay in lockstep. Audio and
-      // the collected sticker still key on the uppercase glyph.
-      const lowercase = displayLetters[i] !== L;
-      // Try a spiral position first; if obstructed, pickClearSpawn retries.
-      const t = i / ALPHABET.length;
-      const minR = Math.max(RING_INNER, RING_INNER + t * 4);
-      const maxR = Math.min(RING_OUTER, RING_INNER + t * (RING_OUTER - RING_INNER) + 6);
-      const spawn = pickClearSpawn(engine.obstacles, taken, { minRadius: minR, maxRadius: maxR }, 1.0, rng, engine.isWalkable);
-      const baseY = engine.terrainHeight?.(spawn.x, spawn.z) ?? 0;
-      const character = buildLetterCharacter(font, { letter: L, lowercase, baseY, shared: sharedLetterAssets });
-      character.group.position.set(spawn.x, baseY, spawn.z);
-      taken.push({ x: spawn.x, z: spawn.z, radius: 1.0 });
-      character.faceTowards(engine.camera.position.x, engine.camera.position.z);
-      engine.scene.add(character.group);
-      engine.addActor(character);
-      spiralI++;
-      return { letter: L, index: i, character };
-    });
-    lettersRef.current = letters;
-    void spiralI;
+    // Landing somewhere new is the start of the next leg.
+    engine.onSurfaceChange = () => {
+      if (danceModeRef.current) return;
+      shutWay(engine);
+      setBanner(null);
+      legRef.current += 1;
+      dealLeg(engine, font);
+    };
 
     engine.tickHook = (_dt, _t, playerPos) => {
+      const cam = engine.camera.position;
       for (const entry of lettersRef.current) {
-        entry.character.faceTowards(engine.camera.position.x, engine.camera.position.z);
+        entry.field.faceCamera(cam);
         // Proximity push drives the soft greeting wave + glow boost when
         // the kid wanders close. Skip during the dance-party finale so
         // every letter doesn't bob mid-choreography.
         if (!danceModeRef.current) {
-          const d = distanceXZ(playerPos, entry.character.positionXZ());
-          entry.character.setPlayerProximity(d);
+          entry.field.character.setPlayerProximity(entry.field.distanceTo(playerPos));
         }
       }
       if (danceModeRef.current) {
         runDanceTick(engine, playerPos);
         return;
       }
-      // Mid-volcano-launch the avatar sweeps over half the map at
-      // altitude; collection is XZ-based so without this guard a
-      // flyover would hoover up letters. No collecting while airborne.
+      // Mid-launch the avatar sweeps over half the map at altitude;
+      // collection is a ground measurement, so without this guard a
+      // flyover would hoover up letters.
       if (engine.inFlight) return;
-      const next = lettersRef.current[currentIndex.current];
+
+      // This world is finished and the way out is open. Nothing left to
+      // collect here, so the only useful nudge is where to go next.
+      if (legDoneRef.current) {
+        const idle = (performance.now() - lastProgressRef.current) / 1000;
+        if (idle > HINT_AFTER_SECONDS && !hintScheduledRef.current) {
+          hintScheduledRef.current = true;
+          void audio.play(openWayClip(surfaceRef.current), { interrupt: false }).then(() => {
+            lastProgressRef.current = performance.now();
+            hintScheduledRef.current = false;
+          });
+        }
+        return;
+      }
+
+      const next = lettersRef.current.find((e) => e.index === currentIndex.current);
       if (!next) return;
-      const d = distanceXZ(playerPos, next.character.positionXZ());
-      if (d < COLLECT_DIST && !next.character.isCollected) {
+      if (next.field.distanceTo(playerPos) < COLLECT_DIST && !next.field.character.isCollected) {
         collectLetter(engine, next, playerPos);
       }
 
@@ -205,35 +281,30 @@ export function FindAlphabetGame() {
       const targetLetter = next.letter;
       const currentOverlap = new Set<string>();
       for (const entry of lettersRef.current) {
-        // Skip letters the kid has already passed in alphabet order
-        // (index below current target). isCollected flips later, after
-        // the 1.6s celebrate animation, so without this check the
-        // just-collected letter triggers a wrong-letter nudge while
-        // the kid is still standing on it.
+        // Skip letters the kid has already passed in alphabet order.
+        // isCollected flips later, after the 1.6s celebrate animation,
+        // so without this check the just-collected letter triggers a
+        // wrong-letter nudge while the kid is still standing on it.
         if (entry.index < currentIndex.current) continue;
-        if (entry.character.isCollected) continue;
+        if (entry.field.character.isCollected) continue;
         if (entry.letter === targetLetter) continue;
-        const dist = distanceXZ(playerPos, entry.character.positionXZ());
-        if (dist < COLLECT_DIST) currentOverlap.add(entry.letter);
+        if (entry.field.distanceTo(playerPos) < COLLECT_DIST) currentOverlap.add(entry.letter);
       }
       if (!wrongNudgeBusyRef.current) {
         const now = performance.now();
         for (const L of currentOverlap) {
           if (prevWrongOverlapRef.current.has(L)) continue; // already bumped
           const lastNudgedAt = wrongLetterCooldownRef.current.get(L) ?? 0;
-          if (now - lastNudgedAt < 4000) continue;          // cooldown
-          // Fire the nudge: bumped letter's name, then the target's.
+          if (now - lastNudgedAt < 4000) continue; // cooldown
+          // Fire the nudge: bumped letter's name, then a random
+          // "whoops, not quite" line. No celebrate animation — the
+          // wrong letter shouldn't look like it earned a victory dance.
           wrongLetterCooldownRef.current.set(L, now);
           wrongNudgeBusyRef.current = true;
-          // No celebrate animation — the wrong letter shouldn't look
-          // like it earned a victory dance. Audio: bumped letter's
-          // name, then a random "whoops, not quite" nudge clip.
           audio.stop();
           audio
             .play(audio.letterName(L))
-            .then(() =>
-              audio.play(audio.randomWrongNudge(), { interrupt: false }),
-            )
+            .then(() => audio.play(audio.randomWrongNudge(), { interrupt: false }))
             .finally(() => {
               wrongNudgeBusyRef.current = false;
             });
@@ -245,28 +316,29 @@ export function FindAlphabetGame() {
       const since = (performance.now() - lastProgressRef.current) / 1000;
       if (since > HINT_AFTER_SECONDS && !hintScheduledRef.current) {
         hintScheduledRef.current = true;
-        audio.play(audio.randomHint()).then(() => {
-          audio.play(audio.letterName(next.letter), { interrupt: false });
+        void audio.play(audio.randomHint()).then(() => {
+          void audio.play(audio.letterName(next.letter), { interrupt: false });
           lastProgressRef.current = performance.now();
           hintScheduledRef.current = false;
         });
       }
     };
 
-    setTimeout(() => audio.play(alphabetPromptId(avatar)), 250);
+    setTimeout(() => void audio.play(alphabetPromptId(avatar)), 250);
   };
 
   const collectLetter = (engine: Engine, entry: LetterEntry, playerPos: THREE.Vector3) => {
-    entry.character.celebrate();
+    entry.field.character.celebrate();
     const burst = makeBurst(playerPos.clone());
+    // Confetti flies "up" in its own frame; on a star that has to mean
+    // out of the ground.
+    orientToSurface(burst.group, surfaceRef.current, playerPos);
     engine.scene.add(burst.group);
     engine.addActor({
       update(dt) {
-        const alive = burst.update(dt, 0);
-        if (!alive) {
-          engine.scene.remove(burst.group);
-          engine.removeActor(this);
-        }
+        if (burst.update(dt, 0)) return;
+        engine.scene.remove(burst.group);
+        engine.removeActor(this);
       },
     });
     playChime();
@@ -278,47 +350,73 @@ export function FindAlphabetGame() {
     setFoundCount((n) => n + 1);
     currentIndex.current += 1;
     lastProgressRef.current = performance.now();
+
     if (currentIndex.current >= ALPHABET.length) {
-      setCompleted(true);
-      playWoo();
-      // Hold the trophy id in a ref and award it AFTER the dance
-      // party has had time to play. If the kid leaves before the
-      // delay fires, the unmount cleanup forces the award so they
-      // never lose progress.
-      const trophyId =
-        letterCase === "lowercase"
-          ? "alphabet-lower"
-          : letterCase === "mixed"
-            ? "alphabet-mixed"
-            : "alphabet-upper";
-      pendingTrophyIdRef.current = trophyId;
-      // 700ms (dance kickoff) + ~8s of dance = trophy lands ~9s after
-      // the final letter. Long enough to enjoy the celebration; short
-      // enough that a kid bouncing in their seat hasn't moved on yet.
-      trophyTimerRef.current = window.setTimeout(() => {
-        if (pendingTrophyIdRef.current) {
-          useGameStore.getState().awardTrophy(pendingTrophyIdRef.current);
-          pendingTrophyIdRef.current = null;
-        }
-        trophyTimerRef.current = null;
-      }, 9000);
-      // Brief pause so the player hears the final letter name + woo
-      // before the dance music takes over.
-      setTimeout(() => startDanceParty(engine), 700);
+      finish(engine);
+      return;
     }
+    // Leg cleared, but there is more alphabet elsewhere. Open the way.
+    if (currentIndex.current >= dealtRef.current) {
+      legDoneRef.current = true;
+      const surface = surfaceRef.current;
+      const opened = openWay(engine);
+      if (opened) setBanner(openCue(surface).banner);
+      hintScheduledRef.current = true;
+      void audio
+        .playSequence([openWayClip(surface)])
+        .finally(() => {
+          hintScheduledRef.current = false;
+          lastProgressRef.current = performance.now();
+        });
+    }
+  };
+
+  // The whole alphabet, done. By construction this happens in the sea:
+  // legs alternate and there is an odd number of them.
+  const finish = (engine: Engine) => {
+    setCompleted(true);
+    setBanner(null);
+    playWoo();
+    // Hold the trophy id in a ref and award it AFTER the dance party
+    // has had time to play. If the kid leaves before the delay fires,
+    // the unmount cleanup forces the award so they never lose progress.
+    pendingTrophyIdRef.current =
+      letterCase === "lowercase"
+        ? "alphabet-lower"
+        : letterCase === "mixed"
+          ? "alphabet-mixed"
+          : "alphabet-upper";
+    // 700ms (dance kickoff) + ~8s of dance = trophy lands ~9s after
+    // the final letter. Long enough to enjoy the celebration; short
+    // enough that a kid bouncing in their seat hasn't moved on yet.
+    trophyTimerRef.current = window.setTimeout(() => {
+      if (pendingTrophyIdRef.current) {
+        useGameStore.getState().awardTrophy(pendingTrophyIdRef.current);
+        pendingTrophyIdRef.current = null;
+      }
+      trophyTimerRef.current = null;
+    }, 9000);
+    // Brief pause so the player hears the final letter name + woo
+    // before the dance music takes over.
+    setTimeout(() => startDanceParty(engine), 700);
   };
 
   // ── Dance party finale ────────────────────────────────────────────
   // Teleport every letter into a ring around the player, hand each a
   // randomized dance style + beat-phase offset, swap the music to the
   // celebration track, and flip into dance-mode tickHook.
+  //
+  // Only the letters of the final leg are still standing — the rest were
+  // collected on other worlds and are long gone — so the ring is the
+  // handful that finished the alphabet rather than all twenty-six.
   const startDanceParty = (engine: Engine) => {
+    const surface = surfaceRef.current;
     const player = engine.player.position();
     // Biomes with a designated dance floor (e.g. sky islands' central
     // island) override where the celebration anchors. We teleport the
     // player there too so they're at the centre of the ring, not
     // wherever they happened to bump the last letter.
-    const anchor = engine.celebrationCenter;
+    const anchor = surface.kind === "flat" ? engine.celebrationCenter : null;
     const cx = anchor ? anchor.x : player.x;
     const cz = anchor ? anchor.z : player.z;
     const ringR = anchor?.ringRadius ?? DANCE_RING_RADIUS;
@@ -337,43 +435,52 @@ export function FindAlphabetGame() {
     danceStartRef.current = performance.now();
     danceModeRef.current = true;
     const letters = lettersRef.current;
+    // On a sphere the ring is drawn around the kid's own patch of the
+    // surface, at the same radius measured along the ground.
+    const centreDir =
+      surface.kind === "planet"
+        ? engine.player.position().clone().sub(surface.spec.center).normalize()
+        : null;
     for (let i = 0; i < letters.length; i++) {
       const entry = letters[i];
       // Even angular spacing around the player.
       const angle = (i / letters.length) * Math.PI * 2;
-      const homeX = cx + Math.cos(angle) * ringR;
-      const homeZ = cz + Math.sin(angle) * ringR;
-      const homeY = engine.terrainHeight?.(homeX, homeZ) ?? 0;
-      entry.character.setBaseY(homeY);
-      entry.character.group.position.set(homeX, homeY, homeZ);
+      let spot: Spot;
+      if (surface.kind === "planet" && centreDir) {
+        spot = {
+          kind: "planet",
+          dir: ringDir(centreDir, ringR / surface.spec.radius, angle),
+        };
+      } else {
+        spot = { kind: "flat", x: cx + Math.cos(angle) * ringR, z: cz + Math.sin(angle) * ringR };
+      }
+      entry.field.moveTo(spot);
       // Reset any rotation/scale from earlier celebrate() calls so the
       // dance starts from a clean baseline.
-      entry.character.group.rotation.set(0, 0, 0);
-      entry.character.group.scale.setScalar(1);
+      entry.field.character.group.rotation.set(0, 0, 0);
+      entry.field.character.group.scale.setScalar(1);
+      const home = entry.field.home;
       entry.dance = {
         style: DANCE_STYLES[i % DANCE_STYLES.length],
-        // Stagger phases so all 26 don't peak in unison — every other
-        // letter offsets by half a beat.
+        // Stagger phases so letters don't peak in unison.
         phaseOffset: (i % 4) / 4,
-        homeX,
-        homeZ,
-        homeY,
+        homeX: home.x,
+        homeZ: home.z,
+        homeY: home.y,
       };
     }
-    // Kick off a firework round one for the moment of victory.
-    // Read the player position FRESH (not the pre-teleport snapshot)
-    // so the firework launches from wherever the dance floor is —
-    // e.g. on the sky biome's central island, not at the kid's old
-    // location on some far rainbow.
-    const fw = makeFirework(engine.player.position().clone(), 60);
+    // Kick off a firework round one for the moment of victory. Read the
+    // player position FRESH (not the pre-teleport snapshot) so it
+    // launches from wherever the dance floor ended up.
+    const at = engine.player.position().clone();
+    const fw = makeFirework(at, 60);
+    orientToSurface(fw.group, surface, at);
     engine.scene.add(fw.group);
     engine.addActor({
       update(dt, t) {
-        const alive = fw.update(dt, t);
-        if (!alive) {
-          engine.scene.remove(fw.group);
-          engine.removeActor(this);
-        }
+        if (fw.update(dt, t)) return;
+        engine.scene.remove(fw.group);
+        engine.removeActor(this);
       },
     });
   };
@@ -381,6 +488,10 @@ export function FindAlphabetGame() {
   // Per-frame dance update. Drives every letter's transform from the
   // current beat phase and also detects the player bumping into one
   // (which triggers a firework rather than speaking the name).
+  //
+  // Everything below is in the letter's own frame: on the sea that is
+  // world space, on a sphere it is the tangent plane standing on the
+  // surface. Which is why the same five styles work in both places.
   const runDanceTick = (engine: Engine, playerPos: THREE.Vector3) => {
     const elapsed = (performance.now() - danceStartRef.current) / 1000;
     // Beat phase: 0..1 within a single beat at CELEBRATION_BPM. Every
@@ -391,15 +502,10 @@ export function FindAlphabetGame() {
       if (!entry.dance) continue;
       const d = entry.dance;
       const phase = (elapsed * beatsPerSec + d.phaseOffset) % 1;
-      const g = entry.character.group;
+      const g = entry.field.character.group;
       // Reset to home each frame so the previous frame's offsets don't
       // accumulate.
-      g.position.x = d.homeX;
-      g.position.z = d.homeZ;
-      // Base y comes from the biome's terrain at this letter's home —
-      // for sky islands that's the central island top, not 0. Dance
-      // styles below add their own offset on top of homeY.
-      g.position.y = d.homeY;
+      g.position.set(d.homeX, d.homeY, d.homeZ);
       g.rotation.set(0, 0, 0);
       g.scale.setScalar(1);
       // Apply the chosen dance style. Each peaks at phase=0.5 (the
@@ -418,7 +524,7 @@ export function FindAlphabetGame() {
         }
         case "spin": {
           // One full rotation every two beats.
-          g.rotation.y = (elapsed * beatsPerSec * Math.PI) + d.phaseOffset * Math.PI * 2;
+          g.rotation.y = elapsed * beatsPerSec * Math.PI + d.phaseOffset * Math.PI * 2;
           g.position.y = d.homeY + 0.15 + Math.sin(phase * Math.PI) * 0.18;
           break;
         }
@@ -429,12 +535,12 @@ export function FindAlphabetGame() {
           break;
         }
         case "hop": {
-          // Hop forward and back — translates inward toward the player
-          // on the down-beat, outward on the up-beat.
-          const inOut = Math.sin(phase * Math.PI * 2) * 0.4;
-          const dirX = playerPos.x - d.homeX;
-          const dirZ = playerPos.z - d.homeZ;
+          // Hop toward the player on the down-beat, away on the up.
+          const local = entry.field.localOf(playerPos);
+          const dirX = local.x - d.homeX;
+          const dirZ = local.z - d.homeZ;
           const len = Math.hypot(dirX, dirZ) || 1;
+          const inOut = Math.sin(phase * Math.PI * 2) * 0.4;
           g.position.x = d.homeX + (dirX / len) * inOut;
           g.position.z = d.homeZ + (dirZ / len) * inOut;
           g.position.y = d.homeY + Math.abs(Math.sin(phase * Math.PI * 2)) * 0.55;
@@ -448,88 +554,83 @@ export function FindAlphabetGame() {
     // spawn a stack of effects every frame.
     for (const entry of lettersRef.current) {
       if (!entry.dance) continue;
-      const lp = entry.character.positionXZ();
-      const d = distanceXZ(playerPos, lp);
-      if (d < COLLECT_DIST + 0.4) {
-        const now = performance.now();
-        const lastFW = (entry.character.group.userData.lastFireworkAt as number | undefined) ?? 0;
-        if (now - lastFW < 900) continue;
-        entry.character.group.userData.lastFireworkAt = now;
-        // Spawn the firework at the letter's actual elevation —
-        // hardcoded y=0 worked for ground biomes but in sky islands
-        // it'd drop the burst far below the dancing letter.
-        const pos = new THREE.Vector3(lp.x, entry.dance.homeY, lp.z);
-        const fw = makeFirework(pos, 28);
-        engine.scene.add(fw.group);
-        engine.addActor({
-          update(dt, t) {
-            const alive = fw.update(dt, t);
-            if (!alive) {
-              engine.scene.remove(fw.group);
-              engine.removeActor(this);
-            }
-          },
-        });
-        // No chime — makeFirework handles its own launch + burst SFX.
-      }
+      if (entry.field.distanceTo(playerPos) >= COLLECT_DIST + 0.4) continue;
+      const now = performance.now();
+      const group = entry.field.character.group;
+      const lastFW = (group.userData.lastFireworkAt as number | undefined) ?? 0;
+      if (now - lastFW < 900) continue;
+      group.userData.lastFireworkAt = now;
+      const at = group.getWorldPosition(new THREE.Vector3());
+      const fw = makeFirework(at, 28);
+      orientToSurface(fw.group, surfaceRef.current, at);
+      engine.scene.add(fw.group);
+      engine.addActor({
+        update(dt, t) {
+          if (fw.update(dt, t)) return;
+          engine.scene.remove(fw.group);
+          engine.removeActor(this);
+        },
+      });
+      // No chime — makeFirework handles its own launch + burst SFX.
     }
   };
 
   // ── Dev-only fast-forward ─────────────────────────────────────────
-  // Pressing F on a localhost build marks letters A-Y collected and
-  // moves the player a few steps from Z so the next pickup triggers
-  // the dance-party finale. Hidden in production via isDev().
+  // Pressing F on a localhost build collects every letter on this world
+  // but the last, and parks the player a few steps from it — so one
+  // more nudge either opens the way onward or, on the final leg, kicks
+  // off the dance party. Hidden in production via isDev().
   useEffect(() => {
     if (!isDev()) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "f" && e.key !== "F") return;
       const engine = engineRef.current;
-      if (!engine || danceModeRef.current) return;
-      if (currentIndex.current >= ALPHABET.length - 1) return;
-      // Mark every letter up to (but not including) the current target's
-      // last sibling — i.e. fast-forward to needing only Z.
+      if (!engine || danceModeRef.current || legDoneRef.current) return;
       const letters = lettersRef.current;
-      for (let i = currentIndex.current; i < letters.length - 1; i++) {
-        const entry = letters[i];
-        if (!entry.character.isCollected) {
-          entry.character.celebrate();
-          collect(entry.letter);
-        }
+      if (letters.length < 2) return;
+      const last = letters[letters.length - 1];
+      for (const entry of letters) {
+        if (entry === last) continue;
+        if (entry.index < currentIndex.current) continue;
+        entry.field.character.celebrate();
+        collect(entry.letter);
       }
-      currentIndex.current = ALPHABET.length - 1;
-      setFoundCount(ALPHABET.length - 1);
+      currentIndex.current = last.index;
+      setFoundCount(last.index);
       lastProgressRef.current = performance.now();
-      // Park the player ~3 units from Z so a single nudge collects it.
-      // Y must come from the biome's terrain (the sky islands' Z lives
-      // at island height, not 0), and the parked XZ must be walkable
-      // — picking +3 on the X axis blindly drops the player into the
-      // void on non-contiguous biomes. Try eight cardinal offsets and
-      // fall back to Z's own position if none of them are walkable.
-      const zEntry = letters[ALPHABET.length - 1];
-      if (zEntry) {
-        const zp = zEntry.character.positionXZ();
-        const offset = 3;
-        const candidates: Array<[number, number]> = [
-          [zp.x + offset, zp.z],
-          [zp.x - offset, zp.z],
-          [zp.x, zp.z + offset],
-          [zp.x, zp.z - offset],
-          [zp.x + offset * 0.7, zp.z + offset * 0.7],
-          [zp.x - offset * 0.7, zp.z + offset * 0.7],
-          [zp.x + offset * 0.7, zp.z - offset * 0.7],
-          [zp.x - offset * 0.7, zp.z - offset * 0.7],
-        ];
-        let chosen: [number, number] = [zp.x, zp.z];
-        for (const [cx, cz] of candidates) {
-          if (!engine.isWalkable || engine.isWalkable(cx, cz)) {
-            chosen = [cx, cz];
-            break;
-          }
-        }
-        const [px, pz] = chosen;
-        const py = engine.terrainHeight?.(px, pz) ?? 0;
-        engine.player.group.position.set(px, py, pz);
+      // Park the player a few steps from the remaining letter. On flat
+      // ground the offset has to land somewhere walkable (the sky
+      // islands' void is right there); on a sphere every direction is.
+      const surface = surfaceRef.current;
+      const target = last.field.worldPos();
+      if (surface.kind === "planet") {
+        const dir = target.clone().sub(surface.spec.center).normalize();
+        const step = ringDir(dir, 3 / surface.spec.radius, 0);
+        engine.player.group.position
+          .copy(surface.spec.center)
+          .addScaledVector(step, surface.spec.radius + (surface.spec.hover ?? 0));
+        return;
       }
+      const offset = 3;
+      const candidates: Array<[number, number]> = [
+        [target.x + offset, target.z],
+        [target.x - offset, target.z],
+        [target.x, target.z + offset],
+        [target.x, target.z - offset],
+        [target.x + offset * 0.7, target.z + offset * 0.7],
+        [target.x - offset * 0.7, target.z + offset * 0.7],
+        [target.x + offset * 0.7, target.z - offset * 0.7],
+        [target.x - offset * 0.7, target.z - offset * 0.7],
+      ];
+      let chosen: [number, number] = [target.x, target.z];
+      for (const [cx, cz] of candidates) {
+        if (!engine.isWalkable || engine.isWalkable(cx, cz)) {
+          chosen = [cx, cz];
+          break;
+        }
+      }
+      const [px, pz] = chosen;
+      engine.player.group.position.set(px, engine.terrainHeight?.(px, pz) ?? 0, pz);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
@@ -554,20 +655,17 @@ export function FindAlphabetGame() {
         void music.play(pickGameTrack(biomeId), 0.16);
       }
       if (!engine) return;
-      for (const entry of lettersRef.current) {
-        engine.removeActor(entry.character);
-        engine.scene.remove(entry.character.group);
-        const dispose = entry.character.group.userData.dispose as (() => void) | undefined;
-        dispose?.();
-      }
+      for (const entry of lettersRef.current) entry.field.remove();
       lettersRef.current = [];
       engine.tickHook = undefined;
+      engine.onSurfaceChange = undefined;
+      engine.travelOpen = true;
     };
   }, []);
 
   // HUD: show a window of letters around the current target so the bar
   // doesn't get unreadably long. displayLetters is the source of truth
-  // for case — same array the bootstrap reads when building characters.
+  // for case — same array the dealer reads when building characters.
   const windowSize = 10;
   const windowStart = Math.max(0, Math.min(foundCount - 2, ALPHABET.length - windowSize));
   const targets = displayLetters.slice(windowStart, windowStart + windowSize).map((L, i) => ({
@@ -581,9 +679,40 @@ export function FindAlphabetGame() {
       <Scene onEngineReady={onEngineReady} />
       <HUD
         title={completed ? undefined : `Find: ${titleLetter ?? "🎉"}`}
-        prompt={completed ? undefined : `${moveVerb(avatar)} to the next letter!`}
+        banner={completed ? undefined : (banner ?? undefined)}
+        prompt={
+          completed ? undefined : banner ? undefined : `${moveVerb(avatar)} to the next letter!`
+        }
         targets={completed ? undefined : targets}
       />
     </div>
   );
+}
+
+// A direction `arc` radians away from `centre`, at the given bearing
+// around it. The dance ring on a sphere, and the dev fast-forward's
+// step to one side of a letter.
+function ringDir(centre: THREE.Vector3, arc: number, bearing: number): THREE.Vector3 {
+  const east = new THREE.Vector3(0, 1, 0).cross(centre);
+  if (east.lengthSq() < 1e-6) east.set(1, 0, 0).cross(centre);
+  east.normalize();
+  const north = centre.clone().cross(east).normalize();
+  return new THREE.Vector3()
+    .addScaledVector(centre, Math.cos(arc))
+    .addScaledVector(east, Math.sin(arc) * Math.cos(bearing))
+    .addScaledVector(north, Math.sin(arc) * Math.sin(bearing))
+    .normalize();
+}
+
+// Small deterministic-within-a-leg PRNG, seeded fresh each time so the
+// alphabet lands in a different layout every session.
+function makeRng(salt: number): () => number {
+  let s = (salt ^ ((Math.random() * 0xffffffff) | 0)) | 0;
+  return () => {
+    s = (s + 0x9e3779b9) | 0;
+    let t = s;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
 }

@@ -74,6 +74,14 @@ export type BiomeContext = {
   // Take the avatar apart on the way into a portal (dir 1) or put it
   // back together on the way out (dir -1).
   morphPlayer: (style: PortalMorph, dir: 1 | -1, duration?: number) => void;
+  // Whether the game has opened the way onward. Every ride that
+  // carries the avatar to another world — the volcano's big launch,
+  // the waterspout, a portal home — must ask before it fires, and
+  // should offer something to look at when the answer is no rather
+  // than silently doing nothing. Games shut the gate again the moment
+  // the avatar lands somewhere new, so each world has to be earned on
+  // its own terms.
+  canTravel: () => boolean;
   // Off-world travel. `launchToPlanet` throws the avatar clear of the
   // flat world and sets it down on a sphere it can then walk all the
   // way around (see planet.ts); `leavePlanet` drops it back into the

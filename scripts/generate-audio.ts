@@ -129,8 +129,18 @@ function buildManifest(voiceId: string, modelId: string): AudioManifest {
     prompts[`spell-${w.word}-reveal`] = `reveal-spell-${w.word}`;
   }
   prompts["find-alphabet"] = "prompt-find-alphabet";
+  // Avatar variants of the same prompt. They have always existed on
+  // disk and always been played by the game; leaving them out of the
+  // manifest meant nothing that reads the manifest — the audio tester,
+  // an offline cache warm keyed off it — knew they were there.
+  prompts["find-alphabet-drive"] = "prompt-find-alphabet-drive";
+  prompts["find-alphabet-fly"] = "prompt-find-alphabet-fly";
   prompts["sound-match"] = "prompt-sound-match";
   prompts["sound-match-replay"] = "prompt-sound-match-replay";
+  // The way onward. See src/games/travelGate.ts.
+  prompts["gate-open-sea"] = "gate-open-sea";
+  prompts["gate-open-planet"] = "gate-open-planet";
+  prompts["gate-shut-planet"] = "gate-shut-planet";
   return {
     voiceId,
     modelId,

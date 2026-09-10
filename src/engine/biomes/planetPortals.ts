@@ -17,6 +17,13 @@ export type PortalSet = {
   group: THREE.Group;
   // 0 = invisible, 1 = fully there. Driven by the biome's altitude fade.
   setOpacity: (k: number) => void;
+  // Whether the way home is open. A shut portal is still there — a
+  // dark, slowly turning pool with no beacon over it — because a kid
+  // who has not finished yet still needs to see where they will be
+  // going. It lights up over about a second when the way opens, which
+  // is the moment the whole gate is built around: you did the thing,
+  // and the world answered.
+  setLit: (lit: boolean) => void;
   tick: (dt: number, t: number, viewer?: THREE.Vector3) => void;
   // The portal the given surface direction is standing in, or null.
   inside: (dir: THREE.Vector3) => THREE.Vector3 | null;
@@ -45,7 +52,6 @@ export function buildPortals(opts: {
 }): PortalSet {
   const { radius, dirs, angle, trigger, beamHeight } = opts;
   const group = new THREE.Group();
-  const fading: Array<{ opacity: number }> = [];
 
   const poolMat = new THREE.MeshBasicMaterial({
     vertexColors: true,
@@ -67,7 +73,6 @@ export function buildPortals(opts: {
     fog: false,
     side: THREE.DoubleSide,
   });
-  fading.push(poolMat, scorchMat);
 
   // One shaft texture and one plane, shared: soft-edged in both axes
   // so the column has no silhouette to give it away as a cone. An
@@ -156,15 +161,34 @@ export function buildPortals(opts: {
   }
 
   let opacity = 0;
+  // Current and target brightness of the "this is a way out" dressing.
+  let lit = 1;
+  let litTarget = 1;
+  const LIT_RATE = 1.4;
+
+  const apply = () => {
+    poolMat.opacity = opacity;
+    scorchMat.opacity = opacity;
+    // The beacon is the whole tell, so it carries the full swing: a
+    // shut portal has no shaft and no star over it at all.
+    rimMat.opacity = opacity * (0.2 + 0.8 * lit);
+    shaftMat.opacity = opacity * 0.85 * lit;
+    sparkMat.opacity = opacity * lit;
+    // The pool itself goes dark rather than away — vertex colours are
+    // multiplied by the material colour, so this dims the whirl
+    // without touching the geometry that carries it.
+    const shade = 0.22 + 0.78 * lit;
+    poolMat.color.setRGB(shade, shade, shade);
+  };
 
   return {
     group,
     setOpacity(k) {
       opacity = Math.min(1, Math.max(0, k));
-      for (const m of fading) m.opacity = opacity;
-      rimMat.opacity = opacity;
-      shaftMat.opacity = opacity * 0.85;
-      sparkMat.opacity = opacity;
+      apply();
+    },
+    setLit(next) {
+      litTarget = next ? 1 : 0;
     },
     inside(dir) {
       for (const p of portals) if (dir.angleTo(p.dir) < trigger) return p.dir;
@@ -183,13 +207,20 @@ export function buildPortals(opts: {
       if (best) best.flash = 1;
     },
     tick(dt, t, viewer) {
+      if (lit !== litTarget) {
+        const step = LIT_RATE * dt;
+        lit = lit < litTarget ? Math.min(litTarget, lit + step) : Math.max(litTarget, lit - step);
+        apply();
+      }
       const sparkPulse = 1 + Math.sin(t * 2.1) * 0.16;
       for (const p of portals) {
         // The whirl speeds up sharply for the moment something goes
         // through it, then settles back.
         if (p.flash > 0) p.flash = Math.max(0, p.flash - dt * 1.7);
         const burst = p.flash * p.flash;
-        p.pool.rotation.y += dt * (0.35 + burst * 5);
+        // A shut pool barely turns. Movement is what makes it read as
+        // a way through rather than a painted circle.
+        p.pool.rotation.y += dt * (0.35 + burst * 5) * (0.14 + 0.86 * lit);
         p.spark.scale.setScalar(poolR * 1.2 * (sparkPulse + burst * 1.9));
         // The shaft is one flat plane. Spinning it about the portal's
         // own up-axis to face the viewer is what keeps it reading as a

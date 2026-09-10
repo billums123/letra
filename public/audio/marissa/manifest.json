@@ -1,7 +1,7 @@
 {
   "voiceId": "A2JkxH7o94rRxvRjHHLO",
   "modelId": "eleven_multilingual_v2",
-  "generatedAt": "2026-06-25T18:39:20.878Z",
+  "generatedAt": "2026-09-10T23:26:26.931Z",
   "letters": {
     "A": {
       "name": "letter-A-name",
@@ -196,8 +196,13 @@
     "spell-DRUM": "prompt-spell-DRUM",
     "spell-DRUM-reveal": "reveal-spell-DRUM",
     "find-alphabet": "prompt-find-alphabet",
+    "find-alphabet-drive": "prompt-find-alphabet-drive",
+    "find-alphabet-fly": "prompt-find-alphabet-fly",
     "sound-match": "prompt-sound-match",
-    "sound-match-replay": "prompt-sound-match-replay"
+    "sound-match-replay": "prompt-sound-match-replay",
+    "gate-open-sea": "gate-open-sea",
+    "gate-open-planet": "gate-open-planet",
+    "gate-shut-planet": "gate-shut-planet"
   },
   "celebrate": [
     "celebrate-1",

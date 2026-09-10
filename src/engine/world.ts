@@ -530,7 +530,8 @@ export function buildWorld(
   setCameraFocus: BiomeContext["setCameraFocus"] = () => {},
   launchToPlanet: BiomeContext["launchToPlanet"] = () => {},
   leavePlanet: BiomeContext["leavePlanet"] = () => {},
-  whirlPlayer: BiomeContext["whirlPlayer"] = () => {}
+  whirlPlayer: BiomeContext["whirlPlayer"] = () => {},
+  canTravel: BiomeContext["canTravel"] = () => true
 ): WorldBuildResult {
   const group = new THREE.Group();
   group.name = `World:${biome.id}`;
@@ -556,6 +557,7 @@ export function buildWorld(
     setCelebrationCenter: (c) => {
       celebrationCenter = c;
     },
+    canTravel,
     launchPlayer,
     setPlayerVisible,
     setPlayerAblaze,

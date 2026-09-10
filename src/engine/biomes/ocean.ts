@@ -32,6 +32,7 @@ import {
   setUnderwaterAmbience,
 } from "../../audio/sfx";
 import { music } from "../../audio/music";
+import { audio } from "../../audio/Player";
 
 // Ocean biome — the kid putters around open water in a tugboat.
 // Faceted low-poly waves undulate for real (the terrain sampler rides
@@ -279,9 +280,6 @@ function coneSurfaceY(lx: number, lz: number): number {
 // space and it should have time to feel ominous.
 const RUMBLE_SECONDS = 1.0;
 const MEGA_RUMBLE_SECONDS = 3.2;
-// How often an eruption is a mega-launch. Deliberately the minority:
-// the surprise is the point, and it stops being one if it is the norm.
-const MEGA_CHANCE = 0.42;
 const COOLDOWN_SECONDS = 3.5;
 
 // ── Sandy islands (scenery; palms live here) ───────────────────────
@@ -384,6 +382,7 @@ function buildProps(ctx: BiomeContext): void {
     launchToPlanet,
     leavePlanet,
     whirlPlayer,
+    canTravel,
   } = ctx;
 
   // ── Wave field ───────────────────────────────────────────────────
@@ -1098,17 +1097,33 @@ function buildProps(ctx: BiomeContext): void {
         // to it immediately gives the same journey — in from wherever
         // you touched it, down at water level for a beat, then up —
         // with the boat turning from the moment it is grabbed.
+        // With the way shut there is nowhere to be thrown, so the
+        // funnel keeps the boat down at water level, spins it round,
+        // and spits it out. Same grab, same noise, a much smaller
+        // ride — which is the point: the kid learns the difference
+        // between the spout on an ordinary day and the spout once
+        // they have finished, without anyone explaining it.
+        const bound = canTravel();
         spoutState = "lifting";
         spout.setFury(1);
         playTornado(earshot(SPOUT.x, SPOUT.z));
         whirlPlayer({
           center: SPOUT,
-          topY: spout.height * 0.86,
-          turns: 5.2,
-          duration: PULL_SECONDS + CLIMB_SECONDS,
+          topY: bound ? spout.height * 0.86 : 1.8,
+          turns: bound ? 5.2 : 2.4,
+          duration: bound ? PULL_SECONDS + CLIMB_SECONDS : 1.4,
           onDone: () => {
             spoutState = "idle";
-            goToNextGiant();
+            if (bound) {
+              goToNextGiant();
+              return;
+            }
+            const dest = pickWaterLanding();
+            launchPlayer(dest, {
+              duration: 1.5,
+              peakY: 9,
+              onLand: () => bigSplash(dest.x, dest.z),
+            });
           },
         });
       }
@@ -1362,6 +1377,19 @@ function buildProps(ctx: BiomeContext): void {
   sunWorld.onEnterSpot = (dir) => enterPortal(sunWorld, dir);
   saturnWorld.onEnterSpot = (dir) => enterPortal(saturnWorld, dir);
   jupiterWorld.onEnterSpot = (dir) => enterPortal(jupiterWorld, dir);
+  // Driving onto a pool that has not lit up yet. Say so, but not on
+  // every pass — a kid circling a dark portal waiting for it to do
+  // something should not be lectured at four times a second.
+  let shutSpotSaid = 0;
+  const blockedSpot = () => {
+    const now = performance.now();
+    if (now - shutSpotSaid < 12000) return;
+    shutSpotSaid = now;
+    void audio.play("gate-shut-planet", { interrupt: false });
+  };
+  sunWorld.onBlockedSpot = blockedSpot;
+  saturnWorld.onBlockedSpot = blockedSpot;
+  jupiterWorld.onBlockedSpot = blockedSpot;
   // Jupiter's storms crack, and the sound takes its time getting to
   // you. The world works out when and how loud; playing it is the
   // biome's job, the same way every other sound here is.
@@ -1616,10 +1644,13 @@ function buildProps(ctx: BiomeContext): void {
       const p = getPlayerPosition();
       const scene = group.parent as THREE.Scene | null;
       if (!p || !scene) return;
-      if (armExitsIn > 0) {
-        armExitsIn -= dt;
-        if (armExitsIn <= 0) away?.armExits(true);
-      }
+      if (armExitsIn > 0) armExitsIn -= dt;
+      // Driven every frame rather than latched once, so the beacons
+      // come up the instant the game opens the way and go dark again
+      // the instant it shuts. The grace period after touchdown still
+      // applies: landing beside a lit portal would bounce the kid
+      // straight off the world they just arrived on.
+      away?.armExits(armExitsIn <= 0 && canTravel());
       dropHome(dt);
       const bg = scene.background;
       if (bg instanceof THREE.Color && bg !== bgRef) {
@@ -2557,9 +2588,16 @@ function buildProps(ctx: BiomeContext): void {
         if (d < MOUTH_TRIGGER_R) {
           state = "rumbling";
           stateT = 0;
-          // Rolled here rather than at the boom: the wind-up length
-          // depends on it.
-          pendingMega = Math.random() < MEGA_CHANCE;
+          // Which eruption this is, decided here rather than at the
+          // boom because the wind-up length depends on it.
+          //
+          // It used to be a 42% roll. It is now exactly the gate: with
+          // the way shut you get the ordinary eruption, which throws
+          // you across the bay and is its own small joy; with the way
+          // open the mountain always fires you at the sun. A door a
+          // four-year-old has earned should not then ask them to keep
+          // rolling for it.
+          pendingMega = canTravel() && !away;
           playVolcanoRumble();
         }
       }
@@ -3215,9 +3253,10 @@ function buildProps(ctx: BiomeContext): void {
         ventState = "rumbling";
         ventT = 0;
         ventIsSunkVolcano = onSunk;
-        // Only the island volcano ever throws anyone at the sun, and
-        // only sometimes — same roll it always used.
-        ventMega = onSunk && Math.random() < MEGA_CHANCE;
+        // Only the sunken island ever throws anyone at the sun, and
+        // only once the game has opened the way — the same gate the
+        // sea cave up top answers to.
+        ventMega = onSunk && canTravel() && !away;
         playVolcanoRumble();
       }
       return;

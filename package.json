@@ -11,6 +11,8 @@
     "lint": "tsc -b --noEmit",
     "test:planet": "node --import tsx scripts/planet-test.ts",
     "test:music": "node --import tsx scripts/music-test.ts",
+    "test:worlds": "node --import tsx scripts/worlds-test.ts",
+    "test": "npm run test:planet && npm run test:music && npm run test:worlds",
     "audio:generate": "node --import tsx scripts/generate-audio.ts",
     "audio:generate-all": "node --import tsx scripts/generate-audio.ts --generate-all",
     "audio:archive": "node --import tsx scripts/generate-audio.ts --archive",

@@ -28,11 +28,21 @@ export type PlanetObstacle = {
 };
 
 export type PlanetSpec = {
+  // Stable name for this world — "sun", "saturn". Games key off it to
+  // tell one sphere from another and from the flat world, so they can
+  // hand each place its own share of the letters.
+  id?: string;
   center: THREE.Vector3;
   radius: number;
   // Clearance between the surface and the avatar's origin.
   hover?: number;
   obstacles?: PlanetObstacle[];
+  // Patches of surface nothing may be placed on. Portals, in practice:
+  // a letter inside one is a letter you cannot reach without being
+  // sent home the moment you touch it, which is a round that can never
+  // be finished. Same shape as an obstacle, but it pushes nothing
+  // around — it only tells the games where not to build.
+  noBuild?: readonly { dir: THREE.Vector3; angular: number }[];
   // Fired every frame with the avatar's current surface direction, so
   // the biome that owns the planet can react to where the kid is
   // standing (walking into a sunspot, etc).

@@ -32,6 +32,11 @@ export type SunWorld = {
   tick: (dt: number, t: number, viewer?: THREE.Vector3) => void;
   // Set by the biome: fired once when the avatar drives into a portal.
   onEnterSpot?: (dir: THREE.Vector3) => void;
+  // Set by the biome: fired when the avatar drives onto a portal that
+  // is still dark. Nothing happens to them, which is exactly why it
+  // needs saying — a shut portal is the one thing in the loop that
+  // answers being touched with silence.
+  onBlockedSpot?: (dir: THREE.Vector3) => void;
   // Suppresses portal triggers — the biome arms them a beat after
   // touchdown so a landing right beside one doesn't bounce the kid
   // straight home again.
@@ -249,12 +254,19 @@ export function buildSunWorld(opts: {
   let opacity = 0;
 
   const spec: PlanetSpec = {
+    id: "sun",
     center,
     radius,
     hover,
+  // Letters and props keep out of the portals. A shade wider than the
+  // dressing so nothing ends up standing on the scorched ring either.
+    noBuild: SPOT_DIRS.map((dir) => ({ dir, angular: SPOT_ANGLE * 1.35 })),
     onWalk: (dir) => {
       const at = portals.inside(dir);
-      if (at && armed && !insidePortal) world.onEnterSpot?.(at);
+      if (at && !insidePortal) {
+        if (armed) world.onEnterSpot?.(at);
+        else world.onBlockedSpot?.(at);
+      }
       insidePortal = at !== null;
     },
   };
@@ -273,7 +285,12 @@ export function buildSunWorld(opts: {
       group.visible = opacity > 0.01;
     },
     armExits(next) {
+      if (next === armed) return;
       armed = next;
+      // Shut portals go dark. The biome calls this every frame from
+      // the game's gate, so a kid watching the horizon sees the
+      // beacons come up the moment the word lands.
+      portals.setLit(next);
       if (!next) insidePortal = false;
     },
     flashPortal(dir) {

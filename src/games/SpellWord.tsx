@@ -1,15 +1,23 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import * as THREE from "three";
 import { Scene } from "../world/Scene";
 import { HUD } from "../ui/HUD";
 import { audio } from "../audio/Player";
-import { playChime, playWoo } from "../audio/sfx";
+import { playChime } from "../audio/sfx";
 import { Engine } from "../engine/Engine";
-import { buildLetterCharacter, distanceXZ, loadFont, makeSharedLetterAssets } from "../engine/letters";
+import { loadFont, makeSharedLetterAssets } from "../engine/letters";
+import {
+  orientToSurface,
+  pickSpot,
+  plantLetter,
+  type FieldLetter,
+  type KeepOut,
+} from "../engine/letterField";
+import { FLAT_SURFACE, type Surface } from "../engine/surface";
 import { makeBurst } from "../engine/particles";
-import { pickClearSpawn } from "../engine/world";
 import { SPELL_WORDS } from "../audio/types";
 import { useGameStore } from "../state/store";
+import { openCue, openWay, openWayClip, shutWay } from "./travelGate";
 import {
   getWordAsset,
   loadCreatureGeometry,
@@ -17,20 +25,29 @@ import {
 } from "../engine/wordAssets";
 
 // "Spell-the-Word" adventure: pick a missing-pet word, scatter the letters
-// around the world avoiding obstacles, and walk over them in order. On
-// completion the screen pauses with a "Next Word!" button so the kid can
-// savour the celebration before the next round.
+// around whatever world the kid is standing on, and walk over them in order.
+//
+// Spelling the word is also what opens the way onward. Finish one in the
+// ocean and the volcano wakes up; ride it to a planet and the pools home
+// stay dark until you have spelled another one up there. So a round is
+// never just a round — it is the toll for the next place. See
+// ./travelGate.ts for the rule and src/engine/biomes/ocean.ts for the
+// rides it governs.
+//
+// The scene is built once and kept. Rounds tear their own letters down and
+// plant fresh ones, because remounting it would rebuild the world — and
+// rebuilding the world would drop a kid standing on the sun back into the
+// sea, which is precisely the trip they were about to earn.
 
 const COLLECT_DIST = 1.7;
 const HINT_AFTER_SECONDS = 35;
+// Where letters land. On the flat sea this is distance from the middle
+// of the world; on a sphere it is how far the kid has to drive along
+// the surface to reach one. See pickSpot.
 const SPAWN_INNER = 7;
 const SPAWN_OUTER = 18;
 
-type LetterEntry = {
-  letter: string;
-  index: number;
-  character: ReturnType<typeof buildLetterCharacter>;
-};
+type Font = Awaited<ReturnType<typeof loadFont>>;
 
 // Weighted pick: bias toward words the kid hasn't mastered yet. Weight is
 // 1 / (1 + min(timesSpelled, CAP)), so a brand-new word (count 0) is ~7x
@@ -55,283 +72,259 @@ function pickWord(prevWord: string | undefined, counts: Record<string, number>) 
 export function SpellWordGame() {
   const collect = useGameStore((s) => s.collect);
   const letterCase = useGameStore((s) => s.letterCase);
-  // Use roundKey to force a remount when "Next Word!" is pressed.
-  const [roundKey, setRoundKey] = useState(0);
-  const [prevWord, setPrevWord] = useState<string | undefined>();
-  // Track the case used on the previous word so "mixed" actually
-  // alternates instead of randomly landing on the same case twice in
-  // a row. Initialised null so the very first round rolls freely.
-  const [prevLowercase, setPrevLowercase] = useState<boolean | null>(null);
-  return (
-    <SpellWordRound
-      key={roundKey}
-      prevWord={prevWord}
-      prevLowercase={prevLowercase}
-      letterCase={letterCase}
-      onNext={(w, lc) => {
-        setPrevWord(w);
-        setPrevLowercase(lc);
-        setRoundKey((n) => n + 1);
-      }}
-      collect={collect}
-    />
-  );
-}
 
-function SpellWordRound({
-  prevWord,
-  prevLowercase,
-  letterCase,
-  onNext,
-  collect,
-}: {
-  prevWord?: string;
-  prevLowercase: boolean | null;
-  letterCase: "uppercase" | "lowercase" | "mixed";
-  onNext: (justFinished: string, lowercase: boolean) => void;
-  collect: (letter: string) => void;
-}) {
-  const word = useMemo(
-    () => pickWord(prevWord, useGameStore.getState().spellWordCounts),
-    [prevWord],
-  );
-  // Roll the case for THIS word. Uppercase / lowercase modes are pinned;
-  // "mixed" flips deterministically from the previous round when one
-  // exists, otherwise it rolls randomly. Computed once so a re-render
-  // (e.g. progress update) doesn't re-roll mid-round.
-  const lowercase = useMemo(() => {
-    if (letterCase === "uppercase") return false;
-    if (letterCase === "lowercase") return true;
-    return prevLowercase === null ? Math.random() < 0.5 : !prevLowercase;
-    // Re-rolls only when we move to a new round (new word picked).
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [word]);
-  const displayWord = lowercase ? word.word.toLowerCase() : word.word;
+  const [displayWord, setDisplayWord] = useState("");
   const [foundCount, setFoundCount] = useState(0);
   const [completed, setCompleted] = useState(false);
+  const [banner, setBanner] = useState<string | null>(null);
+
   const engineRef = useRef<Engine | null>(null);
-  const lettersRef = useRef<LetterEntry[]>([]);
-  const lastProgressRef = useRef(performance.now());
+  const fontRef = useRef<Font | null>(null);
+  const lettersRef = useRef<FieldLetter[]>([]);
+  // The round, held in refs because the engine tick hook is a single
+  // long-lived closure installed at bootstrap.
+  const wordRef = useRef<(typeof SPELL_WORDS)[number] | null>(null);
+  const surfaceRef = useRef<Surface>(FLAT_SURFACE);
   const currentIndex = useRef(0);
+  const completedRef = useRef(false);
+  const prevWordRef = useRef<string | undefined>(undefined);
+  // Case used on the previous word, so "mixed" alternates instead of
+  // randomly landing on the same case twice running.
+  const prevLowercaseRef = useRef<boolean | null>(null);
+  const lastProgressRef = useRef(performance.now());
   const hintScheduledRef = useRef(false);
-  // Position of the most recently collected letter. Until the player
-  // physically walks out of its COLLECT_DIST radius we suppress further
-  // pickups, so two duplicate letters that happen to spawn close
-  // together (the TREE/BOOK problem) don't collapse into a single
-  // stand-still chain-collect.
-  const lastCollectPosRef = useRef<{ x: number; z: number } | null>(null);
-  // Optional 3D payoff (cat / dog / etc.) spawned when the kid finishes
-  // spelling the word. Held in a ref so the unmount cleanup can dispose
-  // it even if the kid taps Next-Word mid-animation. Words without an
-  // entry in WORD_ASSETS just keep the existing audio-only reveal.
+  // Position of the most recently collected letter. Until the kid
+  // physically leaves its radius we suppress further pickups, so two
+  // duplicate letters that happened to spawn close together (the
+  // TREE / BOOK problem) don't collapse into one stand-still chain.
+  const lastCollectRef = useRef<THREE.Vector3 | null>(null);
+  // Optional 3D payoff (cat / dog / …) spawned on completion.
   const payoffRef = useRef<WordAssetHandles | null>(null);
   const payoffActorRef = useRef<{ update: (dt: number, t: number) => void } | null>(null);
 
+  const clearLetters = () => {
+    for (const l of lettersRef.current) l.remove();
+    lettersRef.current = [];
+  };
+
+  const clearPayoff = (engine: Engine) => {
+    if (payoffActorRef.current) {
+      engine.removeActor(payoffActorRef.current);
+      payoffActorRef.current = null;
+    }
+    if (payoffRef.current) {
+      const g = payoffRef.current.group;
+      g.parent?.remove(g);
+      payoffRef.current.dispose();
+      payoffRef.current = null;
+    }
+  };
+
+  // Start a fresh word wherever the avatar is standing. Called on
+  // bootstrap, from the Next-Word button, and every time the kid lands
+  // on a new world.
+  const startRound = (engine: Engine, font: Font) => {
+    clearLetters();
+    clearPayoff(engine);
+    audio.stop();
+
+    const word = pickWord(prevWordRef.current, useGameStore.getState().spellWordCounts);
+    const lowercase =
+      letterCase === "uppercase"
+        ? false
+        : letterCase === "lowercase"
+          ? true
+          : prevLowercaseRef.current === null
+            ? Math.random() < 0.5
+            : !prevLowercaseRef.current;
+    prevWordRef.current = word.word;
+    prevLowercaseRef.current = lowercase;
+    wordRef.current = word;
+    currentIndex.current = 0;
+    completedRef.current = false;
+    lastCollectRef.current = null;
+    lastProgressRef.current = performance.now();
+    hintScheduledRef.current = false;
+    setFoundCount(0);
+    setCompleted(false);
+    setDisplayWord(lowercase ? word.word.toLowerCase() : word.word);
+
+    const surface = engine.surface;
+    surfaceRef.current = surface;
+    const rng = makeRng(word.word.charCodeAt(0) * 31 + word.word.length);
+    // Letters appearing more than once in a word (the two Es in TREE)
+    // need extra spacing — otherwise both can land within COLLECT_DIST
+    // of one spot and the kid picks them up in back-to-back frames,
+    // which looks like the game accepted T, R, E as a whole spelling.
+    const counts = word.word.split("").reduce<Record<string, number>>((acc, L) => {
+      acc[L] = (acc[L] ?? 0) + 1;
+      return acc;
+    }, {});
+    const shared = makeSharedLetterAssets();
+    const taken: { x: number; z: number; radius: number }[] = [];
+    const planetTaken: KeepOut[] = [];
+    const keepOut = surface.kind === "planet" ? (surface.spec.noBuild ?? []) : [];
+    const around = engine.player.position().clone();
+
+    for (const L of word.word.split("")) {
+      const spot = pickSpot(engine, surface, {
+        taken,
+        planetTaken,
+        keepOut,
+        around,
+        minRange: SPAWN_INNER,
+        maxRange: SPAWN_OUTER,
+        selfRadius: (counts[L] ?? 1) > 1 ? 2.5 : 1,
+        rng,
+      });
+      const letter = plantLetter(engine, font, surface, spot, { letter: L, lowercase, shared });
+      letter.faceCamera(engine.camera.position);
+      lettersRef.current.push(letter);
+    }
+
+    setTimeout(() => void audio.play(audio.prompt(`spell-${word.word}`)), 250);
+  };
+
   const onEngineReady = (engine: Engine) => {
     engineRef.current = engine;
-    bootstrap(engine);
+    void bootstrap(engine);
   };
 
   const bootstrap = async (engine: Engine) => {
     const font = await loadFont();
-    const taken: { x: number; z: number; radius: number }[] = [];
-    const rng = (() => {
-      // Mix the word into a fresh per-mount random seed so the same
-      // word can land in different layouts across plays.
-      let s = ((word.word.charCodeAt(0) * 31 + word.word.length) ^ ((Math.random() * 0xffffffff) | 0)) | 0;
-      return () => {
-        s = (s + 0x9e3779b9) | 0;
-        let t = s;
-        t = Math.imul(t ^ (t >>> 15), t | 1);
-        t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-        return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-      };
-    })();
-    // Letters that appear more than once in the word (e.g. the two Es
-    // in TREE) need extra spacing — otherwise both can land within
-    // COLLECT_DIST of the same spot and the kid picks them up in
-    // back-to-back frames, looking like the game accepted T, R, E as
-    // a complete spelling. The bumped keep-out radius (2.5 vs 1.0)
-    // forces the next instance to spawn well beyond 2 * COLLECT_DIST
-    // (1.7 m × 2 = 3.4 m) from the previous one.
-    const letterCounts = word.word.split("").reduce<Record<string, number>>((acc, L) => {
-      acc[L] = (acc[L] ?? 0) + 1;
-      return acc;
-    }, {});
-    // Shared bag of fixed-look letter materials/geometries reused
-    // across every letter in the word.
-    const sharedLetterAssets = makeSharedLetterAssets();
-    const letters: LetterEntry[] = word.word.split("").map((L, i) => {
-      const spawn = pickClearSpawn(engine.obstacles, taken, { minRadius: SPAWN_INNER, maxRadius: SPAWN_OUTER }, 1.0, rng, engine.isWalkable);
-      const baseY = engine.terrainHeight?.(spawn.x, spawn.z) ?? 0;
-      const character = buildLetterCharacter(font, { letter: L, lowercase, baseY, shared: sharedLetterAssets });
-      character.group.position.set(spawn.x, baseY, spawn.z);
-      const keepoutRadius = (letterCounts[L] ?? 1) > 1 ? 2.5 : 1.0;
-      taken.push({ x: spawn.x, z: spawn.z, radius: keepoutRadius });
-      // Initial face-toward-camera so it's right on first paint.
-      character.faceTowards(engine.camera.position.x, engine.camera.position.z);
-      engine.scene.add(character.group);
-      engine.addActor(character);
-      return { letter: L, index: i, character };
-    });
-    lettersRef.current = letters;
+    fontRef.current = font;
+    // The gate starts shut: the ocean has to be earned like anywhere
+    // else, or the very first ride is free.
+    shutWay(engine);
+    startRound(engine, font);
+
+    // Landing somewhere new. The gate shuts behind the kid and a fresh
+    // word starts here, which is the whole loop: spell, ride, spell.
+    engine.onSurfaceChange = () => {
+      shutWay(engine);
+      setBanner(null);
+      startRound(engine, font);
+    };
 
     engine.tickHook = (_dt, _t, playerPos) => {
-      // Keep every letter facing the camera every frame, and push the
-      // current player distance in so each letter can react softly when
-      // the kid approaches (subtle glow boost + one-shot greeting wave).
-      for (const entry of lettersRef.current) {
-        entry.character.faceTowards(engine.camera.position.x, engine.camera.position.z);
-        const d = distanceXZ(playerPos, entry.character.positionXZ());
-        entry.character.setPlayerProximity(d);
+      const cam = engine.camera.position;
+      for (const l of lettersRef.current) {
+        l.faceCamera(cam);
+        l.character.setPlayerProximity(l.distanceTo(playerPos));
       }
-      // After a pickup, gate the next collection on the player having
-      // physically walked out of the previous letter's radius. Without
-      // this guard, two same-letter spawns that landed close (worst
-      // case: pickClearSpawn fallback ignored the taken list) would
-      // both collect from a single stand-still position.
-      if (lastCollectPosRef.current) {
-        const dx = playerPos.x - lastCollectPosRef.current.x;
-        const dz = playerPos.z - lastCollectPosRef.current.z;
-        if (Math.hypot(dx, dz) < COLLECT_DIST + 0.4) {
-          // Still inside the previous pickup's bubble — keep waiting.
-        } else {
-          lastCollectPosRef.current = null;
-        }
+      const word = wordRef.current;
+      if (!word) return;
+      // After a pickup, gate the next one on the kid having physically
+      // left the previous letter's radius.
+      if (lastCollectRef.current) {
+        if (lastCollectRef.current.distanceTo(playerPos) < COLLECT_DIST + 0.4) return;
+        lastCollectRef.current = null;
       }
-      // Any uncollected letter whose character matches the one we need
-      // counts as a valid pickup. Words with duplicate letters (TREE,
-      // BOOK, EGG …) would otherwise be blocked: the kid sees two
-      // identical Es but only one of them — the one at the exact
-      // current index — could be collected, and walking onto the
-      // "wrong" identical letter looked like a silent broken game.
       const required = word.word[currentIndex.current];
       if (required === undefined) return;
-      if (lastCollectPosRef.current) return; // gated above
-      // No collecting while the volcano launch is flying the avatar
-      // over the map — collection distance is XZ-only.
+      // No collecting while a launch is flying the avatar over the map.
       if (engine.inFlight) return;
+      // Any uncollected letter matching the one we need counts. Words
+      // with duplicate letters would otherwise be blocked: the kid
+      // sees two identical Es but only the one at the exact current
+      // index could be taken, and walking onto the "wrong" identical
+      // letter looked like a silently broken game.
       for (const candidate of lettersRef.current) {
         if (candidate.character.isCollected) continue;
         if (candidate.letter !== required) continue;
-        if (distanceXZ(playerPos, candidate.character.positionXZ()) < COLLECT_DIST) {
-          const pos = candidate.character.positionXZ();
-          lastCollectPosRef.current = { x: pos.x, z: pos.z };
+        if (candidate.distanceTo(playerPos) < COLLECT_DIST) {
+          lastCollectRef.current = candidate.worldPos();
           collectLetter(engine, candidate, playerPos);
           break;
         }
       }
       const since = (performance.now() - lastProgressRef.current) / 1000;
-      if (since > HINT_AFTER_SECONDS && !hintScheduledRef.current) {
+      if (since > HINT_AFTER_SECONDS && !hintScheduledRef.current && !completedRef.current) {
         hintScheduledRef.current = true;
-        audio.play(audio.randomHint()).then(() => {
+        void audio.play(audio.randomHint()).then(() => {
           lastProgressRef.current = performance.now();
           hintScheduledRef.current = false;
         });
       }
     };
-
-    setTimeout(() => audio.play(audio.prompt(`spell-${word.word}`)), 250);
   };
 
-  const collectLetter = (engine: Engine, entry: LetterEntry, playerPos: THREE.Vector3) => {
+  const collectLetter = (engine: Engine, entry: FieldLetter, playerPos: THREE.Vector3) => {
     if (entry.character.isCollected) return;
     entry.character.celebrate();
     const burst = makeBurst(playerPos.clone());
+    // Confetti flies "up" in its own frame, so on a star its frame has
+    // to know which way that is.
+    orientToSurface(burst.group, surfaceRef.current, playerPos);
     engine.scene.add(burst.group);
     engine.addActor({
       update(dt) {
-        const alive = burst.update(dt, 0);
-        if (!alive) {
-          engine.scene.remove(burst.group);
-          engine.removeActor(this);
-        }
+        if (burst.update(dt, 0)) return;
+        engine.scene.remove(burst.group);
+        engine.removeActor(this);
       },
     });
     playChime();
-    // playSequence cancels itself if anything else interrupts (e.g. the
-    // next letter is collected before the chain finishes), so we never
-    // hear letter-A's phonetic sound after the player has moved on to B.
+    // playSequence cancels itself if anything interrupts, so we never
+    // hear letter A's phonetic sound after the kid has moved on to B.
     void audio.playSequence([audio.letterName(entry.letter), audio.letterSound(entry.letter)]);
     collect(entry.letter);
     setFoundCount((n) => n + 1);
     currentIndex.current += 1;
     lastProgressRef.current = performance.now();
 
-    if (currentIndex.current >= word.word.length) {
-      setCompleted(true);
-      playWoo();
-      // Record the spelling — every Nth completion of the same word
-      // awards that word's trophy (Cat Catcher fires after 5 CATs,
-      // ×2 after 10, etc.). The store also auto-fires Word Wizard
-      // when the kid crosses 25 total completions across any words.
-      useGameStore.getState().recordSpellCompletion(word.word);
-      // 3D payoff — words with a registered WordAsset (cat, dog, …)
-      // spawn the creature in front of the kid and animate it in.
-      // Words without an asset keep the existing audio-only reveal.
-      spawnPayoff(engine, playerPos);
-      // playSequence respects the audio Player's sequenceVersion guard,
-      // so when the kid taps "Next word" mid-reveal the celebration
-      // clip won't fire afterwards and clobber the next round's prompt.
-      // A bare reveal.then(celebrate) chain was firing celebrate even
-      // after stop() resolved the reveal — the .then() doesn't know
-      // about the interrupt.
-      setTimeout(() => {
-        void audio.playSequence([
-          `reveal-spell-${word.word}`,
-          audio.randomCelebrate(),
-        ]);
-      }, 700);
-    }
+    const word = wordRef.current;
+    if (!word || currentIndex.current < word.word.length) return;
+    completedRef.current = true;
+    setCompleted(true);
+    // Record the spelling — every Nth completion of the same word
+    // awards that word's trophy, and the store auto-fires Word Wizard
+    // once the kid crosses the total threshold.
+    useGameStore.getState().recordSpellCompletion(word.word);
+    spawnPayoff(engine, playerPos);
+    // The way opens now, not when the audio finishes: a kid who taps
+    // straight past the celebration has still earned the ride.
+    const surface = surfaceRef.current;
+    const opened = openWay(engine);
+    if (opened) setBanner(openCue(surface).banner);
+    // The word's own reveal, then either the way onward or an ordinary
+    // cheer. The line about the volcano waking up IS the celebration
+    // when it fires, so nothing generic goes in front of it.
+    setTimeout(() => {
+      void audio.playSequence([
+        `reveal-spell-${word.word}`,
+        opened ? openWayClip(surface) : audio.randomCelebrate(),
+      ]);
+    }, 700);
   };
 
-  useEffect(() => {
-    return () => {
-      const engine = engineRef.current;
-      if (!engine) return;
-      for (const entry of lettersRef.current) {
-        engine.removeActor(entry.character);
-        engine.scene.remove(entry.character.group);
-        const dispose = entry.character.group.userData.dispose as (() => void) | undefined;
-        dispose?.();
-      }
-      lettersRef.current = [];
-      // Tear down the optional 3D payoff. The actor wrapper above just
-      // forwards ticks; we drop both halves so HMR and Next-Word
-      // remounts don't leave a creature standing in the world.
-      if (payoffActorRef.current) {
-        engine.removeActor(payoffActorRef.current);
-        payoffActorRef.current = null;
-      }
-      if (payoffRef.current) {
-        engine.scene.remove(payoffRef.current.group);
-        payoffRef.current.dispose();
-        payoffRef.current = null;
-      }
-      engine.tickHook = undefined;
-    };
-  }, []);
-
-  // Build + mount the 3D payoff for this word, if one is registered.
-  // Spawns at the player's current position, oriented so the creature
-  // walks toward the camera (negative Z) on entry. No-op for words
-  // without a WordAsset entry.
+  // Build the optional 3D payoff for this word. Spawns just in front of
+  // the kid, standing on whatever they are standing on.
   const spawnPayoff = (engine: Engine, playerPos: THREE.Vector3) => {
+    const word = wordRef.current;
+    if (!word) return;
     const asset = getWordAsset(word.word);
     if (!asset) return;
-    const geometry = loadCreatureGeometry(word.word);
-    const handles = asset.build(geometry);
-    // Spawn point: a couple metres in front of the kid (world +Z is
-    // toward the chase camera). Walker translates along its local +X
-    // so the creature trots in from camera-left and lands centred on
-    // this spot. We rotate slightly so the face angles toward the
-    // camera once it stops, instead of staring sideways across the
-    // frame.
-    const endX = playerPos.x;
-    const endZ = playerPos.z + 2;
-    handles.group.position.set(endX, engine.terrainHeight?.(endX, endZ) ?? 0, endZ);
-    handles.group.rotation.y = -Math.PI / 6;
-    engine.scene.add(handles.group);
+    const handles = asset.build(loadCreatureGeometry(word.word));
+    const surface = surfaceRef.current;
+    if (surface.kind === "flat") {
+      const endX = playerPos.x;
+      const endZ = playerPos.z + 2;
+      handles.group.position.set(endX, engine.terrainHeight?.(endX, endZ) ?? 0, endZ);
+      handles.group.rotation.y = -Math.PI / 6;
+      engine.scene.add(handles.group);
+    } else {
+      // On a sphere the creature goes inside a mount standing on the
+      // surface under the kid, so it walks along the ground rather
+      // than off into the sky.
+      const mount = new THREE.Group();
+      mount.position.copy(playerPos);
+      orientToSurface(mount, surface, playerPos);
+      handles.group.position.set(0, 0, 2);
+      handles.group.rotation.y = -Math.PI / 6;
+      mount.add(handles.group);
+      engine.scene.add(mount);
+    }
     payoffRef.current = handles;
     const actor = {
       update(dt: number, t: number) {
@@ -342,14 +335,33 @@ function SpellWordRound({
     payoffActorRef.current = actor;
   };
 
+  useEffect(() => {
+    return () => {
+      const engine = engineRef.current;
+      if (!engine) return;
+      clearLetters();
+      clearPayoff(engine);
+      engine.tickHook = undefined;
+      engine.onSurfaceChange = undefined;
+      engine.travelOpen = true;
+    };
+  }, []);
+
   const targets = displayWord.split("").map((L, i) => ({ letter: L, found: i < foundCount }));
 
   return (
     <div style={{ position: "absolute", inset: 0 }}>
       <Scene onEngineReady={onEngineReady} />
       <HUD
-        title={`Spell: ${displayWord}`}
-        prompt={completed ? "🎉 You spelled it!" : `Find the next letter: ${displayWord[foundCount]}`}
+        title={displayWord ? `Spell: ${displayWord}` : undefined}
+        banner={banner ?? undefined}
+        prompt={
+          completed
+            ? "🎉 You spelled it!"
+            : displayWord
+              ? `Find the next letter: ${displayWord[foundCount]}`
+              : undefined
+        }
         targets={targets}
       />
       {completed && (
@@ -365,7 +377,13 @@ function SpellWordRound({
         >
           <button
             type="button"
-            onClick={() => onNext(word.word, lowercase)}
+            onClick={() => {
+              const engine = engineRef.current;
+              const font = fontRef.current;
+              if (!engine || !font) return;
+              setBanner(null);
+              startRound(engine, font);
+            }}
             style={{
               pointerEvents: "auto",
               appearance: "none",
@@ -394,4 +412,17 @@ function SpellWordRound({
       )}
     </div>
   );
+}
+
+// Small deterministic-within-a-round PRNG, seeded fresh per call so the
+// same word lands in a different layout each time it comes up.
+function makeRng(salt: number): () => number {
+  let s = (salt ^ ((Math.random() * 0xffffffff) | 0)) | 0;
+  return () => {
+    s = (s + 0x9e3779b9) | 0;
+    let t = s;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
 }

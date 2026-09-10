@@ -5,15 +5,28 @@ import { HUD } from "../ui/HUD";
 import { audio } from "../audio/Player";
 import { playChime, playWoo } from "../audio/sfx";
 import { Engine } from "../engine/Engine";
-import { buildLetterCharacter, distanceXZ, loadFont, makeSharedLetterAssets } from "../engine/letters";
+import { loadFont, makeSharedLetterAssets } from "../engine/letters";
+import {
+  orientToSurface,
+  pickSpot,
+  plantLetter,
+  type FieldLetter,
+  type KeepOut,
+} from "../engine/letterField";
+import { FLAT_SURFACE, type Surface } from "../engine/surface";
 import { makeBurst } from "../engine/particles";
-import { pickClearSpawn } from "../engine/world";
 import { ALPHABET } from "../audio/types";
 import { useGameStore } from "../state/store";
+import { openCue, openWay, openWayClip, shutWay } from "./travelGate";
 
 // Sound-match: voice plays a letter sound, kid walks to the matching letter.
 // Spawns a small set of choices (3 the first round, growing to 5) so a 3yo
 // doesn't have to scan a wall of glyphs.
+//
+// One right answer also opens the way onward — the volcano in the sea, the
+// pools on a planet. Rounds are endless, so the gate opens once per world
+// and stays open until the ride is taken; landing somewhere new shuts it
+// and starts the choices over there. See ./travelGate.ts.
 
 const COLLECT_DIST = 1.7;
 // Sound match is endless: we cycle through a shuffled alphabet so
@@ -76,17 +89,14 @@ function tweenScale(
   engine.addActor(actor);
 }
 
-type LetterEntry = {
-  letter: string;
-  character: ReturnType<typeof buildLetterCharacter>;
-};
-
 export function SoundMatchGame() {
   const collect = useGameStore((s) => s.collect);
   const letterCase = useGameStore((s) => s.letterCase);
   const [round, setRound] = useState(1);
   const engineRef = useRef<Engine | null>(null);
-  const lettersRef = useRef<LetterEntry[]>([]);
+  const lettersRef = useRef<FieldLetter[]>([]);
+  const surfaceRef = useRef<Surface>(FLAT_SURFACE);
+  const [banner, setBanner] = useState<string | null>(null);
   const targetRef = useRef<string | null>(null);
   const lockRef = useRef(false);
   // Mirror of the round state so the tickHook closure (set up once in
@@ -116,11 +126,7 @@ export function SoundMatchGame() {
       // Stop the character's own per-frame update (idle bob, celebrate
       // pulse) so it doesn't fight the scale tween.
       engine.removeActor(entry.character);
-      tweenScale(engine, entry.character.group, 1, 0, 0.32, 0, () => {
-        engine.scene.remove(entry.character.group);
-        const dispose = entry.character.group.userData.dispose as (() => void) | undefined;
-        dispose?.();
-      });
+      tweenScale(engine, entry.character.group, 1, 0, 0.32, 0, () => entry.remove());
     }
 
     const choiceCount = Math.min(3 + Math.floor(roundIndex / 2), 5);
@@ -144,9 +150,19 @@ export function SoundMatchGame() {
     const distractors = shuffle(ALPHABET.filter((L) => L !== targetLetter)).slice(0, choiceCount - 1);
     const candidates = shuffle([targetLetter, ...distractors]);
 
-    const minR = 7 + roundIndex * 0.4;
-    const maxR = minR + 6;
+    const surface = engine.surface;
+    surfaceRef.current = surface;
+    // The choices creep outward as the rounds go by. On a sphere that
+    // is measured from the kid rather than from the middle of a disc,
+    // so it starts closer and grows more gently — a star is a long
+    // drive from one side to the other.
+    const grow = Math.min(roundIndex * 0.4, 6);
+    const minRange = surface.kind === "flat" ? 7 + grow : 5 + grow * 0.5;
+    const maxRange = minRange + 6;
     const taken: { x: number; z: number; radius: number }[] = [];
+    const planetTaken: KeepOut[] = [];
+    const keepOut = surface.kind === "planet" ? (surface.spec.noBuild ?? []) : [];
+    const around = engine.player.position().clone();
     const rng = (() => {
       // Re-roll each round so the choices land in a different
       // arrangement every time, while still being deterministic
@@ -173,24 +189,31 @@ export function SoundMatchGame() {
     // when each letter built its own.
     const sharedLetterAssets = makeSharedLetterAssets();
     candidates.forEach((L, i) => {
-      const spawn = pickClearSpawn(engine.obstacles, taken, { minRadius: minR, maxRadius: maxR }, 1.0, rng, engine.isWalkable);
-      const baseY = engine.terrainHeight?.(spawn.x, spawn.z) ?? 0;
+      const spot = pickSpot(engine, surface, {
+        taken,
+        planetTaken,
+        keepOut,
+        around,
+        minRange,
+        maxRange,
+        rng,
+      });
       // Apply the kid's case selection. Mixed rolls per-letter so the
       // round can show e.g. "A b c" — same as Find the Alphabet.
       const lowercase =
         letterCase === "lowercase" ||
         (letterCase === "mixed" && Math.random() < 0.5);
-      const character = buildLetterCharacter(font, { letter: L, lowercase, baseY, shared: sharedLetterAssets });
-      character.group.position.set(spawn.x, baseY, spawn.z);
-      taken.push({ x: spawn.x, z: spawn.z, radius: 1.0 });
-      character.faceTowards(engine.camera.position.x, engine.camera.position.z);
-      engine.scene.add(character.group);
-      engine.addActor(character);
+      const entry = plantLetter(engine, font, surface, spot, {
+        letter: L,
+        lowercase,
+        shared: sharedLetterAssets,
+      });
+      entry.faceCamera(engine.camera.position);
       // Pop in with a tiny per-letter stagger so the choices appear
       // sequentially instead of all at once — feels playful rather
       // than chunky.
-      tweenScale(engine, character.group, 0, 1, 0.42, enterDelay + i * 0.08);
-      lettersRef.current.push({ letter: L, character });
+      tweenScale(engine, entry.character.group, 0, 1, 0.42, enterDelay + i * 0.08);
+      lettersRef.current.push(entry);
     });
 
     // Voice: play the prompt the first round, then the target sound.
@@ -224,16 +247,28 @@ export function SoundMatchGame() {
 
   const bootstrap = async (engine: Engine) => {
     const font = await loadFont();
+    // Shut from the first frame: the sea has to be earned like every
+    // other world, or the opening ride is free.
+    shutWay(engine);
     buildRound(engine, font, 1);
+
+    // Landing somewhere new: the gate shuts behind the kid and the
+    // choices are laid out again on this world.
+    engine.onSurfaceChange = () => {
+      shutWay(engine);
+      setBanner(null);
+      lockRef.current = false;
+      buildRound(engine, font, roundRef.current);
+    };
 
     engine.tickHook = (_dt, _t, playerPos) => {
       // Billboard every letter toward the camera each frame, and push
       // proximity so each letter glows + waves softly as the kid walks
       // up (rising-edge greeting only — no wave-spam if they hover).
+      const cam = engine.camera.position;
       for (const entry of lettersRef.current) {
-        entry.character.faceTowards(engine.camera.position.x, engine.camera.position.z);
-        const d = distanceXZ(playerPos, entry.character.positionXZ());
-        entry.character.setPlayerProximity(d);
+        entry.faceCamera(cam);
+        entry.character.setPlayerProximity(entry.distanceTo(playerPos));
       }
       if (lockRef.current) return;
       // No collecting while the volcano launch is flying the avatar
@@ -242,8 +277,7 @@ export function SoundMatchGame() {
       const target = targetRef.current;
       if (!target) return;
       for (const entry of lettersRef.current) {
-        const d = distanceXZ(playerPos, entry.character.positionXZ());
-        if (d < COLLECT_DIST) {
+        if (entry.distanceTo(playerPos) < COLLECT_DIST) {
           handleHit(engine, font, entry, playerPos);
           return;
         }
@@ -268,7 +302,7 @@ export function SoundMatchGame() {
   const handleHit = async (
     engine: Engine,
     font: Awaited<ReturnType<typeof loadFont>>,
-    entry: LetterEntry,
+    entry: FieldLetter,
     playerPos: THREE.Vector3
   ) => {
     if (lockRef.current) return;
@@ -278,6 +312,9 @@ export function SoundMatchGame() {
       // Correct: celebrate, advance round.
       entry.character.celebrate();
       const burst = makeBurst(playerPos.clone());
+      // Confetti flies "up" in its own frame; on a star that has to be
+      // out of the ground, not toward world +Y.
+      orientToSurface(burst.group, surfaceRef.current, playerPos);
       engine.scene.add(burst.group);
       engine.addActor({
         update(dt) {
@@ -289,7 +326,16 @@ export function SoundMatchGame() {
         },
       });
       playChime();
-      await audio.playSequence([audio.letterName(entry.letter), audio.randomCelebrate()]);
+      // One right answer is the toll for this world. It opens once and
+      // stays open until the ride is taken, so the line only ever
+      // plays on the round that earned it.
+      const surface = surfaceRef.current;
+      const opened = openWay(engine);
+      if (opened) setBanner(openCue(surface).banner);
+      await audio.playSequence([
+        audio.letterName(entry.letter),
+        opened ? openWayClip(surface) : audio.randomCelebrate(),
+      ]);
       collect(entry.letter);
       // Bump the sound-match counter; this awards a Listening Star
       // every 10 successful matches (the store handles the threshold).
@@ -317,11 +363,10 @@ export function SoundMatchGame() {
       ]);
       // Player needs to actually leave the wrong letter before we re-arm so we
       // don't immediately re-trigger the hit.
-      const wrongPos = entry.character.positionXZ();
       const wait = setInterval(() => {
         const p = engineRef.current?.player.position();
         if (!p) return;
-        if (distanceXZ(p, wrongPos) > COLLECT_DIST + 0.6) {
+        if (entry.distanceTo(p) > COLLECT_DIST + 0.6) {
           clearInterval(wait);
           lockRef.current = false;
         }
@@ -333,21 +378,18 @@ export function SoundMatchGame() {
     return () => {
       const engine = engineRef.current;
       if (!engine) return;
-      for (const entry of lettersRef.current) {
-        engine.removeActor(entry.character);
-        engine.scene.remove(entry.character.group);
-        const dispose = entry.character.group.userData.dispose as (() => void) | undefined;
-        dispose?.();
-      }
+      for (const entry of lettersRef.current) entry.remove();
       lettersRef.current = [];
       engine.tickHook = undefined;
+      engine.onSurfaceChange = undefined;
+      engine.travelOpen = true;
     };
   }, []);
 
   return (
     <div style={{ position: "absolute", inset: 0 }}>
       <Scene onEngineReady={onEngineReady} />
-      <HUD title={`Round ${round}`} />
+      <HUD title={`Round ${round}`} banner={banner ?? undefined} />
     </div>
   );
 }

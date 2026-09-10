@@ -6,6 +6,7 @@ import { getBiome } from "./biomes";
 import type { Biome } from "./biomes/types";
 import { subscribeForcedTOD } from "./biomes/timeOfDay";
 import { PlanetWalker, type PlanetSpec } from "./planet";
+import { FLAT_SURFACE, type Surface } from "./surface";
 import type { PortalMorph } from "./biomes/types";
 import { readInput } from "../input/useInput";
 
@@ -72,6 +73,21 @@ export class Engine {
   // Game-mode hook: called every frame so modes can react to the player position.
   // The function decides whether anything happens; engine just calls it.
   tickHook?: (dt: number, t: number, playerPos: THREE.Vector3) => void;
+
+  // Whether the biome may carry the avatar off to another world.
+  //
+  // The gate is the game's, not the world's: a biome offers the rides,
+  // and the game decides whether this kid has earned one yet. Default
+  // open, so a mode that never thinks about it (or a dev screen) keeps
+  // the run of the place.
+  travelOpen = true;
+
+  // Fired once the avatar is standing somewhere new — the flat world
+  // or a named sphere. Deliberately not fired mid-flight: "where am I"
+  // has no useful answer while the avatar is halfway between two
+  // worlds, and every caller wants the arrival, not the departure.
+  onSurfaceChange?: (surface: Surface) => void;
+  private reportedSurface = "flat";
 
   // Tracks which obstacles the player was overlapping last frame, so we
   // can fire the obstacle's onBump callback once on the rising edge of
@@ -192,6 +208,14 @@ export class Engine {
 
   get onPlanet(): boolean {
     return this.planet !== null;
+  }
+
+  // Which surface the avatar is standing on. Games place letters
+  // through this rather than assuming a ground plane.
+  get surface(): Surface {
+    const planet = this.planet;
+    if (!planet) return FLAT_SURFACE;
+    return { kind: "planet", id: planet.spec.id ?? "planet", spec: planet.spec };
   }
 
   // Fling the avatar to (x, z) on a ballistic arc. Ignored if a flight
@@ -493,7 +517,8 @@ export class Engine {
       },
       (planet, opts) => this.launchToPlanet(planet, opts),
       (to, opts) => this.leavePlanet(to, opts),
-      (opts) => this.whirlPlayer(opts)
+      (opts) => this.whirlPlayer(opts),
+      () => this.travelOpen
     );
     this.scene.add(world.group);
     this.terrainHeight = world.terrainHeight;
@@ -976,6 +1001,18 @@ export class Engine {
 
       // Per-actor update first (so collected letters can hide before render).
       for (const actor of this.actors) actor.update(dt, t);
+
+      // Report a new surface only once the avatar has actually landed
+      // on it. Checking the value rather than hooking each transition
+      // keeps this honest however the avatar got here — a launch, a
+      // portal, or a dev teleport.
+      if (!this.inFlight) {
+        const here = this.planet ? (this.planet.spec.id ?? "planet") : "flat";
+        if (here !== this.reportedSurface) {
+          this.reportedSurface = here;
+          this.onSurfaceChange?.(this.surface);
+        }
+      }
 
       this.tickHook?.(dt, t, pos);
       this.events.onPlayerPosition?.(pos);

@@ -336,6 +336,24 @@ export function buildEntries(): AudioEntry[] {
   entries.push({ id: "wrong-different", text: "Hmm, not that one. Let's keep going!" });
   entries.push({ id: "wrong-try-again", text: "Not this letter, try a different one!" });
 
+  // The way onward. Played once per world, the moment the kid finishes
+  // what that world was holding them for. See src/games/travelGate.ts.
+  entries.push({
+    id: "gate-open-sea",
+    text: "You did it! Now the volcano and the waterspout are wide awake. Ride one to a brand new world!",
+  });
+  entries.push({
+    id: "gate-open-planet",
+    text: "Amazing! The glowing pools are open. Jump into one to splash all the way home!",
+  });
+  // Played when a kid drives onto a portal that is still dark — the
+  // one place in the loop where the world would otherwise do nothing
+  // at all in answer to being touched.
+  entries.push({
+    id: "gate-shut-planet",
+    text: "Not yet! Finish here first, and the pools will open up.",
+  });
+
   // Menu
   entries.push({ id: "menu-welcome", text: "Welcome to Letra! Pick a game to start!" });
   entries.push({ id: "menu-spell", text: "Spell the word!" });
