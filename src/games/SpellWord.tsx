@@ -174,7 +174,7 @@ export function SpellWordGame() {
         around,
         minRange: SPAWN_INNER,
         maxRange: SPAWN_OUTER,
-        selfRadius: (counts[L] ?? 1) > 1 ? 2.5 : 1,
+        takenRadius: (counts[L] ?? 1) > 1 ? 2.5 : 1,
         rng,
       });
       const letter = plantLetter(engine, font, surface, spot, { letter: L, lowercase, shared });

@@ -320,7 +320,14 @@ export function pickSpot(
     // from the kid.
     minRange: number;
     maxRange: number;
+    // Clearance this letter needs from scenery when it lands.
     selfRadius?: number;
+    // How much room to reserve against the NEXT letter. Bigger than
+    // selfRadius for a letter the word uses twice: two Es within one
+    // collection radius of each other get picked up in back-to-back
+    // frames, which reads as the game accepting T, R, E as a whole
+    // spelling of TREE.
+    takenRadius?: number;
     rng: () => number;
   },
 ): Spot {
@@ -333,7 +340,7 @@ export function pickSpot(
       opts.rng,
       host.isWalkable,
     );
-    opts.taken.push({ x: p.x, z: p.z, radius: opts.selfRadius ?? 1 });
+    opts.taken.push({ x: p.x, z: p.z, radius: opts.takenRadius ?? opts.selfRadius ?? 1 });
     return { kind: "flat", x: p.x, z: p.z };
   }
   const dir = pickPlanetSpawn({
@@ -350,7 +357,7 @@ export function pickSpot(
   // flat-world letter gets, expressed as an angle on this sphere.
   opts.planetTaken.push({
     dir,
-    angular: ((opts.selfRadius ?? 1) + 1.2) / surface.spec.radius,
+    angular: ((opts.takenRadius ?? opts.selfRadius ?? 1) + 1.2) / surface.spec.radius,
   });
   return { kind: "planet", dir };
 }
