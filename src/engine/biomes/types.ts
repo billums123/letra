@@ -82,6 +82,16 @@ export type BiomeContext = {
   // the avatar lands somewhere new, so each world has to be earned on
   // its own terms.
   canTravel: () => boolean;
+  // Which floor of this world the avatar is on, for worlds that have
+  // more than one. The ocean has two — the surface and the sea bed —
+  // and they are the same flat world seen from either side of the
+  // water. Games re-plant whatever they are holding when this
+  // changes, so the letters follow the kid down the whirlpool instead
+  // of staying up top where they cannot be reached.
+  //
+  // Deliberately NOT a new world: going under is not leaving, so it
+  // costs nothing and the way onward is untouched.
+  setGround: (id: string) => void;
   // Off-world travel. `launchToPlanet` throws the avatar clear of the
   // flat world and sets it down on a sphere it can then walk all the
   // way around (see planet.ts); `leavePlanet` drops it back into the
@@ -98,14 +108,17 @@ export type BiomeContext = {
     }
   ) => void;
   // Take the avatar up a spiral — the ocean's tornado uses it to lift
-  // the boat off the water before throwing it at Saturn.
+  // the boat off the water before throwing it at Saturn. Returns
+  // false if the engine already had the avatar (mid-flight, on a
+  // planet), in which case onDone will never fire: a caller with its
+  // own state machine must not advance it.
   whirlPlayer: (opts: {
     center: { x: number; z: number };
     topY: number;
     turns?: number;
     duration?: number;
     onDone?: () => void;
-  }) => void;
+  }) => boolean;
   leavePlanet: (
     to: { x: number; z: number },
     opts?: { duration?: number; dropFrom?: number; onLand?: () => void }

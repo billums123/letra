@@ -10,6 +10,7 @@ import {
   orientToSurface,
   pickSpot,
   plantLetter,
+  replantLetters,
   type FieldLetter,
   type KeepOut,
 } from "../engine/letterField";
@@ -89,8 +90,11 @@ export function SpellWordGame() {
   const completedRef = useRef(false);
   const prevWordRef = useRef<string | undefined>(undefined);
   // Case used on the previous word, so "mixed" alternates instead of
-  // randomly landing on the same case twice running.
+  // randomly landing on the same case twice running, and the case of
+  // the word currently up, so carrying it to another world doesn't
+  // change it out from under the kid.
   const prevLowercaseRef = useRef<boolean | null>(null);
+  const lowercaseRef = useRef(false);
   const lastProgressRef = useRef(performance.now());
   const hintScheduledRef = useRef(false);
   // Position of the most recently collected letter. Until the kid
@@ -120,17 +124,27 @@ export function SpellWordGame() {
     }
   };
 
-  // Start a fresh word wherever the avatar is standing. Called on
+  // Lay a word out wherever the avatar is standing. Called on
   // bootstrap, from the Next-Word button, and every time the kid lands
   // on a new world.
-  const startRound = (engine: Engine, font: Font) => {
+  //
+  // `carry` keeps the word that is already up. Arriving somewhere new
+  // in the middle of hunting for PIG and being told to find BUS
+  // instead is the game changing its mind, and a four-year-old who was
+  // just told what to look for has no way to read that as anything but
+  // their own mistake. The pig went to the sun; we are still after the
+  // pig. A word that has already been spelled is finished, though, so
+  // that one does roll over to a new one.
+  const startRound = (engine: Engine, font: Font, carry = false) => {
     clearLetters();
     clearPayoff(engine);
     audio.stop();
 
-    const word = pickWord(prevWordRef.current, useGameStore.getState().spellWordCounts);
-    const lowercase =
-      letterCase === "uppercase"
+    const held = carry && wordRef.current && !completedRef.current ? wordRef.current : null;
+    const word = held ?? pickWord(prevWordRef.current, useGameStore.getState().spellWordCounts);
+    const lowercase = held
+      ? lowercaseRef.current
+      : letterCase === "uppercase"
         ? false
         : letterCase === "lowercase"
           ? true
@@ -138,7 +152,8 @@ export function SpellWordGame() {
             ? Math.random() < 0.5
             : !prevLowercaseRef.current;
     prevWordRef.current = word.word;
-    prevLowercaseRef.current = lowercase;
+    if (!held) prevLowercaseRef.current = lowercase;
+    lowercaseRef.current = lowercase;
     wordRef.current = word;
     currentIndex.current = 0;
     completedRef.current = false;
@@ -198,12 +213,25 @@ export function SpellWordGame() {
     shutWay(engine);
     startRound(engine, font);
 
-    // Landing somewhere new. The gate shuts behind the kid and a fresh
-    // word starts here, which is the whole loop: spell, ride, spell.
+    // Landing somewhere new. The gate shuts behind the kid, and the
+    // word they were on comes with them — that is the whole loop:
+    // spell, ride, spell.
     engine.onSurfaceChange = () => {
       shutWay(engine);
       setBanner(null);
-      startRound(engine, font);
+      startRound(engine, font, true);
+    };
+
+    // Same world, different floor: down the whirlpool and back. The
+    // round carries on exactly as it was, on the ground the kid is
+    // actually standing on.
+    engine.onGroundChange = () => {
+      replantLetters(engine, engine.surface, lettersRef.current, {
+        around: engine.player.position().clone(),
+        minRange: SPAWN_INNER,
+        maxRange: SPAWN_OUTER,
+        rng: makeRng(7),
+      });
     };
 
     engine.tickHook = (_dt, _t, playerPos) => {
@@ -343,6 +371,7 @@ export function SpellWordGame() {
       clearPayoff(engine);
       engine.tickHook = undefined;
       engine.onSurfaceChange = undefined;
+      engine.onGroundChange = undefined;
       engine.travelOpen = true;
     };
   }, []);

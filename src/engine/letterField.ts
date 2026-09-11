@@ -303,6 +303,34 @@ function perpendicular(v: THREE.Vector3): THREE.Vector3 {
   return out.normalize();
 }
 
+// Move letters to fresh spots on the ground the kid is standing on
+// now. The task has not changed — these are the same letters, still
+// wanted in the same order — so this is a re-plant, not a new round.
+//
+// For a world with two floors, which is the whole reason it exists:
+// take the whirlpool down and the letters you were hunting are forty-
+// six units above your head, out of sight and out of reach. They come
+// with you instead.
+export function replantLetters(
+  host: FieldHost,
+  surface: Surface,
+  letters: readonly FieldLetter[],
+  opts: {
+    around: THREE.Vector3;
+    minRange: number;
+    maxRange: number;
+    rng: () => number;
+  },
+): void {
+  const taken: { x: number; z: number; radius: number }[] = [];
+  const planetTaken: KeepOut[] = [];
+  const keepOut = surface.kind === "planet" ? (surface.spec.noBuild ?? []) : [];
+  for (const l of letters) {
+    if (l.character.isCollected) continue;
+    l.moveTo(pickSpot(host, surface, { ...opts, taken, planetTaken, keepOut }));
+  }
+}
+
 // The flat-world equivalent, so a game can ask for a spot without
 // branching on which kind of world it is standing on.
 export function pickSpot(

@@ -89,6 +89,13 @@ export class Engine {
   onSurfaceChange?: (surface: Surface) => void;
   private reportedSurface = "flat";
 
+  // Fired when the ground under a multi-floor world changes — the
+  // ocean surface and its sea bed. The task doesn't change, only what
+  // it is standing on, so games re-plant rather than start over.
+  onGroundChange?: (ground: string) => void;
+  private ground = "default";
+  private reportedGround = "default";
+
   // Tracks which obstacles the player was overlapping last frame, so we
   // can fire the obstacle's onBump callback once on the rising edge of
   // a collision instead of every frame the player is wedged against it.
@@ -290,8 +297,12 @@ export class Engine {
     turns?: number;
     duration?: number;
     onDone?: () => void;
-  }): void {
-    if (this.whirl || this.flight || this.spaceFlight || this.planet) return;
+  }): boolean {
+    // Refusing silently is how a biome ends up wedged: it flips its
+    // own state to "being carried", nothing ever carries anything,
+    // and onDone — the only thing that would put it back — never
+    // runs. Say so, and let the caller decide not to commit.
+    if (this.whirl || this.flight || this.spaceFlight || this.planet) return false;
     const pp = this.player.group.position;
     const dx = pp.x - opts.center.x;
     const dz = pp.z - opts.center.z;
@@ -310,6 +321,7 @@ export class Engine {
       spin: 0,
       onDone: opts.onDone,
     };
+    return true;
   }
 
   // Throw the avatar off the flat world and set it down on a sphere.
@@ -518,7 +530,10 @@ export class Engine {
       (planet, opts) => this.launchToPlanet(planet, opts),
       (to, opts) => this.leavePlanet(to, opts),
       (opts) => this.whirlPlayer(opts),
-      () => this.travelOpen
+      () => this.travelOpen,
+      (id) => {
+        this.ground = id;
+      }
     );
     this.scene.add(world.group);
     this.terrainHeight = world.terrainHeight;
@@ -1011,6 +1026,10 @@ export class Engine {
         if (here !== this.reportedSurface) {
           this.reportedSurface = here;
           this.onSurfaceChange?.(this.surface);
+        }
+        if (this.ground !== this.reportedGround) {
+          this.reportedGround = this.ground;
+          this.onGroundChange?.(this.ground);
         }
       }
 

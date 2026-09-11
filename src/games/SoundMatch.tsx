@@ -10,6 +10,7 @@ import {
   orientToSurface,
   pickSpot,
   plantLetter,
+  replantLetters,
   type FieldLetter,
   type KeepOut,
 } from "../engine/letterField";
@@ -116,7 +117,16 @@ export function SoundMatchGame() {
   const hintScheduledRef = useRef(false);
 
   // Build round letters: pick the target plus N-1 random distractors.
-  const buildRound = (engine: Engine, font: Awaited<ReturnType<typeof loadFont>>, roundIndex: number) => {
+  // `keepTarget` lays the same sound out again somewhere else rather
+  // than asking for a new one. A kid who has just been told to find
+  // the letter that says /b/ and is then flown to a star should still
+  // be looking for /b/ when they land.
+  const buildRound = (
+    engine: Engine,
+    font: Awaited<ReturnType<typeof loadFont>>,
+    roundIndex: number,
+    keepTarget = false,
+  ) => {
     // Animate previous letters out (shrink to 0) before disposing. We
     // freeze the actor list to a local so the engine.removeActor inside
     // the tween's onComplete can't trip over a concurrent mutation.
@@ -135,7 +145,7 @@ export function SoundMatchGame() {
     // start on the letter we just used (the prev target), rotate it
     // one slot back so the kid doesn't see the same answer twice in
     // a row across the cycle boundary.
-    if (letterQueueRef.current.length === 0) {
+    if (!keepTarget && letterQueueRef.current.length === 0) {
       const next = shuffle([...ALPHABET]);
       const prev = targetRef.current;
       if (prev && next[0] === prev && next.length > 1) {
@@ -143,7 +153,11 @@ export function SoundMatchGame() {
       }
       letterQueueRef.current = next;
     }
-    const targetLetter = letterQueueRef.current.shift()!;
+    // Carrying the sound over leaves the queue alone, so nothing is
+    // burned by the trip and every letter still shows up once a cycle.
+    const targetLetter = keepTarget && targetRef.current
+      ? targetRef.current
+      : letterQueueRef.current.shift()!;
     targetRef.current = targetLetter;
     // Distractor pool: any letter except the target. Shuffle and take
     // (choiceCount - 1) for the round's wrong answers.
@@ -253,12 +267,24 @@ export function SoundMatchGame() {
     buildRound(engine, font, 1);
 
     // Landing somewhere new: the gate shuts behind the kid and the
-    // choices are laid out again on this world.
+    // same sound is laid out again on this world.
     engine.onSurfaceChange = () => {
       shutWay(engine);
       setBanner(null);
       lockRef.current = false;
-      buildRound(engine, font, roundRef.current);
+      buildRound(engine, font, roundRef.current, true);
+    };
+
+    // Same world, different floor — down the whirlpool and back. The
+    // round carries on; only the ground under it changed.
+    engine.onGroundChange = () => {
+      const grow = Math.min(roundRef.current * 0.4, 6);
+      replantLetters(engine, engine.surface, lettersRef.current, {
+        around: engine.player.position().clone(),
+        minRange: 7 + grow,
+        maxRange: 13 + grow,
+        rng: Math.random,
+      });
     };
 
     engine.tickHook = (_dt, _t, playerPos) => {
@@ -382,6 +408,7 @@ export function SoundMatchGame() {
       lettersRef.current = [];
       engine.tickHook = undefined;
       engine.onSurfaceChange = undefined;
+      engine.onGroundChange = undefined;
       engine.travelOpen = true;
     };
   }, []);

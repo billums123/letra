@@ -383,6 +383,7 @@ function buildProps(ctx: BiomeContext): void {
     leavePlanet,
     whirlPlayer,
     canTravel,
+    setGround,
   } = ctx;
 
   // ── Wave field ───────────────────────────────────────────────────
@@ -912,6 +913,11 @@ function buildProps(ctx: BiomeContext): void {
   // the SPOUT object declared near the top of the biome, because the
   // ground sampler needs it long before this section runs.
   const SPOUT_TRIGGER_R = 3.4;
+  // How long after it lets go before the funnel may grab again. Same
+  // reason the volcano has one: a ride that ends where it started
+  // needs a beat, or the thing hands you straight back to itself.
+  const SPOUT_COOLDOWN_SECONDS = 3;
+  let spoutCooldown = 0;
   // How close the boat has to be before the funnel starts to notice.
   const SPOUT_NOTICE_R = 16;
   // The ride, in two halves that are now one move: the first is spent
@@ -1074,6 +1080,7 @@ function buildProps(ctx: BiomeContext): void {
     // out of the way until the funnel is genuinely nearby.
     const heard = Math.max(0, 1 - d / SPOUT_NOTICE_R);
     setTornadoAmbience(away || spoutState !== "idle" ? (away ? 0 : 1) : heard * heard);
+    if (spoutCooldown > 0) spoutCooldown -= dt;
     if (spoutState === "lifting") {
       // Nothing to do but keep spinning: the engine owns the avatar
       // until the spiral finishes. Crucially it also means the
@@ -1086,7 +1093,7 @@ function buildProps(ctx: BiomeContext): void {
       // Winds up as you approach, so the thing is visibly reacting to
       // the boat before it ever grabs it.
       spout.setFury(away ? 0 : Math.max(0, 1 - d / SPOUT_NOTICE_R) * 0.55);
-      if (!away && d < SPOUT_TRIGGER_R) {
+      if (!away && spoutCooldown <= 0 && d < SPOUT_TRIGGER_R) {
         // Caught. The spin starts on this frame.
         //
         // There used to be a separate reeling-in phase first: a
@@ -1104,10 +1111,14 @@ function buildProps(ctx: BiomeContext): void {
         // between the spout on an ordinary day and the spout once
         // they have finished, without anyone explaining it.
         const bound = canTravel();
-        spoutState = "lifting";
-        spout.setFury(1);
-        playTornado(earshot(SPOUT.x, SPOUT.z));
-        whirlPlayer({
+        // Commit only if the engine actually takes the avatar. It
+        // refuses while one is already mid-flight — which is exactly
+        // what the boat is for the second after the funnel has spat
+        // it out, still sitting inside the trigger radius. Flipping
+        // to "lifting" on a refusal wedged the spout there forever,
+        // because the only thing that clears it is the onDone of a
+        // ride that never started.
+        const grabbed = whirlPlayer({
           center: SPOUT,
           topY: bound ? spout.height * 0.86 : 1.8,
           turns: bound ? 5.2 : 2.4,
@@ -1118,6 +1129,10 @@ function buildProps(ctx: BiomeContext): void {
               goToNextGiant();
               return;
             }
+            // Thrown clear and dropped back in the sea. The cooldown
+            // is what stops the funnel it was just thrown out of
+            // catching it again on the way down.
+            spoutCooldown = SPOUT_COOLDOWN_SECONDS;
             const dest = pickWaterLanding();
             launchPlayer(dest, {
               duration: 1.5,
@@ -1126,6 +1141,10 @@ function buildProps(ctx: BiomeContext): void {
             });
           },
         });
+        if (!grabbed) return;
+        spoutState = "lifting";
+        spout.setFury(1);
+        playTornado(earshot(SPOUT.x, SPOUT.z));
       }
     }
   });
@@ -1338,8 +1357,9 @@ function buildProps(ctx: BiomeContext): void {
     p.x += (EDDY.x - p.x) * k;
     p.z += (EDDY.z - p.z) * k;
     if (eddyT >= EDDY_PULL_SECONDS) {
-      eddyState = "diving";
-      whirlPlayer({
+      // Same rule as the spout: don't say you are diving unless
+      // something is actually carrying you down.
+      const taken = whirlPlayer({
         center: EDDY,
         // Down, not up: the same spiral run the other way.
         topY: -SEA_DEPTH + 6,
@@ -1350,6 +1370,7 @@ function buildProps(ctx: BiomeContext): void {
           goUnderwater();
         },
       });
+      eddyState = taken ? "diving" : "idle";
     }
   });
 
@@ -3147,6 +3168,11 @@ function buildProps(ctx: BiomeContext): void {
   }
 
   function applyWorld(): void {
+    // Which floor the games should be planting letters on. The sea bed
+    // is not a new world — it costs nothing to go down and nothing to
+    // come back — but it IS different ground, and letters left up on
+    // the surface are forty-six units above a kid who cannot see them.
+    setGround(submerged ? "seafloor" : "sea");
     if (!surfaceLights) captureSurfaceLights();
     if (surfaceLights) {
       for (const l of surfaceLights) l.light.intensity = submerged ? l.intensity * 0.14 : l.intensity;
@@ -3269,11 +3295,8 @@ function buildProps(ctx: BiomeContext): void {
     p.x += (centre.x - p.x) * k;
     p.z += (centre.z - p.z) * k;
     if (ventT >= VENT_RUMBLE) {
-      ventState = "flying";
-      playVolcanoBoom(ventMega);
-      wooTimer = ventMega ? 2.4 : 1.1;
       const mega = ventMega;
-      whirlPlayer({
+      const lifted = whirlPlayer({
         center: centre,
         // Just clear of the water, so the swap to the surface world
         // is invisible and the splash lands on the same beat.
@@ -3286,6 +3309,15 @@ function buildProps(ctx: BiomeContext): void {
           if (mega) goToSun();
         },
       });
+      if (!lifted) {
+        // Nothing carried us up, so we are still on the sea bed and
+        // the vent has to be able to try again.
+        ventState = "idle";
+        return;
+      }
+      ventState = "flying";
+      playVolcanoBoom(mega);
+      wooTimer = mega ? 2.4 : 1.1;
     }
   });
 
