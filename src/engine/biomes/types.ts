@@ -82,16 +82,13 @@ export type BiomeContext = {
   // the avatar lands somewhere new, so each world has to be earned on
   // its own terms.
   canTravel: () => boolean;
-  // Which floor of this world the avatar is on, for worlds that have
-  // more than one. The ocean has two — the surface and the sea bed —
-  // and they are the same flat world seen from either side of the
-  // water. Games re-plant whatever they are holding when this
-  // changes, so the letters follow the kid down the whirlpool instead
-  // of staying up top where they cannot be reached.
-  //
-  // Deliberately NOT a new world: going under is not leaving, so it
-  // costs nothing and the way onward is untouched.
-  setGround: (id: string) => void;
+  // Which part of this world the avatar is in, for worlds with more
+  // than one. The ocean has two — the waves and the sea bed forty-six
+  // units under them — and a kid on one cannot reach anything on the
+  // other. They are separate places, so each gets its own letters and
+  // each has to be finished before it will let anyone leave, the same
+  // as a planet.
+  setArea: (id: string) => void;
   // Off-world travel. `launchToPlanet` throws the avatar clear of the
   // flat world and sets it down on a sphere it can then walk all the
   // way around (see planet.ts); `leavePlanet` drops it back into the

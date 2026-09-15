@@ -383,7 +383,7 @@ function buildProps(ctx: BiomeContext): void {
     leavePlanet,
     whirlPlayer,
     canTravel,
-    setGround,
+    setArea,
   } = ctx;
 
   // ── Wave field ───────────────────────────────────────────────────
@@ -503,7 +503,16 @@ function buildProps(ctx: BiomeContext): void {
   // tunnel and the boat reappears, whatever the volcano is doing.
   // The height test keeps the launch visible — the boom teleports the
   // avatar to the crater floor, which is well above the tunnel.
-  const SWALLOW_CEILING = 1.6;
+  const SWALLOW_CEILING = 2.2;
+  // Hysteresis. Once inside, the bounds relax by this much before the
+  // mountain will give the avatar back.
+  //
+  // Without it a hovering avatar strobes: the rocket floats at 1.5 and
+  // bobs, the old ceiling was 1.6, so its own idle bob carried it
+  // across the threshold every few frames — and each crossing toggled
+  // the avatar's visibility AND the camera focus, which is the camera
+  // "snapping between different views" on the way into the cave.
+  const SWALLOW_SLACK = 0.7;
   let swallowed = false;
   tick.push(() => {
     const p = getPlayerPosition();
@@ -512,11 +521,12 @@ function buildProps(ctx: BiomeContext): void {
     const lz = p.z - ISLAND.z;
     const along = lx * MOUTH_DIR.x + lz * MOUTH_DIR.z;
     const perp = Math.abs(lx * -MOUTH_DIR.z + lz * MOUTH_DIR.x);
+    const slack = swallowed ? SWALLOW_SLACK : 0;
     const next =
-      along > CAVE_WALL_ALONG &&
-      along < SWALLOW_HIDE_ALONG &&
-      perp < CHANNEL_HALF_W + 0.3 &&
-      p.y < SWALLOW_CEILING;
+      along > CAVE_WALL_ALONG - slack &&
+      along < SWALLOW_HIDE_ALONG + slack &&
+      perp < CHANNEL_HALF_W + 0.3 + slack &&
+      p.y < SWALLOW_CEILING + slack;
     if (next !== swallowed) {
       swallowed = next;
       setPlayerVisible(!swallowed);
@@ -1317,7 +1327,15 @@ function buildProps(ctx: BiomeContext): void {
 
   let eddyState: "idle" | "pulling" | "diving" = "idle";
   let eddyT = 0;
+  // Whether the hole is taking this kid down, or just having a go at
+  // them. Rolled when it grabs, so the answer cannot change mid-ride.
+  let eddyBound = false;
+  // Same reason the spout and the volcano have one: a ride that ends
+  // near where it started must not hand the boat straight back.
+  const EDDY_COOLDOWN_SECONDS = 3;
+  let eddyCooldown = 0;
   tick.push((dt) => {
+    if (eddyCooldown > 0) eddyCooldown -= dt;
     if (!away) oceanAge += dt;
     const p = getPlayerPosition();
     if (submerged) {
@@ -1343,7 +1361,11 @@ function buildProps(ctx: BiomeContext): void {
     }
     if (eddyState === "idle") {
       eddy.setFury(away ? 0 : Math.max(0, 1 - d / EDDY_NOTICE_R) * 0.5);
-      if (!away && travelGrace <= 0 && d < EDDY_TRIGGER_R) {
+      if (!away && travelGrace <= 0 && eddyCooldown <= 0 && d < EDDY_TRIGGER_R) {
+        // Whether this ride actually goes anywhere. The sea bed is a
+        // place of its own — its own letters, its own way out — so it
+        // is earned the same way a planet is.
+        eddyBound = canTravel();
         eddyState = "pulling";
         eddyT = 0;
         playWhirlpool(earshot(EDDY.x, EDDY.z));
@@ -1361,13 +1383,25 @@ function buildProps(ctx: BiomeContext): void {
       // something is actually carrying you down.
       const taken = whirlPlayer({
         center: EDDY,
-        // Down, not up: the same spiral run the other way.
-        topY: -SEA_DEPTH + 6,
-        turns: 4.2,
-        duration: EDDY_DIVE_SECONDS,
+        // Down, not up: the same spiral run the other way. With the
+        // way shut it barely dips — a spin in the dent and back out,
+        // the wet twin of the volcano's ordinary eruption.
+        topY: eddyBound ? -SEA_DEPTH + 6 : -1.2,
+        turns: eddyBound ? 4.2 : 2.2,
+        duration: eddyBound ? EDDY_DIVE_SECONDS : 1.3,
         onDone: () => {
           eddyState = "idle";
-          goUnderwater();
+          if (eddyBound) {
+            goUnderwater();
+            return;
+          }
+          eddyCooldown = EDDY_COOLDOWN_SECONDS;
+          const dest = pickWaterLanding();
+          launchPlayer(dest, {
+            duration: 1.4,
+            peakY: 7,
+            onLand: () => bigSplash(dest.x, dest.z),
+          });
         },
       });
       eddyState = taken ? "diving" : "idle";
@@ -3168,11 +3202,11 @@ function buildProps(ctx: BiomeContext): void {
   }
 
   function applyWorld(): void {
-    // Which floor the games should be planting letters on. The sea bed
-    // is not a new world — it costs nothing to go down and nothing to
-    // come back — but it IS different ground, and letters left up on
-    // the surface are forty-six units above a kid who cannot see them.
-    setGround(submerged ? "seafloor" : "sea");
+    // Where the games should be planting letters. The waves and the
+    // sea bed are separate places on the same ground: nothing on one
+    // can be reached from the other, so each gets its own letters and
+    // each has to be finished before it will let anyone leave.
+    setArea(submerged ? "seafloor" : "sea");
     if (!surfaceLights) captureSurfaceLights();
     if (surfaceLights) {
       for (const l of surfaceLights) l.light.intensity = submerged ? l.intensity * 0.14 : l.intensity;
@@ -3261,6 +3295,8 @@ function buildProps(ctx: BiomeContext): void {
   // whirlpool take it in the first place. Lose the island and you
   // lose the route to the sun, unless the route goes with it.
   let ventIsSunkVolcano = false;
+  // Whether the eruption in progress is taking the kid anywhere.
+  let ventBound = false;
   let ventMega = false;
   tick.push((dt, t) => {
     travelGrace = Math.max(0, travelGrace - dt);
@@ -3282,7 +3318,11 @@ function buildProps(ctx: BiomeContext): void {
         // Only the sunken island ever throws anyone at the sun, and
         // only once the game has opened the way — the same gate the
         // sea cave up top answers to.
-        ventMega = onSunk && canTravel() && !away;
+        // Whether this eruption surfaces at all. The sea bed lets
+        // nobody out until its word is spelled, the same as everywhere
+        // else; until then the vent huffs and puts you back down.
+        ventBound = canTravel() && !away;
+        ventMega = onSunk && ventBound;
         playVolcanoRumble();
       }
       return;
@@ -3296,15 +3336,28 @@ function buildProps(ctx: BiomeContext): void {
     p.z += (centre.z - p.z) * k;
     if (ventT >= VENT_RUMBLE) {
       const mega = ventMega;
+      const bound = ventBound;
       const lifted = whirlPlayer({
         center: centre,
         // Just clear of the water, so the swap to the surface world
-        // is invisible and the splash lands on the same beat.
-        topY: 1.5,
+        // is invisible and the splash lands on the same beat — or, if
+        // the way is shut, a short hop that never leaves the sea bed.
+        topY: bound ? 1.5 : -SEA_DEPTH + 9,
         turns: mega ? 3 : 2.2,
-        duration: mega ? 3.2 : 2.8,
+        duration: mega ? 3.2 : bound ? 2.8 : 1.6,
         onDone: () => {
           ventState = "idle";
+          if (!bound) {
+            // Lifted off the sea bed and set straight back down on it.
+            travelGrace = 2.5;
+            const ang = Math.random() * Math.PI * 2;
+            const dest = {
+              x: centre.x + Math.cos(ang) * 14,
+              z: centre.z + Math.sin(ang) * 14,
+            };
+            launchPlayer(dest, { duration: 1.3, peakY: 5 });
+            return;
+          }
           surfaceFromDeep();
           if (mega) goToSun();
         },

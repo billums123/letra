@@ -67,6 +67,10 @@ export class Engine {
   private tmpYawQuat = new THREE.Quaternion();
   private tmpTargetTilt = new THREE.Quaternion();
   private tmpNormal = new THREE.Vector3();
+  // Which way the avatar is actually travelling this frame. Avatars
+  // that fly rather than tumble are pointed along it.
+  private flightHeading = new THREE.Vector3(0, 1, 0);
+  private tmpHeading = new THREE.Vector3();
   private static readonly WORLD_UP = new THREE.Vector3(0, 1, 0);
   private static readonly ZERO_MOVE = { x: 0, y: 0 };
 
@@ -88,13 +92,12 @@ export class Engine {
   // worlds, and every caller wants the arrival, not the departure.
   onSurfaceChange?: (surface: Surface) => void;
   private reportedSurface = "flat";
+  private wasFlying = false;
 
-  // Fired when the ground under a multi-floor world changes — the
-  // ocean surface and its sea bed. The task doesn't change, only what
-  // it is standing on, so games re-plant rather than start over.
-  onGroundChange?: (ground: string) => void;
-  private ground = "default";
-  private reportedGround = "default";
+  // Which part of the flat world the biome says the avatar is in.
+  // Reported through `surface`, so going under counts as arriving
+  // somewhere new exactly the way landing on a planet does.
+  private area = "flat";
 
   // Tracks which obstacles the player was overlapping last frame, so we
   // can fire the obstacle's onBump callback once on the rising edge of
@@ -221,7 +224,9 @@ export class Engine {
   // through this rather than assuming a ground plane.
   get surface(): Surface {
     const planet = this.planet;
-    if (!planet) return FLAT_SURFACE;
+    if (!planet) {
+      return this.area === "flat" ? FLAT_SURFACE : { kind: "flat", id: this.area };
+    }
     return { kind: "planet", id: planet.spec.id ?? "planet", spec: planet.spec };
   }
 
@@ -532,7 +537,7 @@ export class Engine {
       (opts) => this.whirlPlayer(opts),
       () => this.travelOpen,
       (id) => {
-        this.ground = id;
+        this.area = id;
       }
     );
     this.scene.add(world.group);
@@ -598,6 +603,16 @@ export class Engine {
   private start() {
     const tick = () => {
       if (this.disposed) return;
+      // Book the next frame BEFORE doing any work.
+      //
+      // The last line of this function used to be the one that asked
+      // for the next frame, which meant a single throw anywhere above
+      // it — a three.js shader that fails to compile after the GL
+      // context has been poked, a bad actor, anything — ended the loop
+      // for good. The picture froze, input stopped, and the only way
+      // out was relaunching the game. One bad frame should cost a
+      // frame, not the session.
+      this.rafId = requestAnimationFrame(tick);
       // If the GL context was lost (iOS background / memory pressure),
       // the tick loop must not call renderer.render — that would throw
       // on a dead context. We've already fired onContextLost so the
@@ -612,6 +627,7 @@ export class Engine {
       // surface (e.g. into the void between sky islands).
       const pp = this.player.group.position;
       const prevX = pp.x;
+      const prevY = pp.y;
       const prevZ = pp.z;
 
       // Ballistic flight (volcano launch etc.) replaces the whole
@@ -826,10 +842,23 @@ export class Engine {
       // Mid-flight tumble — front-flips about the avatar's local X so
       // the launch reads as a joyful somersault rather than a frozen
       // statue sliding along an arc.
+      //
+      // Unless the avatar flies. A rocket thrown out of a volcano
+      // cartwheeling end over end reads as wreckage; the same rocket
+      // with its nose on the arc and its engines lit reads as the
+      // thing it is. Its nose is local +Y, so pointing that along the
+      // heading is the whole move.
       const tumbling = this.flight ?? this.spaceFlight;
       if (tumbling) {
-        this.tmpTumble.setFromAxisAngle(Engine.TUMBLE_AXIS, tumbling.spin);
-        this.player.group.quaternion.multiply(this.tmpTumble);
+        if (this.player.tumbles === false) {
+          this.player.group.quaternion.setFromUnitVectors(
+            Engine.WORLD_UP,
+            this.flightHeading,
+          );
+        } else {
+          this.tmpTumble.setFromAxisAngle(Engine.TUMBLE_AXIS, tumbling.spin);
+          this.player.group.quaternion.multiply(this.tmpTumble);
+        }
       }
       if (whirl) {
         // Whipped round the eye of it, leaning out of the turn.
@@ -1017,19 +1046,31 @@ export class Engine {
       // Per-actor update first (so collected letters can hide before render).
       for (const actor of this.actors) actor.update(dt, t);
 
+      // Track the direction of travel for avatars that fly rather than
+      // tumble, and run their engines for as long as the flight lasts.
+      // Measured from the position the arc actually produced, so it
+      // works the same for a ballistic hop and a Bezier to a planet.
+      const flying = this.flight !== null || this.spaceFlight !== null;
+      if (flying) {
+        this.tmpHeading.set(pp.x - prevX, pp.y - prevY, pp.z - prevZ);
+        if (this.tmpHeading.lengthSq() > 1e-8) {
+          this.flightHeading.copy(this.tmpHeading).normalize();
+        }
+      }
+      if (flying !== this.wasFlying) {
+        this.wasFlying = flying;
+        this.player.setBoosting?.(flying);
+      }
+
       // Report a new surface only once the avatar has actually landed
       // on it. Checking the value rather than hooking each transition
       // keeps this honest however the avatar got here — a launch, a
       // portal, or a dev teleport.
       if (!this.inFlight) {
-        const here = this.planet ? (this.planet.spec.id ?? "planet") : "flat";
+        const here = this.planet ? (this.planet.spec.id ?? "planet") : this.area;
         if (here !== this.reportedSurface) {
           this.reportedSurface = here;
           this.onSurfaceChange?.(this.surface);
-        }
-        if (this.ground !== this.reportedGround) {
-          this.reportedGround = this.ground;
-          this.onGroundChange?.(this.ground);
         }
       }
 
@@ -1038,7 +1079,6 @@ export class Engine {
       this.events.onTick?.(dt, t);
 
       this.renderer.render(this.scene, this.camera);
-      this.rafId = requestAnimationFrame(tick);
     };
     this.clock.start();
     this.rafId = requestAnimationFrame(tick);

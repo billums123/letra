@@ -5,12 +5,12 @@
 // as long as a four-year-old will hunt before the next thing needs to
 // happen, and the next thing is a ride into space.
 //
-// The count is ODD, and that is load-bearing. The only way off a planet is
-// the pool home, so legs strictly alternate sea, planet, sea, planet, sea:
-// an odd number of them puts the last leg — and therefore the dance-party
-// finale — back in the ocean every single time, where there is a whole sea
-// to spread the ring across. Change this to an even number and the finale
-// lands on a star, on a sphere the ring has to be bent around.
+// Five of them, so a full alphabet is four rides: sea, somewhere, sea,
+// somewhere, sea — or, once the sea bed became a place of its own, any
+// walk through the ocean's rooms and the worlds above it. The finale can
+// therefore land anywhere, which is why the dance party is written
+// against the letter's own frame rather than a ground plane: the ring
+// bends around a star as readily as it lies flat on the sea.
 export const LEG_SIZES = [6, 5, 5, 5, 5];
 
 // The slice of the alphabet this leg gets, given how far the dealer has

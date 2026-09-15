@@ -10,7 +10,6 @@ import {
   orientToSurface,
   pickSpot,
   plantLetter,
-  replantLetters,
   type FieldLetter,
   type KeepOut,
 } from "../engine/letterField";
@@ -73,6 +72,11 @@ function pickWord(prevWord: string | undefined, counts: Record<string, number>) 
 export function SpellWordGame() {
   const collect = useGameStore((s) => s.collect);
   const letterCase = useGameStore((s) => s.letterCase);
+  // A trophy celebration covers the whole screen and freezes input,
+  // and it fires from the very completion that puts the button up. A
+  // button a kid can see but cannot press is worse than no button, so
+  // this one waits for the party to finish.
+  const celebrating = useGameStore((s) => s.pendingEarns.length > 0);
 
   const [displayWord, setDisplayWord] = useState("");
   const [foundCount, setFoundCount] = useState(0);
@@ -222,17 +226,6 @@ export function SpellWordGame() {
       startRound(engine, font, true);
     };
 
-    // Same world, different floor: down the whirlpool and back. The
-    // round carries on exactly as it was, on the ground the kid is
-    // actually standing on.
-    engine.onGroundChange = () => {
-      replantLetters(engine, engine.surface, lettersRef.current, {
-        around: engine.player.position().clone(),
-        minRange: SPAWN_INNER,
-        maxRange: SPAWN_OUTER,
-        rng: makeRng(7),
-      });
-    };
 
     engine.tickHook = (_dt, _t, playerPos) => {
       const cam = engine.camera.position;
@@ -371,7 +364,6 @@ export function SpellWordGame() {
       clearPayoff(engine);
       engine.tickHook = undefined;
       engine.onSurfaceChange = undefined;
-      engine.onGroundChange = undefined;
       engine.travelOpen = true;
     };
   }, []);
@@ -393,7 +385,7 @@ export function SpellWordGame() {
         }
         targets={targets}
       />
-      {completed && (
+      {completed && !celebrating && (
         <div
           style={{
             position: "absolute",

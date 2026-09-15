@@ -10,7 +10,14 @@ import type { PlanetSpec } from "./planet";
 // thing that lets a mode ask the question without caring which.
 
 export type Surface =
-  | { kind: "flat" }
+  | {
+      kind: "flat";
+      // Which part of the flat world — "sea", "seafloor". A biome with
+      // one place leaves it "flat". Two places on the same ground are
+      // still two places: the sea bed is forty-six units under the
+      // waves with its own letters to find and its own way out.
+      id: string;
+    }
   | {
       kind: "planet";
       // Stable name for the sphere — "sun", "saturn", "jupiter".
@@ -18,20 +25,22 @@ export type Surface =
       spec: PlanetSpec;
     };
 
-// The flat world is the same answer every time, so it needs no
-// allocation. Handy for identity checks too.
-export const FLAT_SURFACE: Surface = { kind: "flat" };
+// What a biome that never moves the kid anywhere reports.
+export const FLAT_SURFACE: Surface = { kind: "flat", id: "flat" };
 
-// A name for the surface a kid is on, usable as a map key. The flat
-// world is "flat"; a sphere is its own id.
+// A name for the surface a kid is on, usable as a map key.
 export function surfaceId(s: Surface): string {
-  return s.kind === "flat" ? "flat" : s.id;
+  return s.id;
 }
 
 // Human-facing name, for a HUD line telling a kid where they are.
 export function surfaceLabel(s: Surface): string {
-  if (s.kind === "flat") return "the sea";
   switch (s.id) {
+    case "seafloor":
+      return "the sea floor";
+    case "sea":
+    case "flat":
+      return "the sea";
     case "sun":
       return "the sun";
     case "saturn":

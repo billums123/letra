@@ -10,7 +10,6 @@ import {
   orientToSurface,
   pickSpot,
   plantLetter,
-  replantLetters,
   type FieldLetter,
   type KeepOut,
 } from "../engine/letterField";
@@ -275,17 +274,6 @@ export function SoundMatchGame() {
       buildRound(engine, font, roundRef.current, true);
     };
 
-    // Same world, different floor — down the whirlpool and back. The
-    // round carries on; only the ground under it changed.
-    engine.onGroundChange = () => {
-      const grow = Math.min(roundRef.current * 0.4, 6);
-      replantLetters(engine, engine.surface, lettersRef.current, {
-        around: engine.player.position().clone(),
-        minRange: 7 + grow,
-        maxRange: 13 + grow,
-        rng: Math.random,
-      });
-    };
 
     engine.tickHook = (_dt, _t, playerPos) => {
       // Billboard every letter toward the camera each frame, and push
@@ -408,7 +396,6 @@ export function SoundMatchGame() {
       lettersRef.current = [];
       engine.tickHook = undefined;
       engine.onSurfaceChange = undefined;
-      engine.onGroundChange = undefined;
       engine.travelOpen = true;
     };
   }, []);

@@ -13,6 +13,16 @@ export type PlayerHandles = {
   // Whether the engine should tilt this avatar to match the terrain
   // incline. Hovering avatars (rocket) opt out by setting this false.
   terrainAlign?: boolean;
+  // Whether a launch should cartwheel this avatar through the air.
+  // True for everyone who is being thrown — a kid, a car, a tugboat
+  // all tumble, and the somersault is most of the joke. A rocket is
+  // not being thrown. It flies, so it opts out and gets pointed along
+  // its own arc instead (see the Engine's flight orientation).
+  tumbles?: boolean;
+  // Light the engines. The Engine calls this for the length of any
+  // flight so an avatar that flies under its own power looks like it
+  // is, rather than going limp the moment control is taken away.
+  setBoosting?: (on: boolean) => void;
   // Set the avatar alight. Only the kid implements it — a tugboat
   // driving across a star is funny, a tugboat on fire is a shipwreck —
   // so everyone else leaves it undefined and the callers no-op.
@@ -698,6 +708,8 @@ function buildRocket(): PlayerHandles {
   // local space; `body` itself rotates.
   const body = new THREE.Group();
   group.add(body);
+  // Engines wide open — set by the Engine for the length of a launch.
+  let boosting = false;
 
   // Main fuselage — a tall rounded cylinder.
   const fuselage = new THREE.Mesh(
@@ -858,16 +870,20 @@ function buildRocket(): PlayerHandles {
       leanZ += (targetLeanZ - leanZ) * 0.12;
       body.rotation.x = leanX;
       body.rotation.z = leanZ;
-      // Flame flicker — randomized scale + opacity each frame.
-      const intensity = 0.6 + mag * 0.6;
+      // Flame flicker — randomized scale + opacity each frame. Under
+      // boost the engines are wide open regardless of input, because
+      // the kid has no stick during a launch and a rocket crossing the
+      // sky on a cold nozzle looks like debris.
+      const drive = boosting ? 1 : mag;
+      const intensity = boosting ? 1.9 : 0.6 + drive * 0.6;
       const flick = 0.85 + Math.random() * 0.3;
       flame.scale.set(flick, intensity * flick, flick);
       flameCore.scale.set(flick * 0.8, intensity * 0.85 * flick, flick * 0.8);
-      (flame.material as THREE.MeshBasicMaterial).opacity = 0.6 + mag * 0.4;
-      (flameCore.material as THREE.MeshBasicMaterial).opacity = 0.7 + mag * 0.3;
+      (flame.material as THREE.MeshBasicMaterial).opacity = 0.6 + drive * 0.4;
+      (flameCore.material as THREE.MeshBasicMaterial).opacity = 0.7 + drive * 0.3;
       // Thrust loop tracks input magnitude — quiet hiss while idle,
-      // brighter and louder under full input.
-      thrust.setActivity(mag);
+      // brighter and louder under full input, flat out under boost.
+      thrust.setActivity(drive);
     },
     position() {
       return group.position;
@@ -877,6 +893,11 @@ function buildRocket(): PlayerHandles {
     },
     // Hovering avatar — terrain incline shouldn't tilt the rocket.
     terrainAlign: false,
+    // A rocket does not get thrown. It flies.
+    tumbles: false,
+    setBoosting(on) {
+      boosting = on;
+    },
     dispose() {
       thrust.stop();
     },

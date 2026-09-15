@@ -14,6 +14,11 @@ import { setInputFrozen } from "../input/useInput";
 // AND on the menu — the kid never misses a milestone regardless of
 // where they are when it triggers.
 
+// How long a trophy celebration holds the screen before bowing out on
+// its own. Long enough to read the name and enjoy it, short enough
+// that nothing behind it is ever unreachable for long.
+const AUTO_DISMISS_MS = 4200;
+
 export function EarnedTrophyModal() {
   const earn = useGameStore((s) => s.pendingEarns[0]) ?? null;
   const dismiss = useGameStore((s) => s.dismissEarn);
@@ -21,6 +26,9 @@ export function EarnedTrophyModal() {
   // Local enter/leave state so we can play an exit animation before the
   // event is actually popped from the queue.
   const [phase, setPhase] = useState<"enter" | "settled" | "exit">("enter");
+  // Latest dismisser, so the auto-dismiss timer below can call it
+  // without being re-armed every time the component re-renders.
+  const dismissRef = useRef<() => void>(() => {});
   // Track the earn we're currently animating. When the head of the queue
   // changes (after dismiss + animation finishes), we restart from "enter".
   const lastEarnIdRef = useRef<string | null>(null);
@@ -64,9 +72,23 @@ export function EarnedTrophyModal() {
       }, 500);
       // Settle into the resting state so the trophy stops bouncing.
       const t2 = setTimeout(() => setPhase("settled"), 900);
+      // And then get out of the way on its own.
+      //
+      // This used to wait for a tap, forever. It covers the whole
+      // screen at z-index 100 and freezes player input while it is up,
+      // and it fires from recordSpellCompletion — which is to say at
+      // the exact moment Spell the Word puts its big green "Next Word"
+      // button on screen. So a kid finished a word, reached for the
+      // button they could plainly see, and hit an invisible-to-them
+      // dismiss target instead: the button did nothing, the boat would
+      // not move, and the only way out was one more tap they had no
+      // reason to know about. Measured: still up and still swallowing
+      // the button eight seconds later.
+      const t3 = setTimeout(() => dismissRef.current(), AUTO_DISMISS_MS);
       return () => {
         clearTimeout(t);
         clearTimeout(t2);
+        clearTimeout(t3);
       };
     }
   }, [earn]);
@@ -75,6 +97,7 @@ export function EarnedTrophyModal() {
   const spec = getTrophy(earn.id);
 
   const handleDismiss = () => {
+    if (phase === "exit") return;
     setPhase("exit");
     // Brief exit animation, then pop the queue.
     setTimeout(() => {
@@ -82,6 +105,8 @@ export function EarnedTrophyModal() {
       setPhase("enter");
     }, 220);
   };
+  // Hand the current dismisser to the auto-dismiss timer armed above.
+  dismissRef.current = handleDismiss;
 
   // The trophy art lives at /trophies/<id>.png. If missing, fall back
   // to the emoji glyph in the spec — keeps the modal usable even before

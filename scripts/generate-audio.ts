@@ -140,6 +140,7 @@ function buildManifest(voiceId: string, modelId: string): AudioManifest {
   // The way onward. See src/games/travelGate.ts.
   prompts["gate-open-sea"] = "gate-open-sea";
   prompts["gate-open-planet"] = "gate-open-planet";
+  prompts["gate-open-seafloor"] = "gate-open-seafloor";
   prompts["gate-shut-planet"] = "gate-shut-planet";
   return {
     voiceId,

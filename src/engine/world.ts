@@ -532,7 +532,7 @@ export function buildWorld(
   leavePlanet: BiomeContext["leavePlanet"] = () => {},
   whirlPlayer: BiomeContext["whirlPlayer"] = () => false,
   canTravel: BiomeContext["canTravel"] = () => true,
-  setGround: BiomeContext["setGround"] = () => {}
+  setArea: BiomeContext["setArea"] = () => {}
 ): WorldBuildResult {
   const group = new THREE.Group();
   group.name = `World:${biome.id}`;
@@ -559,7 +559,7 @@ export function buildWorld(
       celebrationCenter = c;
     },
     canTravel,
-    setGround,
+    setArea,
     launchPlayer,
     setPlayerVisible,
     setPlayerAblaze,

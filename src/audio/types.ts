@@ -346,6 +346,10 @@ export function buildEntries(): AudioEntry[] {
     id: "gate-open-planet",
     text: "Amazing! The glowing pools are open. Jump into one to splash all the way home!",
   });
+  entries.push({
+    id: "gate-open-seafloor",
+    text: "Well done! The sea vent is bubbling now. Ride it back up to the top!",
+  });
   // Played when a kid drives onto a portal that is still dark — the
   // one place in the loop where the world would otherwise do nothing
   // at all in answer to being touched.

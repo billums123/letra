@@ -23,8 +23,14 @@ export type GateCue = {
   banner: string;
 };
 
-// What a kid should do next, now that the way is open.
+// What a kid should do next, now that the way is open. Whatever it
+// says has to name the thing actually in front of them: forty-six
+// units under the sea the volcano is not an option, and being told to
+// ride it is worse than being told nothing.
 export function openCue(surface: Surface): GateCue {
+  if (surface.id === "seafloor") {
+    return { banner: "🌋 The sea vent is bubbling! Ride it back up ⬆️" };
+  }
   if (surface.kind === "flat") {
     return { banner: "🌋 The volcano is awake! Ride it to a new world 🌪️" };
   }
@@ -35,6 +41,7 @@ export function openCue(surface: Surface): GateCue {
 // whatever it was already going to say. Keeping it out of openWay is
 // what lets Spell the Word put the word's own reveal first.
 export function openWayClip(surface: Surface): string {
+  if (surface.id === "seafloor") return "gate-open-seafloor";
   return surface.kind === "flat" ? "gate-open-sea" : "gate-open-planet";
 }
 

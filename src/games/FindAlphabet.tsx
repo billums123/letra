@@ -12,7 +12,6 @@ import {
   orientToSurface,
   pickSpot,
   plantLetter,
-  replantLetters,
   type FieldLetter,
   type KeepOut,
   type Spot,
@@ -234,24 +233,6 @@ export function FindAlphabetGame() {
       dealLeg(engine, font);
     };
 
-    // Same world, different floor — down the whirlpool and back up.
-    // Not a new leg: going under is not leaving, so this leg's
-    // remaining letters simply come down with the kid rather than
-    // staying on the surface forty-six units over their head.
-    engine.onGroundChange = () => {
-      if (danceModeRef.current) return;
-      replantLetters(
-        engine,
-        engine.surface,
-        lettersRef.current.map((e) => e.field),
-        {
-          around: engine.player.position().clone(),
-          minRange: RING_INNER,
-          maxRange: RING_OUTER,
-          rng: makeRng(legRef.current * 31 + 5),
-        },
-      );
-    };
 
     engine.tickHook = (_dt, _t, playerPos) => {
       const cam = engine.camera.position;
@@ -679,7 +660,6 @@ export function FindAlphabetGame() {
       lettersRef.current = [];
       engine.tickHook = undefined;
       engine.onSurfaceChange = undefined;
-      engine.onGroundChange = undefined;
       engine.travelOpen = true;
     };
   }, []);

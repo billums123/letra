@@ -321,15 +321,12 @@ const inAnyCone = (dir: THREE.Vector3, cones: readonly KeepOut[]) =>
   check("a prop's up points out of the planet", up.angleTo(outward) < 1e-6);
 
   const flat = new THREE.Object3D();
-  orientToSurface(flat, { kind: "flat" }, at);
+  orientToSurface(flat, { kind: "flat", id: "flat" }, at);
   check("and is left alone on flat ground", flat.quaternion.equals(new THREE.Quaternion()));
 }
 
-// 7. The alphabet is dealt out whole, and the finale comes home.
-//
-// Legs alternate sea / planet / sea, because the only way off a planet is
-// the pool home. An odd number of legs is therefore the thing that keeps
-// the dance party in the ocean.
+// 7. The alphabet is dealt out whole, in bites a four-year-old will
+//    actually finish before the next ride.
 {
   let dealt = 0;
   const dealtPer: number[] = [];
@@ -341,8 +338,8 @@ const inAnyCone = (dir: THREE.Vector3, cones: readonly KeepOut[]) =>
   check("the legs deal out the whole alphabet", dealt === 26, `${dealtPer.join("+")} = ${dealt}`);
   check("and no leg is longer than a four-year-old's patience",
     dealtPer.every((n) => n > 0 && n <= 7), dealtPer.join(", "));
-  check("an odd number of legs, so the finale lands back in the sea",
-    LEG_SIZES.length % 2 === 1, `${LEG_SIZES.length} legs`);
+  check("enough legs that every one ends in a ride somewhere",
+    LEG_SIZES.length >= 3, `${LEG_SIZES.length} legs`);
   // One past the end must not deal a sixth leg's worth of nothing.
   const past = legSlice(LEG_SIZES.length, 26, 26);
   check("dealing past Z deals nothing", past.from === past.to);
