@@ -14,8 +14,20 @@
 
 import { useGameStore } from "../state/store";
 
+// Parked. The endpoint behind this is a Cloudflare Pages Function, and
+// playletra.com is served as static files from Railway, which does not
+// run them — every ping was landing on the SPA fallback. Flip this back
+// on in the same change that gives /api/ping a real backend, and put the
+// "what we count" paragraph back in public/privacy.html at the same
+// time. Until then the web build measures with Cloudflare Web Analytics
+// alone, which is what the privacy page now says.
+const PING_BACKEND_LIVE = false;
+
 const ENABLED =
-  !import.meta.env.DEV && import.meta.env.VITE_TARGET !== "mobile" && typeof navigator !== "undefined";
+  PING_BACKEND_LIVE &&
+  !import.meta.env.DEV &&
+  import.meta.env.VITE_TARGET !== "mobile" &&
+  typeof navigator !== "undefined";
 
 const LAST_VISIT_KEY = "letra:lastVisit";
 

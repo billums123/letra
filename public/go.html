@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Letra</title>
+    <!-- Countable entry point for ad and bio links.
+         playletra.com is served as plain static files, so there is no
+         server-side redirect rule to lean on (_redirects is a
+         Cloudflare Pages / Netlify file and this host does not read
+         it). A real file with a meta refresh works on any static host,
+         which is the point. The script runs first and uses replace()
+         so /go never lands in the back-button history. -->
+    <meta http-equiv="refresh" content="0; url=/?src=ad" />
+    <link rel="canonical" href="https://playletra.com/" />
+    <meta name="robots" content="noindex" />
+    <style>
+      body { margin: 0; height: 100vh; background: #7ec8ff; }
+    </style>
+    <script>
+      window.location.replace("/?src=ad");
+    </script>
+  </head>
+  <body><a href="/?src=ad">Continue to Letra</a></body>
+</html>

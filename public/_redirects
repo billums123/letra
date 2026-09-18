@@ -1,5 +1,13 @@
+# NOTE: playletra.com is currently served as plain static files from a
+# Railway service, which does NOT read this file. It is kept because it
+# is correct for Cloudflare Pages or Netlify if hosting ever moves, and
+# because it documents the intended routing. What actually makes
+# /privacy, /terms and /hello work today is the host resolving an
+# extensionless path to the matching .html file. /go works because
+# public/go.html is a real file.
+#
 # Static pages that live outside the React app. These sit above the
-# SPA catch-all because Cloudflare takes the first matching rule.
+# SPA catch-all because the first matching rule wins.
 /privacy    /privacy.html    200
 /terms      /terms.html      200
 /hello      /hello.html      200
