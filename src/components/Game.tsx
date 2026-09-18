@@ -13,6 +13,7 @@ import { FindAlphabetGame } from "../games/FindAlphabet";
 import { SoundMatchGame } from "../games/SoundMatch";
 import { EarnedTrophyModal } from "../ui/EarnedTrophyModal";
 import { isDev } from "../util/isDev";
+import { MENU_PATH } from "../util/visitCohort";
 
 // Dev-only screens are code-split: their bundles only fetch when an
 // authoring screen actually mounts (i.e. on a localhost / preview
@@ -64,8 +65,18 @@ function DevLoading() {
 // lives at /play (the parent-facing landing owns / instead) so PWA
 // installs and shared /play links land in the game directly without a
 // landing-page bounce.
+// The three real games also carry the world, so the dashboard shows
+// which one people actually play — the evidence for whether the ocean
+// is the draw, and therefore whether the paid unlock is on the right
+// thing. Biome ids are plain words (meadow, moon, sky, ocean).
+const WORLD_SCOPED: ReadonlySet<Screen> = new Set<Screen>([
+  "spell-word",
+  "find-alphabet",
+  "sound-match",
+]);
+
 const SCREEN_PATHS: Record<Screen, string> = {
-  "menu": "/play",
+  "menu": MENU_PATH,
   "spell-word": "/play/spell-word",
   "find-alphabet": "/play/find-alphabet",
   "sound-match": "/play/sound-match",
@@ -125,11 +136,12 @@ export function Game() {
   // button and just routes back to the menu so the URL/state mismatch
   // never confuses the kid.
   useEffect(() => {
-    const path = SCREEN_PATHS[screen];
+    const base = SCREEN_PATHS[screen];
+    const path = WORLD_SCOPED.has(screen) ? `${base}/${biomeId}` : base;
     if (window.location.pathname !== path) {
       window.history.pushState({ screen }, "", path);
     }
-  }, [screen]);
+  }, [screen, biomeId]);
   useEffect(() => {
     const onPop = () => goToMenu();
     window.addEventListener("popstate", onPop);

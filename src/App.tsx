@@ -2,6 +2,7 @@ import { Component, type ReactNode, useEffect, useState } from "react";
 import { Game } from "./components/Game";
 import { Landing } from "./ui/Landing";
 import { pingVisit } from "./util/ping";
+import { MENU_PATH } from "./util/visitCohort";
 
 // Top-level safety net. Without this, a Three.js context loss, an
 // unhandled audio decode error, or any thrown render leaves the kid
@@ -175,8 +176,8 @@ function readPath(): string {
     // replaceState (not pushState) so the URL bar shows /play
     // immediately without a phantom "/" entry sitting in history
     // that the browser back button would round-trip through.
-    window.history.replaceState({}, "", "/play");
-    return "/play";
+    window.history.replaceState({}, "", MENU_PATH);
+    return MENU_PATH;
   }
   return path;
 }
@@ -202,10 +203,10 @@ export function App() {
   }, []);
 
   const goToGame = () => {
-    if (window.location.pathname !== "/play") {
-      window.history.pushState({}, "", "/play");
+    if (window.location.pathname !== MENU_PATH) {
+      window.history.pushState({}, "", MENU_PATH);
     }
-    setPath("/play");
+    setPath(MENU_PATH);
   };
 
   if (SHOW_LANDING && (path === "/" || path === "")) {
