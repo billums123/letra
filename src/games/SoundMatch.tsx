@@ -17,6 +17,7 @@ import { FLAT_SURFACE, type Surface } from "../engine/surface";
 import { makeBurst } from "../engine/particles";
 import { ALPHABET } from "../audio/types";
 import { useGameStore } from "../state/store";
+import { pingDone, pingRound } from "../util/ping";
 import { openCue, openWay, openWayClip, shutWay } from "./travelGate";
 
 // Sound-match: voice plays a letter sound, kid walks to the matching letter.
@@ -126,6 +127,8 @@ export function SoundMatchGame() {
     roundIndex: number,
     keepTarget = false,
   ) => {
+    // Count the session, not every few-second round.
+    if (roundIndex === 0) pingRound("sound", engine.surface.id);
     // Animate previous letters out (shrink to 0) before disposing. We
     // freeze the actor list to a local so the engine.removeActor inside
     // the tween's onComplete can't trip over a concurrent mutation.
@@ -354,6 +357,7 @@ export function SoundMatchGame() {
       // Bump the sound-match counter; this awards a Listening Star
       // every 10 successful matches (the store handles the threshold).
       useGameStore.getState().recordSoundMatch();
+      pingDone("sound");
       const next = roundRef.current + 1;
       roundRef.current = next;
       setRound(next);

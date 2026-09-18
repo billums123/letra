@@ -1,6 +1,20 @@
+# Static pages that live outside the React app. These sit above the
+# SPA catch-all because Cloudflare takes the first matching rule.
+/privacy    /privacy.html    200
+/terms      /terms.html      200
+/hello      /hello.html      200
+
+# Countable entry point for ads and bios: lands on the parent-facing
+# landing with a source tag that the visit ping forwards. No cookie,
+# no identifier — just a word in the query string.
+/go         /?src=ad         302
+
 # Cloudflare Pages SPA fallback. Every path that isn't a real file in
 # the build (e.g. /play, /play/spell-word, /play/find-alphabet, the
 # /dev/* tools) needs to serve index.html so the React app can read
 # location.pathname and route accordingly. Without this Cloudflare
 # returns a 404 for any URL except / and the asset paths.
+#
+# /api/* never reaches this file: public/_routes.json sends those to
+# the Pages Functions in functions/api/ first.
 /*    /index.html    200

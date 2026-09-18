@@ -20,6 +20,7 @@ import { FLAT_SURFACE, type Surface } from "../engine/surface";
 import { makeBurst, makeFirework } from "../engine/particles";
 import { ALPHABET } from "../audio/types";
 import { useGameStore, type AvatarKind } from "../state/store";
+import { pingDone, pingRound } from "../util/ping";
 import { isDev } from "../util/isDev";
 import { openCue, openWay, openWayClip, shutWay } from "./travelGate";
 import { legSlice } from "./alphabetLegs";
@@ -168,6 +169,7 @@ export function FindAlphabetGame() {
     if (from >= to) return;
     dealtRef.current = to;
     legDoneRef.current = false;
+    pingRound("alpha", engine.surface.id);
     lastProgressRef.current = performance.now();
     hintScheduledRef.current = false;
     prevWrongOverlapRef.current = new Set();
@@ -435,6 +437,7 @@ export function FindAlphabetGame() {
     // tick or two later but the offset is imperceptible.
     danceStartRef.current = performance.now();
     danceModeRef.current = true;
+    pingDone("alpha");
     const letters = lettersRef.current;
     // On a sphere the ring is drawn around the kid's own patch of the
     // surface, at the same radius measured along the ground.

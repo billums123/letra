@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Letra — Free 3D alphabet game</title>
+    <meta name="description" content="A free 3D alphabet game for ages 3 to 6. No ads. No tracking. Made by a dad." />
+    <link rel="icon" type="image/png" href="/letra-icon.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Lilita+One&family=Fredoka:wght@400;500;600&display=swap" />
+    <!--
+      Ad measurement, if and when you decide to run it (see the launch
+      plan's open questions). This is the ONLY page it may go on; the
+      game never carries it. If you add it here, uncomment the matching
+      paragraph in privacy.html the same evening.
+
+      <script>
+        // Meta pixel base code goes here. Fire the standard "Lead" event
+        // from the Play button's click handler below (see playTap) so
+        // Meta optimises for people who actually start the game.
+      </script>
+    -->
+    <style>
+      :root { --sky: #a8e2ff; --sky2: #7ec8ff; --ink: #16314c; --ink2: #3a4a5e; --card: #fff; --sun: #ffd23f; }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; padding: 0; }
+      body { font-family: Fredoka, system-ui, -apple-system, sans-serif; color: var(--ink); background: linear-gradient(180deg, var(--sky) 0%, var(--sky2) 100%); min-height: 100vh; line-height: 1.55; font-size: 18px; }
+      main { max-width: 760px; margin: 0 auto; padding: 28px 16px 64px; text-align: center; }
+      .logo { display: block; width: min(320px, 80%); margin: 0 auto 10px; }
+      .tag { font-size: 22px; font-weight: 600; margin: 0 auto 6px; max-width: 34ch; text-wrap: balance; }
+      .sub { color: var(--ink2); font-size: 16px; margin: 0 auto 22px; }
+      video { width: 100%; max-width: 640px; border-radius: 24px; box-shadow: 0 8px 0 rgba(0,0,0,0.12); margin: 0 auto 22px; display: block; background: #000; }
+      .btn { display: inline-block; font-family: "Lilita One", Fredoka, sans-serif; font-size: 26px; letter-spacing: 0.5px; padding: 18px 34px; border-radius: 999px; text-decoration: none; border: none; cursor: pointer; box-shadow: 0 6px 0 rgba(0,0,0,0.15); transition: transform 0.08s ease; }
+      .btn:active { transform: translateY(4px); box-shadow: 0 2px 0 rgba(0,0,0,0.15); }
+      .btn.play { background: var(--sun); color: var(--ink); }
+      .btn.app { background: #fff; color: var(--ink); font-size: 20px; padding: 14px 26px; margin-top: 12px; }
+      .row { display: flex; flex-wrap: wrap; gap: 14px; justify-content: center; align-items: center; }
+      .card { background: var(--card); border-radius: 24px; padding: 24px 20px; box-shadow: 0 6px 0 rgba(0,0,0,0.10); margin-top: 26px; text-align: left; }
+      .card h2 { font-family: "Lilita One", Fredoka, sans-serif; font-size: 26px; margin: 0 0 8px; }
+      .grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-top: 22px; }
+      .mode { background: #fff; border-radius: 20px; padding: 16px 12px; box-shadow: 0 5px 0 rgba(0,0,0,0.10); }
+      .mode img { width: 72px; height: 72px; object-fit: contain; display: block; margin: 0 auto 8px; }
+      .mode b { display: block; font-size: 16px; }
+      .mode span { font-size: 14px; color: var(--ink2); }
+      ul.trust { list-style: none; padding: 0; margin: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 6px 16px; font-weight: 500; }
+      form { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-top: 14px; }
+      input[type=email] { flex: 1 1 220px; font: inherit; font-size: 17px; padding: 12px 16px; border-radius: 999px; border: 2px solid var(--ink); color: var(--ink); }
+      button.send { font: inherit; font-weight: 700; font-size: 17px; background: var(--ink); color: #fff; border: none; border-radius: 999px; padding: 12px 22px; cursor: pointer; box-shadow: 0 4px 0 rgba(0,0,0,0.12); }
+      .small { font-size: 14px; color: var(--ink2); margin: 8px 0 0; }
+      .small a { color: var(--ink); }
+      footer { margin-top: 30px; font-size: 15px; color: var(--ink2); }
+      footer a { color: var(--ink); font-weight: 600; text-decoration: underline; text-underline-offset: 3px; margin: 0 8px; }
+      @media (max-width: 560px) { .grid { grid-template-columns: 1fr; } ul.trust { grid-template-columns: 1fr; } .btn.play { font-size: 22px; padding: 16px 28px; } }
+      [hidden] { display: none !important; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <img class="logo" src="/letra-title.png" alt="Letra" />
+      <p class="tag">A free 3D alphabet game for ages 3 to 6.</p>
+      <p class="sub">No ads. No tracking. No accounts. Made by a dad for his kid.</p>
+
+      <!-- Drop a faceless 15-second gameplay clip at public/hello.mp4 and
+           this appears on its own. Until then it stays hidden. -->
+      <video id="clip" autoplay muted loop playsinline preload="metadata" hidden>
+        <source src="/hello.mp4" type="video/mp4" />
+      </video>
+
+      <div class="row">
+        <a class="btn play" id="play" href="/play?src=hello">Play free now</a>
+      </div>
+      <div class="row">
+        <button class="btn app" id="appBtn" type="button">Get the full app · $4.99</button>
+      </div>
+
+      <section class="card" id="app" hidden>
+        <h2>The iPad app isn't out yet.</h2>
+        <p>It's coming soon: the whole game, working offline, with the ocean and the planets. <b>$4.99 once.</b> No subscription, ever.</p>
+        <p>Leave an email and we'll send the link the day it's live. Nothing is charged now, and nothing else is ever sent.</p>
+        <div id="formWrap">
+          <form id="signup" method="post" target="_blank">
+            <input type="email" name="email" required placeholder="you@example.com" aria-label="Email" />
+            <input type="hidden" name="tag" id="tag" value="app-499" />
+            <input type="hidden" name="embed" value="1" />
+            <button class="send" type="submit">Send me the link</button>
+          </form>
+          <p class="small">Not sure about paying? <a href="#" id="justUpdates">Just tell me when it's out</a>, no price attached.</p>
+        </div>
+        <p class="small" id="noForm" hidden>The signup form is being set up. Until then: <a href="mailto:hello@playletra.com?subject=Letra%20app">hello@playletra.com</a>.</p>
+      </section>
+
+      <div class="grid">
+        <div class="mode"><img src="/icons/spell-word.png" alt="" /><b>Spell the Word</b><span>Find the letters, in order, across a 3D world.</span></div>
+        <div class="mode"><img src="/icons/match-sound.png" alt="" /><b>Sound Match</b><span>Hear a sound, run to the letter that makes it.</span></div>
+        <div class="mode"><img src="/icons/find-alphabet.png" alt="" /><b>Find the Alphabet</b><span>All 26, scattered across the sea and the planets.</span></div>
+      </div>
+
+      <section class="card">
+        <h2>Why parents trust it</h2>
+        <ul class="trust">
+          <li>🚫 No ads, ever</li>
+          <li>🔒 No tracking, no accounts</li>
+          <li>🧒 Nothing collected from your kid</li>
+          <li>💛 Made by a dad, for his own</li>
+          <li>📖 Open source, so you can check</li>
+          <li>🌊 Real 3D worlds, not flashcards</li>
+        </ul>
+      </section>
+
+      <footer>
+        <a href="/privacy">Privacy</a> · <a href="/terms">Terms</a> · <a href="mailto:hello@playletra.com">hello@playletra.com</a>
+      </footer>
+    </main>
+
+    <script>
+      // Buttondown username. Empty hides the form and shows the email
+      // fallback instead, so nothing half-wired ever renders.
+      var BUTTONDOWN_USERNAME = "";
+
+      var v = document.getElementById("clip");
+      v.addEventListener("canplay", function () { v.hidden = false; });
+
+      var appBtn = document.getElementById("appBtn");
+      var app = document.getElementById("app");
+      var form = document.getElementById("signup");
+      var tag = document.getElementById("tag");
+      if (BUTTONDOWN_USERNAME) {
+        form.action = "https://buttondown.com/api/emails/embed-subscribe/" + BUTTONDOWN_USERNAME;
+      } else {
+        document.getElementById("formWrap").hidden = true;
+        document.getElementById("noForm").hidden = false;
+      }
+      appBtn.addEventListener("click", function () {
+        app.hidden = false;
+        appBtn.hidden = true;
+        app.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+      document.getElementById("justUpdates").addEventListener("click", function (e) {
+        e.preventDefault();
+        tag.value = "updates";
+        e.target.textContent = "Okay, no price attached.";
+      });
+      // playTap: if the pixel is ever enabled, fire its event from here.
+      document.getElementById("play").addEventListener("click", function playTap() {});
+    </script>
+  </body>
+</html>

@@ -437,6 +437,13 @@ export default defineConfig({
         // Bump the budget — the bundled font + a single voice's manifest
         // can push past the default 2 MB.
         maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
+        // Navigations the service worker must hand to the network
+        // instead of answering with the app shell. /privacy, /terms
+        // and /hello are static pages served by Cloudflare rewrites;
+        // /go is a redirect that has to reach the server to happen;
+        // /api is the Pages Functions. Without this list an installed
+        // PWA would show the game for every one of them.
+        navigateFallbackDenylist: [/^\/privacy/, /^\/terms/, /^\/hello/, /^\/go/, /^\/api\//],
         runtimeCaching: [
           {
             // Voice clips. Matched by URL, NOT by request.destination —
@@ -460,7 +467,12 @@ export default defineConfig({
               cacheName: "letra-audio",
               rangeRequests: true,
               expiration: { maxEntries: 400, maxAgeSeconds: 60 * 60 * 24 * 30 },
-              cacheableResponse: { statuses: [0, 200] },
+              // The content-type check is the guard against cache
+              // poisoning: a missing clip comes back from the SPA
+              // fallback as index.html with a 200, and without this
+              // the worker would file that HTML under the mp3's URL
+              // for thirty days. Only a real audio response is kept.
+              cacheableResponse: { statuses: [0, 200], headers: { "content-type": "audio/mpeg" } },
             },
           },
           {
@@ -472,7 +484,7 @@ export default defineConfig({
             options: {
               cacheName: "letra-music",
               expiration: { maxEntries: 20, maxAgeSeconds: 60 * 60 * 24 * 30 },
-              cacheableResponse: { statuses: [0, 200] },
+              cacheableResponse: { statuses: [0, 200], headers: { "content-type": "audio/mpeg" } },
             },
           },
           {

@@ -17,6 +17,7 @@ import { FLAT_SURFACE, type Surface } from "../engine/surface";
 import { makeBurst } from "../engine/particles";
 import { SPELL_WORDS } from "../audio/types";
 import { useGameStore } from "../state/store";
+import { pingDone, pingRound } from "../util/ping";
 import { openCue, openWay, openWayClip, shutWay } from "./travelGate";
 import {
   getWordAsset,
@@ -146,6 +147,7 @@ export function SpellWordGame() {
 
     const held = carry && wordRef.current && !completedRef.current ? wordRef.current : null;
     const word = held ?? pickWord(prevWordRef.current, useGameStore.getState().spellWordCounts);
+    pingRound("spell", engine.surface.id);
     const lowercase = held
       ? lowercaseRef.current
       : letterCase === "uppercase"
@@ -302,6 +304,7 @@ export function SpellWordGame() {
     // awards that word's trophy, and the store auto-fires Word Wizard
     // once the kid crosses the total threshold.
     useGameStore.getState().recordSpellCompletion(word.word);
+    pingDone("spell");
     spawnPayoff(engine, playerPos);
     // The way opens now, not when the audio finishes: a kid who taps
     // straight past the celebration has still earned the ride.

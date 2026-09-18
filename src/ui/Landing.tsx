@@ -31,6 +31,11 @@ function detectPlatform(): Platform {
 const KOFI_URL = "https://ko-fi.com/hestermani";
 const GITHUB_URL = "https://github.com/billums123/letra";
 const CONTACT_EMAIL = "hello@playletra.com";
+// Buttondown newsletter username. Empty means the signup form stays
+// hidden, so nothing half-wired ever renders. The form is a plain
+// HTML POST to Buttondown's embed endpoint: no script, no cookie,
+// nothing third-party runs on the page.
+const BUTTONDOWN_USERNAME = "";
 
 export function Landing({ onPlay }: { onPlay: () => void }) {
   // Only show the install hint on iOS and Android — desktop browsers
@@ -287,6 +292,8 @@ function Footer() {
           .
         </p>
 
+        <EmailSignup />
+
         <div
           style={{
             display: "flex",
@@ -305,6 +312,12 @@ function Footer() {
           >
             {CONTACT_EMAIL}
           </FooterLink>
+          <FooterLink href="/privacy" icon="🔒">
+            Privacy
+          </FooterLink>
+          <FooterLink href="/terms" icon="📄">
+            Terms
+          </FooterLink>
         </div>
 
         <p style={{ margin: 0, opacity: 0.75, fontSize: 14 }}>
@@ -316,6 +329,71 @@ function Footer() {
         </p>
       </div>
     </footer>
+  );
+}
+
+// "Tell me when the app is out." A plain form POST to Buttondown:
+// the parent's email is the only thing that leaves the page, and it
+// goes to Buttondown, not to us. target=_blank keeps the game tab
+// where it is; Buttondown's own page confirms the signup.
+function EmailSignup() {
+  if (!BUTTONDOWN_USERNAME) return null;
+  return (
+    <form
+      action={`https://buttondown.com/api/emails/embed-subscribe/${BUTTONDOWN_USERNAME}`}
+      method="post"
+      target="_blank"
+      style={{
+        display: "flex",
+        flexWrap: "wrap",
+        gap: 10,
+        justifyContent: "center",
+        alignItems: "center",
+        margin: 0,
+      }}
+    >
+      <label htmlFor="letra-email" style={{ fontWeight: 600, width: "100%" }}>
+        Want the iPad app when it's ready?
+      </label>
+      <input
+        id="letra-email"
+        type="email"
+        name="email"
+        required
+        placeholder="you@example.com"
+        style={{
+          padding: "12px 16px",
+          borderRadius: 999,
+          border: "2px solid #16314c",
+          fontSize: 16,
+          minWidth: 220,
+          fontFamily: "inherit",
+          color: "#16314c",
+        }}
+      />
+      <input type="hidden" name="tag" value="updates" />
+      <input type="hidden" name="embed" value="1" />
+      <button
+        type="submit"
+        style={{
+          background: "#16314c",
+          color: "white",
+          padding: "12px 22px",
+          borderRadius: 999,
+          fontWeight: 700,
+          fontSize: 16,
+          border: "none",
+          boxShadow: "0 4px 0 rgba(0,0,0,0.12)",
+          cursor: "pointer",
+          fontFamily: "inherit",
+        }}
+      >
+        Tell me
+      </button>
+      <span style={{ width: "100%", fontSize: 13, opacity: 0.7 }}>
+        Nothing else, ever. One click to unsubscribe.
+      </span>
+    </form>
   );
 }
 

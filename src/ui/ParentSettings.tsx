@@ -560,6 +560,33 @@ function SettingsPanel({ onDone }: { onDone: () => void }) {
           </a>
           .
         </p>
+        <p
+          style={{
+            margin: "10px 0 0",
+            fontSize: 13,
+            lineHeight: 1.55,
+            color: "#1c3550",
+          }}
+        >
+          Full policy:{" "}
+          <a
+            href="/privacy.html"
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ color: "#1c3550", fontWeight: 700 }}
+          >
+            Privacy
+          </a>
+          {" · "}
+          <a
+            href="/terms.html"
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ color: "#1c3550", fontWeight: 700 }}
+          >
+            Terms
+          </a>
+        </p>
       </Section>
 
       <button

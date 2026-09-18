@@ -1,6 +1,7 @@
 import { Component, type ReactNode, useEffect, useState } from "react";
 import { Game } from "./components/Game";
 import { Landing } from "./ui/Landing";
+import { pingVisit } from "./util/ping";
 
 // Top-level safety net. Without this, a Three.js context loss, an
 // unhandled audio decode error, or any thrown render leaves the kid
@@ -192,6 +193,12 @@ export function App() {
     const onPop = () => setPath(readPath());
     window.addEventListener("popstate", onPop);
     return () => window.removeEventListener("popstate", onPop);
+  }, []);
+
+  // One anonymous "a device visited" count per page load. See
+  // src/util/ping.ts for what is and is not sent.
+  useEffect(() => {
+    pingVisit();
   }, []);
 
   const goToGame = () => {
